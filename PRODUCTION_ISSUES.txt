@@ -1,0 +1,866 @@
+================================================================================
+  RIDEOPS — PRODUCTION READINESS ISSUES & LOOPHOLES
+  Created: 2026-07-21
+  Fix these before going live.
+================================================================================
+
+════════════════════════════════════════════════════════════════════════════════
+ CRITICAL (must fix before launch)
+════════════════════════════════════════════════════════════════════════════════
+
+[C1] DEV_OTP_BYPASS IN PROD ENV EXAMPLE
+  File: .env.prod.example (line: DEV_OTP_BYPASS=123456)
+  Issue: The production env example still has DEV_OTP_BYPASS=123456 set.
+         If this is copied to .env.prod without removing it, ANY driver can
+         log in with OTP "123456" — completely bypassing SMS authentication.
+  Fix:  DELETE the DEV_OTP_BYPASS line entirely from .env.prod.example and
+        ensure it is not present in any live .env.prod file.
+
+[C2] JWT SECRETS FALL BACK TO HARDCODED DEV STRINGS
+  File: backend/src/lib/jwt.ts
+  Code: const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret';
+        const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret';
+  Issue: If the API container starts without the env file (e.g., misconfigured
+         deploy), it silently uses known-public secrets. An attacker could mint
+         valid tokens for any user/role.
+  Fix:  Throw a startup error if either secret is missing or equals a known
+        default. Example:
+          if (!process.env.JWT_ACCESS_SECRET) throw new Error('JWT_ACCESS_SECRET is not set');
+
+[C3] NO HTTPS / TLS IN NGINX CONFIG
+  File: docker/nginx.conf
+  Issue: Nginx listens on port 80 (plain HTTP) only. All auth tokens, OTPs,
+         and sensitive data travel unencrypted over the wire in production.
+  Fix:  Add TLS termination — either via Nginx with Let's Encrypt/certbot,
+        or via an AWS ALB / Cloudflare proxy in front of the EC2 instance.
+        Update CORS_ORIGIN and all env URLs to https://.
+
+[C4] CORS DEFAULTS TO WILDCARD '*'
+  File: backend/src/sockets/index.ts + backend/src/app.ts (via env)
+  Code: origin: process.env.CORS_ORIGIN ?? '*'
+  Issue: If CORS_ORIGIN is not set, both HTTP and WebSocket connections are
+         accepted from any origin, enabling CSRF-style attacks.
+  Fix:  Throw a startup error if CORS_ORIGIN is not set in production.
+        Never allow '*' in a production build.
+
+
+════════════════════════════════════════════════════════════════════════════════
+ HIGH SEVERITY (authorization & access control gaps)
+════════════════════════════════════════════════════════════════════════════════
+
+[H1] GET /drivers/:id — NO OWNERSHIP / ROLE GUARD
+  File: backend/src/routes/drivers.ts
+  Issue: Any authenticated user (any role) can look up any driver by ID.
+         A supervisor can enumerate all vendor drivers; a driver could look
+         up other drivers. Exposes phone numbers, vehicle info, location, etc.
+  Fix:  Add a role check — only vendor (own drivers), admin, or the driver
+        themselves should be able to call this endpoint.
+
+[H2] GET /rides/:id — NO ROLE GUARD
+  File: backend/src/routes/rides.ts
+  Issue: Any authenticated user can fetch any ride's full detail including
+         passenger list, driver info, and route. A driver can see rides
+         belonging to other vendors/supervisors.
+  Fix:  Add ownership scoping: supervisor can only fetch their own rides,
+        driver can only fetch rides they are assigned to, vendor only their
+        rides. Admin sees all.
+
+[H3] PATCH /rides/:id/status — NO ROLE GUARD ON THE ROUTE ITSELF
+  File: backend/src/routes/rides.ts
+  Issue: The status-advance endpoint has no requireRole() guard. The
+         permission logic lives inside advanceRideStatus() service, but
+         there is no middleware-level gate. An unauthenticated bypass or
+         role confusion could reach the service with an empty requestorRole.
+  Fix:  Add requireRole('driver', 'supervisor', 'admin') at the route level
+        so the service never receives an empty role string.
+
+[H4] SAFETY INCIDENT — ANY AUTHENTICATED USER CAN CREATE
+  File: backend/src/routes/safety.ts  (POST /safety/incidents)
+  Issue: The POST route has no requireRole() guard — any authenticated user
+         (including a vendor or an unrelated driver) can create a safety
+         incident for any rideId. There is also no check that the reporter
+         is actually related to the referenced ride.
+  Fix:  Add requireRole and validate that the reportedBy user is the assigned
+        driver or the supervisor of the referenced ride.
+
+[H5] ISSUE MESSAGES — DRIVERS CANNOT ACCESS BUT ROLE CHECK IS INCOMPLETE
+  File: backend/src/routes/issues.ts  (GET/POST /:id/messages)
+  Issue: assertCanAccessIssue uses req.user, but drivers (req.driver) are
+         never checked. A driver authenticating as a user (role confusion) or
+         a bug in assertCanAccessIssue could expose issue threads.
+  Fix:  Verify assertCanAccessIssue handles all roles correctly and covers
+        the driver identity path.
+
+[H6] VENDOR CAN SET ARBITRARY userId WHEN CREATING A VENDOR RECORD
+  File: backend/src/routes/vendors.ts  (POST /vendors)
+  Issue: The VendorSchema accepts a userId field from the request body,
+         allowing an admin to (accidentally or maliciously) link a vendor
+         record to any existing user — including another admin or supervisor.
+  Fix:  userId should be derived from the created user account, not accepted
+        as a free-form body field. Remove it from VendorSchema or validate
+        that the target user has role 'vendor'.
+
+
+════════════════════════════════════════════════════════════════════════════════
+ HIGH SEVERITY (data & financial)
+════════════════════════════════════════════════════════════════════════════════
+
+[H7] VENDOR PAYOUT DETAILS (BANK INFO) STORED UNENCRYPTED
+  File: backend/prisma/schema.prisma  (Vendor.payoutDetails Json)
+  Issue: Bank account numbers, IFSC codes, UPI IDs etc. are stored as plain
+         JSON in the database. A DB dump or SQL injection leaks this directly.
+  Fix:  Encrypt the payoutDetails field at the application layer before
+        writing to DB (e.g., AES-256-GCM with a KMS-managed key), or use a
+        dedicated secrets store.
+
+[H8] DRIVER WALLET BALANCE CAN GO NEGATIVE
+  File: backend/src/services/ride.service.ts  (driverReleaseScheduledRide)
+  Code: prisma.driver.update({ data: { walletBalance: { decrement: fine } } })
+  Issue: There is no check that walletBalance >= fine before decrementing.
+         Repeated scheduled-ride releases will push balance arbitrarily
+         negative with no floor.
+  Fix:  Check current balance before applying the fine, or add a DB
+        constraint (walletBalance >= 0) and handle the constraint error
+        gracefully.
+
+[H9] PRICE OVERRIDE ON MANUAL ASSIGN IS UNCAPPED
+  File: backend/src/services/ride.service.ts  (manualAssignRide)
+  Issue: Supervisors and admins can pass any positive number as the price
+         override (z.number().positive()). There is no upper-bound validation
+         or audit log for price changes.
+  Fix:  Add a reasonable maximum (e.g., 10× computed fare), log every price
+        override with the requestor's ID, and consider restricting overrides
+        to admin-only.
+
+[H10] RAZORPAY WEBHOOK HANDLER IS MISSING
+  File: (does not exist yet)
+  Issue: RAZORPAY_WEBHOOK_SECRET is in the env example and Razorpay fields
+         exist in the Ride schema, but there is no webhook endpoint to
+         confirm payment. Without signature verification, the payment flow
+         cannot be trusted.
+  Fix:  Implement POST /api/payments/webhook with Razorpay signature
+        verification (x-razorpay-signature header) before enabling payments.
+
+
+════════════════════════════════════════════════════════════════════════════════
+ MEDIUM SEVERITY (security hardening)
+════════════════════════════════════════════════════════════════════════════════
+
+[M1] PAX OTPs ARE ONLY 4 DIGITS (9,000 COMBINATIONS)
+  File: backend/src/services/ridePax.service.ts
+  Code: const gen4 = () => String(Math.floor(1000 + Math.random() * 9000));
+  Issue: With 4-digit OTPs there are only 9,000 possible values. Although
+         capped at 5 attempts per OTP, a determined attacker has a 1-in-1,800
+         chance per attempt. For a high-value corporate transport context,
+         6 digits is safer and expected.
+  Fix:  Switch to 6-digit OTPs (100,000 combinations) and ensure the pax
+        OTP schema validation is updated (currently allows 4–6).
+
+[M2] Math.random() USED FOR OTP GENERATION — NOT CRYPTOGRAPHICALLY SECURE
+  File: backend/src/lib/otp.ts  +  backend/src/services/ridePax.service.ts
+  Code: Math.floor(100000 + Math.random() * 900000)
+  Issue: Math.random() is not a CSPRNG. On Node.js this is a minor risk in
+         practice, but best practice for security codes is crypto.randomInt().
+  Fix:  Replace with:
+          import { randomInt } from 'crypto';
+          const otp = String(randomInt(100000, 999999));
+
+[M3] REFRESH TOKEN ENDPOINT HAS NO RATE LIMITER
+  File: backend/src/routes/auth.ts  (POST /auth/refresh)
+  Issue: Unlike /auth/login and OTP endpoints, /auth/refresh has no rate
+         limiter. An attacker who steals a refresh token can hammer the
+         endpoint indefinitely to keep issuing new access tokens.
+  Fix:  Apply authRateLimiter (or a dedicated refreshRateLimiter) to
+        POST /auth/refresh.
+
+[M4] NO SECURITY HEADERS (helmet)
+  File: backend/src/app.ts
+  Issue: The Express app does not set security headers: no Content-Security-
+         Policy, X-Frame-Options, X-Content-Type-Options, HSTS, etc.
+  Fix:  Add `helmet` middleware:
+          import helmet from 'helmet';
+          app.use(helmet());
+
+[M5] FILE UPLOAD — NO VIRUS/MALWARE SCANNING
+  File: backend/src/lib/storage.ts
+  Issue: KYC documents (PDFs, images) are accepted and stored without any
+         malware scanning. A malicious file could be stored on the server
+         volume.
+  Fix:  Integrate a scanning step (e.g., ClamAV via clamscan npm package, or
+        an AWS Macie/S3 scan) before finalizing the upload. Alternatively,
+        move uploads to S3 with server-side scanning enabled.
+
+[M6] UPLOADED FILES SERVED FROM DISK — SHOULD USE CLOUD STORAGE
+  File: backend/src/lib/storage.ts  +  routes/files.ts
+  Issue: Documents are stored on a Docker volume and served directly by the
+         API process. This creates I/O contention, doesn't scale horizontally,
+         and the volume must be manually backed up.
+  Fix:  Move file storage to AWS S3 (or similar). Generate pre-signed URLs
+        for access instead of proxying files through Express.
+
+[M7] STALE REFRESH TOKENS NOT PERIODICALLY PURGED
+  File: backend/prisma/schema.prisma  (RefreshToken table)
+  Issue: Revoked and expired refresh tokens accumulate in the refresh_tokens
+         table indefinitely. Over time this degrades query performance and
+         increases the DB backup size.
+  Fix:  Add a scheduled cleanup job (cron or DB trigger) to delete tokens
+        where revokedAt IS NOT NULL OR expiresAt < NOW().
+
+
+════════════════════════════════════════════════════════════════════════════════
+ MEDIUM SEVERITY (infrastructure & ops)
+════════════════════════════════════════════════════════════════════════════════
+
+[M8] REDIS HAS NO AUTH / PASSWORD
+  File: docker-compose.prod.yml  (redis service)
+  Issue: The Redis container is started with no requirepass setting. Any
+         process on the same Docker network can read/write Redis, including
+         OTP rate-limit counters and broadcast keys.
+  Fix:  Set a strong Redis password via REDIS_PASSWORD env var, update the
+        redis service command to `redis-server --requirepass ${REDIS_PASSWORD}`,
+        and update REDIS_URL to redis://:password@redis:6379.
+
+[M9] POSTGRES RUNS WITH DEFAULT CREDENTIALS IN PROD EXAMPLE
+  File: .env.prod.example
+  Code: POSTGRES_USER=rideops / POSTGRES_PASSWORD=CHANGE_ME_strong_db_password
+  Issue: The example explicitly labels the password as a placeholder. If an
+         operator forgets to change it, the DB is accessible with a guessable
+         password.
+  Fix:  Generate and document a strong password requirement. Consider
+        automating secret generation in the deploy pipeline.
+
+[M10] SINGLE EC2 / SINGLE POINT OF FAILURE
+  File: docker-compose.prod.yml
+  Issue: The entire stack (DB, Redis, API, Web) runs on one EC2 instance with
+         no redundancy. A single instance failure takes down the platform.
+  Fix:  For production: use RDS (managed Postgres with Multi-AZ), ElastiCache
+        (managed Redis), and at least 2 API containers behind an ALB.
+
+[M11] NO DB BACKUP STRATEGY DOCUMENTED
+  File: docker-compose.prod.yml  (pgdata volume)
+  Issue: PostgreSQL data is on a Docker named volume with no automated backup
+         or point-in-time recovery configured.
+  Fix:  Schedule daily pg_dump to S3, or switch to RDS with automated backups.
+
+[M12] PRISMA MIGRATE DEPLOY RUNS ON EVERY BOOT
+  File: docker-compose.prod.yml  (api command)
+  Code: sh -c "npx prisma migrate deploy && node dist/server.js"
+  Issue: Running migrations on every container start is a risk with rolling
+         deployments — if two instances start simultaneously they can race on
+         the same migration.
+  Fix:  Run migrations as a one-off init container or a separate deploy step
+        before rolling out the new API version.
+
+
+════════════════════════════════════════════════════════════════════════════════
+ LOW / POLISH (UX, reliability, code quality)
+════════════════════════════════════════════════════════════════════════════════
+
+[L1] SUPABASE CLIENT LEFT IN FRONTEND (DEAD CODE)
+  File: src/integrations/supabase/
+  Issue: Auto-generated Supabase integration files exist but are not used.
+         They add bundle size and may confuse future developers.
+  Fix:  Delete the supabase integration directory and remove any stale imports.
+
+[L2] DRIVER isOnline STATE CAN DESYNC
+  File: backend/src/sockets/index.ts
+  Issue: Driver online status is set to true on socket connect and false on
+         disconnect. If the server restarts while drivers are connected, all
+         drivers remain marked online in the DB forever (no cleanup on boot).
+  Fix:  On server startup, run:
+          UPDATE drivers SET is_online = false WHERE is_online = true;
+        Or use a Redis presence key with TTL that the driver must heartbeat.
+
+[L3] BROADCAST SWEEPER — NO DISTRIBUTED LOCK
+  File: backend/src/lib/broadcastSweeper.ts
+  Issue: If two API instances run simultaneously (future horizontal scale),
+         both sweepers will race to expire the same rides, causing duplicate
+         socket emissions and double DB writes.
+  Fix:  Use a Redis distributed lock (e.g., SET sweeper:lock NX EX 25) so
+        only one instance runs the sweep per interval.
+
+[L4] HEALTH CHECK DOES NOT VERIFY DB/REDIS CONNECTIVITY
+  File: backend/src/app.ts  (GET /health)
+  Issue: The health endpoint returns { status: 'ok' } regardless of DB or
+         Redis state. A load balancer using this for health checks won't
+         detect a broken DB connection.
+  Fix:  Add a lightweight DB ping (prisma.$queryRaw`SELECT 1`) and Redis
+        ping inside the health handler and return 503 if either fails.
+
+[L5] PAGINATION LIMIT IS NOT CAPPED
+  File: Multiple routes (rides, drivers, employees, payouts)
+  Code: const limit = Number(req.query.limit) || 20;
+  Issue: A caller can pass limit=99999 and dump the entire table in one
+         request, causing high memory usage and slow queries.
+  Fix:  Cap the limit:  const limit = Math.min(Number(req.query.limit) || 20, 100);
+
+[L6] GOOGLE MAPS API KEY BAKED INTO FRONTEND BUNDLE
+  File: docker-compose.prod.yml  (VITE_GOOGLE_MAPS_KEY build arg)
+  Issue: The Maps key is compiled into the static JS bundle. Anyone can
+         extract it from the browser and use it on their own domain, incurring
+         your billing.
+  Fix:  Restrict the key in the Google Cloud Console to your production
+        domain (HTTP Referrer restriction) and enable only the APIs you use
+        (Maps JS, Places, Directions).
+
+[L7] NO INPUT SANITIZATION FOR FREE-TEXT FIELDS
+  File: Various routes (description, name, address fields)
+  Issue: While SQL injection is prevented by Prisma parameterized queries,
+         there is no HTML/XSS sanitization on free-text fields like
+         descriptions, issue messages, and incident reports. If these values
+         are ever rendered as HTML (emails, PDFs, admin dashboards) they
+         could cause XSS.
+  Fix:  Sanitize or escape free-text fields at the service layer using a
+        library like DOMPurify (server-side) or validator.js strip-tags
+        before storing.
+
+[L8] NO AUDIT LOG FOR SENSITIVE ADMIN ACTIONS
+  File: backend/src/routes/admin.ts, payouts.ts, drivers.ts
+  Issue: Actions like creating tenants, marking payouts as paid, blacklisting
+         drivers, and manually assigning rides are not recorded in an audit
+         log. There is no way to trace who changed what and when.
+  Fix:  Add an AuditLog table (or structured log entries) capturing: actor,
+        action, targetType, targetId, before/after values, timestamp.
+
+[L9] DRIVER DOCUMENT TYPE IS A FREE STRING — NO ENUM
+  File: backend/prisma/schema.prisma  (DriverDocument.type String)
+  Issue: Document type (aadhaar, dl, rc, etc.) is stored as a free string
+         with no DB-level constraint. Invalid types like "selfie" or "hack"
+         can be inserted.
+  Fix:  Convert to a Postgres enum or add a CHECK constraint / Zod enum
+        validation at the route layer.
+
+[L10] ANALYTICS PERIOD PARAM IS NOT VALIDATED
+  File: backend/src/routes/analytics.ts  (GET /analytics/rides)
+  Code: const period = req.query.period as string | undefined;
+  Issue: The period string is passed to the service without format validation.
+         Malformed values could cause unexpected query behavior.
+  Fix:  Validate with Zod: z.string().regex(/^\d{4}-\d{2}$/).optional()
+
+================================================================================
+ SUMMARY COUNT
+================================================================================
+  Critical  : C1–C4   (4 issues)
+  High       : H1–H10 (10 issues)
+  Medium     : M1–M12 (12 issues)
+  Low/Polish : L1–L10 (10 issues)
+  TOTAL      : 36 issues
+================================================================================
+
+
+================================================================================
+  FEATURE REQUESTS — PENDING IMPLEMENTATION
+  Added: 2026-07-25
+  These are new feature asks to be built on top of the existing app.
+================================================================================
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 1 — Self-Service Account Registration (Vendor & Supervisor)
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  Auth.tsx shows "Need an account? Your administrator provisions it."
+  Account creation only possible via admin panel (admin/Supervisors, admin/Vendors).
+
+REQUESTED CHANGE:
+  1. Add a "Create Account" option/link on the login page (Auth.tsx).
+  2. Opens a tabbed form: "Register as Supervisor" | "Register as Vendor".
+  3. Form fields (both tabs):
+       - Full Name
+       - Email Address
+       - Mobile Number
+       - Company Name (label: "Supervisor's Company" or "Vendor Company")
+       - GSTIN (optional)
+       - Registered Address
+       - Password
+       - Confirm Password
+  4. On submit, the request is saved as a PENDING registration — NOT
+     immediately activated. Admin reviews and approves.
+  5. On admin approval → account is created, activation email is sent.
+  6. Password is NOT shown to admin during review (stored hashed from day 0).
+
+BACKEND CHANGES NEEDED:
+  - New Prisma model: RegistrationRequest
+      { id, role, fullName, email, passwordHash, mobile, companyName,
+        gstin?, address, status: pending|approved|rejected, createdAt, reviewedAt? }
+  - POST  /api/auth/register-request   (public, rate-limited)
+  - GET   /api/admin/registration-requests  (admin only)
+  - PATCH /api/admin/registration-requests/:id  { status: approved | rejected }
+      → on approved: call existing registerUser() internally + send email
+  - Email: use nodemailer or similar; template: "Your RideOps account is ready"
+
+FRONTEND CHANGES NEEDED:
+  - Auth.tsx: add "Create Account" link below the sign-in form.
+  - New page/modal: RegistrationRequest.tsx with tabbed form + Zod validation.
+  - Admin panel: new page admin/RegistrationRequests.tsx — table of pending
+    requests with Approve / Reject buttons.
+  - Add route: /admin/registration-requests in App.tsx + AdminLayout nav.
+
+FILES TO CHANGE:
+  src/pages/Auth.tsx
+  src/pages/admin/AdminLayout.tsx (add nav item)
+  src/App.tsx (add route)
+  backend/prisma/schema.prisma (new model)
+  backend/src/routes/auth.ts (new POST endpoint)
+  backend/src/routes/admin.ts (new GET + PATCH endpoints)
+  backend/src/services/auth.service.ts (approveRegistration function)
+  src/lib/queries.ts (new mutation/query hooks)
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 2 — Pickup Sequence & Per-Employee Pickup Time in Route Review
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  Routes.tsx Step 2 shows GoogleRouteMap with drag-to-reorder (reorderStops).
+  There is no per-employee time field visible in the route review step.
+
+REQUESTED CHANGE:
+  1. In Step 2 "Review route", alongside each stop in the list:
+       - Show the employee name, current sequence number.
+       - Add a time-picker input (HH:MM) for "Expected pickup time" per stop.
+       - Drag handle already exists via reorderStops — keep it.
+  2. The pickup times per stop are included in the ride payload sent to the
+     backend and stored against each RidePax record.
+  3. In the Driver app (DriverTrip.tsx), each passenger stop should show
+     the "Scheduled pickup: HH:MM" alongside the name and OTP field.
+
+BACKEND CHANGES NEEDED:
+  - Add column to RidePax: scheduledPickupTime String? @map("scheduled_pickup_time")
+  - Update createRidePax() to accept scheduledPickupTime per passenger.
+  - Update getRidePax() to return scheduledPickupTime in the response.
+  - CreateRideSchema: accept optional scheduledPickupTimes: Record<empId, HH:MM>
+
+FRONTEND CHANGES NEEDED:
+  - Routes.tsx Step 2: add time input per stop row in the route list.
+  - Pass pickup times in buildPayload() → CreateRidePayload.
+  - queries.ts: add scheduledPickupTimes to CreateRidePayload type.
+  - DriverTrip.tsx: show scheduledPickupTime per passenger stop.
+
+FILES TO CHANGE:
+  src/pages/supervisor/Routes.tsx
+  src/pages/driver/DriverTrip.tsx
+  src/lib/queries.ts
+  backend/prisma/schema.prisma
+  backend/src/services/ridePax.service.ts
+  backend/src/routes/rides.ts (schema update)
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 3 — Multiple Office Locations + Company-based Employee Categorization
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  Settings.tsx has a single OfficeMapPicker for one office location.
+  Employee roster has no "company" field; all employees belong to one supervisor.
+  Routes page uses the single saved office as the drop point.
+
+REQUESTED CHANGE:
+  A. Multiple Office Locations (Settings):
+     1. Replace single office picker with a list of office locations.
+     2. Each location has: Label/Company Name, Address, Lat/Lng.
+     3. "Add Office Location" button opens a modal with:
+          - Company Name (text input)
+          - Map picker (OfficeMapPicker)
+     4. Saved locations appear as cards with Edit / Delete options.
+     5. One can be marked as "Default".
+
+  B. Employee Company Field (Roster):
+     1. Add "Company" column to the employee table.
+     2. "Add Employee" dialog: add a "Company" dropdown fetching from
+        the saved office locations (company names).
+     3. Roster page: add filter/grouping by Company.
+
+  C. Booking (Routes page):
+     1. Step 1 employee picker: group employees by Company.
+     2. Step 3 "Send to drivers": allow supervisor to select WHICH office
+        location is the destination (dropdown of saved offices).
+
+BACKEND CHANGES NEEDED:
+  - New model: OfficeLocation
+      { id, supervisorId, label, address, lat Float, lng Float,
+        isDefault Boolean, createdAt }
+  - New column on Employee: companyLabel String? @map("company_label")
+  - API routes (all under /supervisor):
+      GET    /supervisor/offices
+      POST   /supervisor/offices        { label, address, lat, lng }
+      PATCH  /supervisor/offices/:id   { label?, address?, lat?, lng?, isDefault? }
+      DELETE /supervisor/offices/:id
+  - Update GET /supervisor/office to return the default office (backward compat).
+  - Update Employee creation schema to accept optional companyLabel.
+
+FRONTEND CHANGES NEEDED:
+  - Settings.tsx: replace single office card with OfficeLocationManager component.
+  - AddEmployeeDialog.tsx: add Company dropdown (fetches from /supervisor/offices).
+  - Roster.tsx: add Company column + filter by company.
+  - Routes.tsx: group employees by company in Step 1; office selector in Step 3.
+  - queries.ts: new hooks useOfficeLocations, useCreateOffice, useDeleteOffice.
+
+FILES TO CHANGE:
+  src/pages/supervisor/Settings.tsx
+  src/pages/supervisor/Roster.tsx
+  src/pages/supervisor/Routes.tsx
+  src/components/AddEmployeeDialog.tsx
+  src/lib/queries.ts
+  backend/prisma/schema.prisma
+  backend/src/routes/supervisor.ts
+  backend/src/services/supervisor.service.ts (if exists, else create)
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 4 — Saved Routes / Groups (Reusable Route Templates)
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  Every ride booking starts from scratch. No concept of saved route groups.
+
+REQUESTED CHANGE:
+  1. After Step 2 (route review) or after a successful broadcast, offer
+     "Save this group/route" option.
+  2. Saved routes store: name, employee list (ordered), office location,
+     ride type (login/logout), vehicle type preference.
+  3. New "Saved Routes" section (sub-page or tab in Routes page):
+       - Lists all saved routes with: name, employee count, last used date.
+       - Actions: Load (pre-fills the booking flow), Edit, Delete.
+       - Edit: add/remove employees from the group, drag to reorder,
+         rename the group.
+  4. Loading a saved route takes the supervisor straight to Step 2 with
+     pre-populated employee selection and order.
+
+BACKEND CHANGES NEEDED:
+  - New model: RouteTemplate
+      { id, supervisorId, name, officeLocationId?, rideType, vehicleType?,
+        orderedEmployeeIds Json (array of empIds in sequence), createdAt, lastUsedAt? }
+  - API routes:
+      GET    /supervisor/routes/templates
+      POST   /supervisor/routes/templates   { name, rideType, vehicleType, employeeIds, officeLocationId? }
+      PATCH  /supervisor/routes/templates/:id
+      DELETE /supervisor/routes/templates/:id
+
+FRONTEND CHANGES NEEDED:
+  - Routes.tsx: add "Saved Routes" tab alongside the stepper.
+  - SaveRouteDialog.tsx: modal to name and save a route after Step 2.
+  - SavedRoutesList.tsx: list component with Load/Edit/Delete actions.
+  - queries.ts: useRouteTemplates, useCreateRouteTemplate, useUpdateRouteTemplate,
+    useDeleteRouteTemplate hooks.
+
+FILES TO CHANGE:
+  src/pages/supervisor/Routes.tsx
+  src/lib/queries.ts (new hooks)
+  backend/prisma/schema.prisma (RouteTemplate model)
+  backend/src/routes/supervisor.ts (new endpoints)
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 5 — Revised Price Calculation + AC/Non-AC Option
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE (marginal/tiered model):
+  0–10km @₹50/km, 11–15 @₹45, 16–20 @₹40, 21–25 @₹35, 26–30 @₹30, 31+ @₹30
+  Vehicle surcharge: hatchback +₹3/km, sedan +₹5/km, SUV +₹7/km
+
+REQUESTED CHANGE (direct slab — ENTIRE distance billed at single slab rate):
+  0–10 km  → ₹50/km  × total distance
+  0–15 km  → ₹45/km  × total distance
+  0–20 km  → ₹40/km  × total distance
+  0–25 km  → ₹35/km  × total distance
+  0–30 km  → ₹30/km  × total distance
+  31+ km   → ₹30/km  × total distance
+  Vehicle surcharge unchanged: hatchback +₹3/km, sedan +₹5/km, SUV +₹7/km
+  NEW: AC option → flat ₹100 surcharge (optional, supervisor selects at Step 3)
+
+EXAMPLE:
+  22 km SUV AC = 22×₹35 + 22×₹7 + ₹100 = ₹770 + ₹154 + ₹100 = ₹1,024
+
+BACKEND CHANGES NEEDED:
+  - backend/src/lib/pricing.ts: replace distanceFare() with direct slab lookup.
+  - Ride schema: add acSurcharge Boolean @default(false) @map("ac_surcharge")
+  - computeFare(): add isAc param → adds 100 if true.
+  - CreateRideSchema: add isAc Boolean optional.
+  - ride.service.ts createRide(): pass isAc to computeFare().
+
+FRONTEND CHANGES NEEDED:
+  - src/lib/pricing.ts: mirror the same direct-slab logic.
+  - Routes.tsx Step 3: add AC / Non-AC toggle (Switch or radio).
+    Show "+₹100" label next to the AC option.
+  - Fare display in Step 3 updates live when AC is toggled.
+  - queries.ts CreateRidePayload: add isAc?: boolean.
+
+FILES TO CHANGE:
+  src/lib/pricing.ts
+  src/pages/supervisor/Routes.tsx
+  src/lib/queries.ts
+  backend/src/lib/pricing.ts
+  backend/prisma/schema.prisma (add isAc column to Ride)
+  backend/src/routes/rides.ts (schema)
+  backend/src/services/ride.service.ts
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 6 — Vendor Code + Driver Vendor-Code Entry
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  Vendors have no human-readable code. Drivers are linked by vendorId (UUID).
+
+REQUESTED CHANGE:
+  1. Each Vendor gets a unique Vendor Code (e.g. VND-001 or alphanumeric).
+     - Auto-generated on vendor creation (sequential or random 6-char).
+     - Visible in admin/vendor portal and on the vendor dashboard.
+  2. During driver onboarding/registration in the driver app:
+       - Add a "Vendor Code" input field.
+       - Backend looks up the vendor by code and links the driver to that vendor.
+  3. In the driver account tab, show their vendor's name and code.
+
+BACKEND CHANGES NEEDED:
+  - Vendor schema: add vendorCode String @unique @map("vendor_code")
+  - Migration: generate codes for existing vendors.
+  - admin.service.ts createVendorAccount(): auto-generate vendorCode.
+  - New endpoint: GET /api/vendors/by-code/:code (public or driver-accessible)
+      → returns { id, name, vendorCode } (no sensitive data).
+  - Driver creation: accept vendorCode instead of/alongside vendorId.
+      POST /drivers: if vendorCode provided, resolve to vendorId first.
+
+FRONTEND CHANGES NEEDED:
+  - DriverLogin.tsx / DriverOnboarding.tsx: add Vendor Code input when registering.
+  - DriverAccount.tsx: show vendor name + vendor code.
+  - Admin/Vendors page: display vendorCode column in the table.
+  - Vendor dashboard header: show "Your Vendor Code: VND-XXX".
+  - queries.ts: add useVendorByCode hook.
+
+FILES TO CHANGE:
+  backend/prisma/schema.prisma
+  backend/src/services/admin.service.ts
+  backend/src/routes/vendors.ts (new by-code endpoint)
+  backend/src/routes/drivers.ts (accept vendorCode)
+  src/pages/driver/DriverOnboarding.tsx
+  src/pages/driver/DriverAccount.tsx
+  src/pages/admin/Vendors.tsx
+  src/pages/vendor/VendorLayout.tsx (show vendor code in header)
+  src/lib/queries.ts
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 7 — Draggable Pickup/Drop Pins on the Route Map
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  GoogleRouteMap.tsx renders employee pickup markers. Pins are not draggable.
+  Pickup coordinates come from saved employee data or area-name lookup (getPoint).
+
+REQUESTED CHANGE:
+  1. In Step 2 route review, each employee pickup marker on the map is draggable.
+  2. Dragging a pin updates that stop's coordinates (precise lat/lng).
+  3. The final drop (office) pin is also draggable in Step 2.
+  4. After drag, the address label updates via reverse geocoding
+     (Google Maps Geocoding API or Google's dragend event).
+  5. Updated coordinates are used in the ride payload (not the saved employee
+     coordinates — just for this booking).
+
+FRONTEND CHANGES NEEDED:
+  - GoogleRouteMap.tsx: set draggable: true on each employee marker and
+    the drop marker. Handle dragend event → call onPinMoved(empId, lat, lng).
+  - Routes.tsx: add onPinMoved callback → update customStops coordinates.
+  - Reverse geocode on drag end to update the address label shown in the list.
+
+BACKEND CHANGES NEEDED:
+  None — the updated lat/lng will flow through the existing pickupPoint /
+  dropPoint in the CreateRide payload.
+
+FILES TO CHANGE:
+  src/components/GoogleRouteMap.tsx
+  src/pages/supervisor/Routes.tsx
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 8 — Expired KYC Document Flagging + Ride Block for Expired Drivers
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  DriverDocument has an expiry date field. No automated check or enforcement.
+  Drivers with expired documents still receive ride broadcasts.
+
+REQUESTED CHANGE:
+  1. A background job (or on-demand check) flags documents where expiry < TODAY.
+  2. If a driver has any VERIFIED document that is now expired:
+       - Driver's kycStatus is auto-set to "expired".
+       - Driver is excluded from ride broadcasts (findNearbyDrivers filter).
+       - Driver sees a "KYC expired" banner in their app with the expired doc.
+  3. Vendor/Admin see an "Expired KYC" badge on the driver in their panel.
+  4. Re-KYC flow: driver uploads the new document → vendor re-verifies →
+     on approval, kycStatus returns to "approved".
+
+BACKEND CHANGES NEEDED:
+  - driver.service.ts findNearbyDrivers(): add filter kycStatus = 'approved'.
+  - New scheduled function: sweepExpiredKyc() — runs daily (or on-demand):
+      SELECT drivers WHERE kycStatus = 'approved'
+        AND EXISTS (
+          SELECT 1 FROM driver_documents
+          WHERE driver_id = id AND status = 'verified' AND expiry < NOW()
+        )
+      → set kycStatus = 'expired' for those drivers.
+  - Integrate sweepExpiredKyc into server startup sweeper or a cron.
+  - GET /driver/me response: include expiredDocTypes: string[] for the banner.
+
+FRONTEND CHANGES NEEDED:
+  - DriverAccount.tsx / DriverDocuments.tsx: show warning banner listing
+    expired documents with "Upload new" button.
+  - Vendor/Drivers page: show "KYC Expired" badge on affected drivers.
+  - Admin/Drivers page: same badge + filter option.
+
+FILES TO CHANGE:
+  backend/src/services/driver.service.ts
+  backend/src/lib/ (new kycSweeper.ts)
+  backend/src/server.ts (register sweeper)
+  src/pages/driver/DriverDocuments.tsx
+  src/pages/driver/DriverAccount.tsx
+  src/pages/vendor/Drivers.tsx
+  src/pages/admin/AdminDrivers.tsx
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 9 — SOS Button in Driver App → Supervisor Chat
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  No SOS feature exists. Safety incidents exist only in the admin panel.
+
+REQUESTED CHANGE:
+  1. Add an SOS button (prominent, red) in DriverShell header or DriverHome.
+  2. On press → modal/bottom-sheet with issue type selection:
+       - Vehicle Issue
+       - Medical Emergency
+       - Other Issues
+  3. On selecting an issue type → a chat window opens connected to the
+     driver's associated supervisor (the supervisor of the current active ride,
+     or the supervisor linked through the vendor/employee relationship).
+  4. A push notification / socket event is sent to the supervisor immediately.
+  5. The supervisor sees the SOS in their Issues page or a dedicated SOS panel
+     with the issue type pre-filled and chat open.
+  6. SOS chat is a real-time thread (uses existing IssueMessage + Socket.io).
+
+BACKEND CHANGES NEEDED:
+  - DriverIssue model: add issueType String? @map("issue_type")
+      values: vehicle_issue | medical_emergency | other
+  - POST /issues: allow drivers to create issues (currently supervisor-only).
+      Add requireRole('supervisor', 'driver') or separate driver SOS endpoint:
+      POST /driver/sos { issueType, rideId? }
+        → creates DriverIssue with the driver's supervisorId resolved from
+          active ride or vendor → supervisor mapping.
+  - Socket.io: emit sos:alert to supervisor:${supervisorId} room on creation.
+  - New event handler in /supervisor namespace for SOS acknowledgement.
+
+FRONTEND CHANGES NEEDED:
+  - DriverShell.tsx: add SOS button in the top bar (red, shield icon).
+  - New component: SosModal.tsx — issue type selector + confirms send.
+  - New component: DriverChat.tsx — real-time chat UI reusing IssueMessage API.
+    (Can reuse existing useIssueMessages + useSendIssueMessage hooks.)
+  - DriverShell.tsx: add "SOS / Chat" tab or integrate into existing ride view.
+  - supervisor/Issues.tsx: highlight SOS issues with a red badge.
+  - queries.ts: useCreateDriverSos mutation.
+
+FILES TO CHANGE:
+  src/pages/driver/DriverShell.tsx
+  src/pages/driver/DriverHome.tsx (SOS button placement)
+  src/pages/supervisor/Issues.tsx
+  src/lib/queries.ts
+  backend/prisma/schema.prisma (issueType column)
+  backend/src/routes/issues.ts (allow driver to create)
+  backend/src/sockets/index.ts (SOS emit)
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 10 — Final Drop Location Shown in Driver App (Login Rides)
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  DriverTrip.tsx shows per-passenger pickup OTP stops.
+  For login rides, the final destination (office) is NOT displayed as a
+  separate stop after the last pickup. The driver only sees employee pickups.
+
+REQUESTED CHANGE:
+  1. In DriverTrip.tsx, after all passenger pickup stops, append a final
+     "Drop-off: <office address>" stop with a map link.
+  2. This final stop should show:
+       - Office name / address
+       - A "Navigate" button (opens Google Maps to the office coordinates).
+  3. The office lat/lng comes from the ride's dropPoint (already in RideRow)
+     and dropAddress fields — these are already stored in the backend.
+  4. For logout rides, the same logic applies but reversed: show the office
+     as the START (pickup), then individual drop stops.
+
+BACKEND CHANGES NEEDED:
+  None — dropPoint and dropAddress are already returned in the ride payload
+  and in getRide(). Just needs to be surfaced in the driver UI.
+
+FRONTEND CHANGES NEEDED:
+  - DriverTrip.tsx: after rendering the pax list, add a final "Destination"
+    card showing ride.dropAddress and a navigate button using
+    mapsUrl(ride.dropLat, ride.dropLng).
+  - RideRow type in queries.ts: add dropLat / dropLng optional fields
+    (need to include from backend ride response, or derive from dropPoint).
+  - Backend ride.service.ts getRide(): include dropPoint coordinates in
+    the public ride payload (currently stored as PostGIS, needs to be
+    extracted as lat/lng in the response).
+
+FILES TO CHANGE:
+  src/pages/driver/DriverTrip.tsx
+  src/lib/queries.ts (RideRow type)
+  backend/src/services/ride.service.ts (getRide response — extract lat/lng)
+  backend/src/routes/rides.ts (if needed for ride payload shape)
+
+════════════════════════════════════════════════════════════════════════════════
+ FEATURE 11 — Dual OTP per Employee (Pickup OTP + Drop OTP)
+════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATE:
+  RidePax already has BOTH pickupOtp AND dropOtp columns in the schema.
+  ridePax.service.ts generates both (gen4() for each).
+  verifyPickup() and verifyDrop() both exist in the service.
+  Routes /pax/:paxId/pickup and /pax/:paxId/drop both exist.
+
+  HOWEVER — the DriverTrip.tsx UI only shows ONE OTP input per passenger
+  (the pickup OTP). The drop OTP is never shown or collected in the UI.
+
+REQUESTED CHANGE:
+  1. For each passenger in DriverTrip.tsx:
+       - If not yet picked up: show PICKUP OTP input field → verify pickup.
+       - If picked up but not yet dropped: show DROP OTP input field → verify drop.
+       - If dropped: show "Dropped ✓" status.
+  2. The flow per passenger:
+       AWAITING PICKUP → [Enter pickup OTP] → PICKED UP → [Enter drop OTP] → DROPPED
+  3. Supervisor's pax view (already has both OTPs via includeOtp=true) — 
+     update the display to show both pickup OTP and drop OTP separately,
+     labeled clearly.
+  4. Ensure the employee (or their contact) receives BOTH OTPs — either at 
+     ride creation (SMS) or displayed on the supervisor's roster for the ride.
+
+BACKEND CHANGES NEEDED:
+  None — backend already fully supports dual OTP (pickupOtp + dropOtp per pax,
+  with separate verify endpoints). This is a pure frontend fix.
+  OPTIONAL: Send both OTPs to the employee via SMS at ride creation time.
+
+FRONTEND CHANGES NEEDED:
+  - DriverTrip.tsx: add two-phase OTP UI per passenger:
+      Phase 1 (pickedAt == null && noShow == false): show pickup OTP field.
+      Phase 2 (pickedAt != null && droppedAt == null): show drop OTP field.
+      Phase 3 (droppedAt != null): show completion badge.
+  - Update the pax card layout to clearly label "Pickup OTP" vs "Drop OTP".
+  - supervisor/Live.tsx or supervisor pax view: show both OTPs side-by-side.
+
+FILES TO CHANGE:
+  src/pages/driver/DriverTrip.tsx   ← PRIMARY CHANGE (most work here)
+  src/pages/supervisor/Live.tsx     (show both OTPs in the pax detail view)
+
+================================================================================
+ FEATURE SUMMARY
+================================================================================
+  F1  — Self-service account registration (vendor/supervisor → admin review)
+  F2  — Per-employee pickup time in route review + shown in driver app
+  F3  — Multiple office locations + company field on employees
+  F4  — Saved route templates (reusable groups)
+  F5  — Direct-slab pricing + AC/Non-AC ₹100 surcharge
+  F6  — Vendor Code + driver vendor-code entry
+  F7  — Draggable pickup/drop pins on route map
+  F8  — Expired KYC flagging + ride block until re-KYC
+  F9  — SOS button → issue type selector → supervisor chat
+  F10 — Final drop location shown in driver app for login rides
+  F11 — Dual OTP per employee (pickup + drop) surfaced in driver UI
+
+  IMPLEMENTATION NOTE:
+  F11 is the quickest win (backend already done — frontend only).
+  F10 is also near-complete (data exists — just needs to be shown).
+  F5 requires coordinated backend + frontend change (pricing engine).
+  F1 requires the most new backend work (new model + email integration).
+================================================================================

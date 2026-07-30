@@ -1,0 +1,250 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* RideOps — Black / White / Gold design system. All colors HSL. */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 8%;
+
+    /* Primary = black */
+    --primary: 0 0% 8%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary = light neutral */
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 8%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
+
+    /* Accent = gold */
+    --accent: 43 74% 49%;
+    --accent-foreground: 0 0% 8%;
+
+    /* Gold tokens */
+    --gold: 43 74% 49%;
+    --gold-foreground: 0 0% 8%;
+    --gold-soft: 43 80% 94%;
+    --gold-dark: 38 65% 38%;
+
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 60% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 8%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 43 74% 49%;
+
+    --radius: 0.6rem;
+
+    --gradient-gold: linear-gradient(135deg, hsl(43 74% 49%), hsl(38 65% 38%));
+    --gradient-dark: linear-gradient(135deg, hsl(0 0% 8%), hsl(0 0% 18%));
+    --shadow-gold: 0 10px 30px -12px hsl(43 74% 49% / 0.45);
+    --shadow-card: 0 1px 3px hsl(0 0% 0% / 0.06), 0 1px 2px hsl(0 0% 0% / 0.04);
+
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 88%;
+    --sidebar-primary: 43 74% 49%;
+    --sidebar-primary-foreground: 0 0% 8%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: 43 74% 55%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 43 74% 49%;
+  }
+
+  .dark {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 96%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 96%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 43 74% 49%;
+    --primary-foreground: 0 0% 8%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 43 74% 49%;
+    --accent-foreground: 0 0% 8%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 96%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 43 74% 49%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html, body {
+    font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+@layer utilities {
+  .text-gold { color: hsl(var(--gold)); }
+  .bg-gold { background-color: hsl(var(--gold)); }
+  .border-gold { border-color: hsl(var(--gold)); }
+  .bg-gradient-gold { background-image: var(--gradient-gold); }
+  .bg-gradient-dark { background-image: var(--gradient-dark); }
+  .shadow-gold { box-shadow: var(--shadow-gold); }
+  .shadow-card { box-shadow: var(--shadow-card); }
+
+  .card-tilt {
+    transition: transform 400ms cubic-bezier(.2,.8,.2,1), box-shadow 400ms ease, border-color 300ms ease;
+    transform-style: preserve-3d;
+    will-change: transform;
+  }
+  .card-tilt:hover {
+    transform: translateY(-6px) rotateX(3deg) rotateY(-3deg) scale(1.015);
+    box-shadow: 0 30px 60px -25px hsl(43 74% 49% / 0.35), 0 10px 25px -10px hsl(0 0% 0% / 0.4);
+  }
+  .card-glow { position: relative; isolation: isolate; }
+  .card-glow::before {
+    content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px;
+    background: linear-gradient(135deg, hsl(43 74% 55% / 0.7), transparent 40%, hsl(43 74% 55% / 0.5));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    opacity: 0; transition: opacity 400ms ease; z-index: -1;
+  }
+  .card-glow:hover::before { opacity: 1; }
+  .card-shine { position: relative; overflow: hidden; }
+  .card-shine::after {
+    content: ""; position: absolute; top: 0; left: -150%; width: 60%; height: 100%;
+    background: linear-gradient(115deg, transparent, hsl(0 0% 100% / 0.12), transparent);
+    transform: skewX(-20deg); transition: left 800ms ease; pointer-events: none;
+  }
+  .card-shine:hover::after { left: 150%; }
+
+  @keyframes float-y {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .float-slow { animation: float-y 6s ease-in-out infinite; }
+
+  @keyframes gold-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 hsl(43 74% 49% / 0.45); }
+    50% { box-shadow: 0 0 0 14px hsl(43 74% 49% / 0); }
+  }
+  .pulse-gold { animation: gold-pulse 2.4s ease-out infinite; }
+
+  @keyframes shimmer-x {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .text-shimmer {
+    background: linear-gradient(90deg, hsl(43 74% 55%), hsl(43 90% 75%), hsl(43 74% 55%));
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: shimmer-x 4s linear infinite;
+  }
+
+  /* ===== Cinematic step cards ===== */
+  .step-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1.25rem;
+    isolation: isolate;
+    transform-style: preserve-3d;
+    transition: transform 700ms cubic-bezier(.2,.8,.2,1),
+                box-shadow 700ms cubic-bezier(.2,.8,.2,1);
+    will-change: transform;
+  }
+  .step-card::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, hsl(0 0% 0% / 0.15) 0%, hsl(0 0% 0% / 0.55) 55%, hsl(0 0% 0% / 0.9) 100%);
+    z-index: 1; pointer-events: none;
+    transition: opacity 700ms ease;
+  }
+  .step-card .step-bg {
+    position: absolute; inset: -8%;
+    background-size: cover; background-position: center;
+    transform: scale(1.08);
+    transition: transform 1400ms cubic-bezier(.2,.8,.2,1), filter 900ms ease;
+    filter: saturate(0.85) brightness(0.7);
+    z-index: 0;
+  }
+  .step-card:hover .step-bg {
+    transform: scale(1.22) translateY(-2%);
+    filter: saturate(1.15) brightness(0.85);
+  }
+  .step-card:hover {
+    transform: translateY(-10px) rotateX(2deg) rotateY(-2deg);
+    box-shadow:
+      0 40px 80px -30px hsl(43 74% 49% / 0.55),
+      0 20px 40px -20px hsl(0 0% 0% / 0.7);
+  }
+  .step-card .step-content {
+    position: relative; z-index: 2;
+  }
+  .step-card .step-sweep {
+    position: absolute; inset: 0; z-index: 2; pointer-events: none;
+    background: linear-gradient(115deg, transparent 30%, hsl(43 90% 70% / 0.18) 50%, transparent 70%);
+    transform: translateX(-100%);
+    transition: transform 1100ms cubic-bezier(.2,.8,.2,1);
+  }
+  .step-card:hover .step-sweep { transform: translateX(100%); }
+
+  /* Headlight beam streak on the connector line */
+  @keyframes beam {
+    0% { transform: translateX(-30%); opacity: 0; }
+    20% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { transform: translateX(130%); opacity: 0; }
+  }
+  .beam-line { animation: beam 4.5s linear infinite; }
+
+  /* Image hover utilities */
+  .img-zoom { overflow: hidden; }
+  .img-zoom img { transition: transform 900ms cubic-bezier(.2,.8,.2,1), filter 600ms ease; }
+  .img-zoom:hover img { transform: scale(1.08); filter: brightness(1.1); }
+
+  /* Drive across animation for hero car */
+  @keyframes drive-across {
+    0% { transform: translateX(-10%); }
+    100% { transform: translateX(10%); }
+  }
+  .drive-slow { animation: drive-across 14s ease-in-out infinite alternate; }
+
+  /* ===== Fleet card — simple but attractive lift + gold edge ===== */
+  .fleet-card {
+    transition: transform 600ms cubic-bezier(.2,.8,.2,1), box-shadow 600ms ease, border-color 400ms ease;
+    will-change: transform;
+  }
+  .fleet-card:hover {
+    transform: translateY(-8px);
+    border-color: hsl(43 74% 49% / 0.55);
+    box-shadow:
+      0 25px 50px -20px hsl(43 74% 49% / 0.35),
+      0 12px 30px -12px hsl(0 0% 0% / 0.7);
+  }
+  .fleet-sweep {
+    position: absolute; inset: 0; z-index: 1;
+    background: linear-gradient(115deg, transparent 35%, hsl(43 90% 70% / 0.18) 50%, transparent 65%);
+    transform: translateX(-110%);
+    transition: transform 900ms cubic-bezier(.2,.8,.2,1);
+  }
+  .fleet-card:hover .fleet-sweep { transform: translateX(110%); }
+}

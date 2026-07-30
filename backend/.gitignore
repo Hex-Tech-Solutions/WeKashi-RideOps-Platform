@@ -1,0 +1,30 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+.env.local
+*.env.local
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+
+# ── Test / coverage ───────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Uploads (user-uploaded KYC docs etc.) ────────────────────────────────────
+uploads/
+
+# ── Prisma ────────────────────────────────────────────────────────────────────
+# Keep migration files but ignore the lock (auto-managed)
+prisma/migrations/*/migration_lock.toml
+
+# ── Temporary SQL files used for manual DB ops ───────────────────────────────
+*.sql.tmp
+tmp.sql
+check_cols.sql
+fix_cols.sql

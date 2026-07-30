@@ -1,0 +1,483 @@
+/// <reference types="google.maps" />
+import { useEffect, useMemo, useRef, useState } from "react";
+import { GripVertical, X, Plus, ShieldCheck, ShieldAlert, MapPin, Loader2, Move } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { loadGoogleMaps } from "@/lib/googleMaps";
+import { coordPoint } from "@/lib/geo";
+import type { RouteResult, RouteStop } from "@/lib/geo";
+
+interface Props {
+  route: RouteResult;
+  type?: "login" | "logout";
+  editable?: boolean;
+  onReorder?: (from: number, to: number) => void;
+  onRemove?: (empId: string) => void;
+  onAdd?: () => void;
+  onAutoFix?: () => void;
+  /** Called when an employee pickup pin is dragged to a new position. */
+  onPinMoved?: (empId: string, lat: number, lng: number, address: string) => void;
+  /** Called when the office / drop pin is dragged to a new position. */
+  onOfficeMoved?: (lat: number, lng: number, address: string) => void;
+  /** Called with the real driving distance (km) once the Directions API responds. */
+  onRealDistanceKm?: (km: number) => void;
+  /** Current per-stop expected pickup times — empId → HH:MM */
+  pickupTimes?: Record<string, string>;
+  /** Called when the supervisor changes a stop's expected pickup time */
+  onPickupTimeChange?: (empId: string, time: string) => void;
+}
+
+// ─── Reverse geocode helper ───────────────────────────────────────────────────
+
+async function reverseGeocode(
+  geocoder: google.maps.Geocoder,
+  lat: number,
+  lng: number,
+): Promise<string> {
+  try {
+    const result = await geocoder.geocode({ location: { lat, lng } });
+    return result.results[0]?.formatted_address ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  } catch {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function GoogleRouteMap({
+  route,
+  type = "login",
+  editable,
+  onReorder,
+  onRemove,
+  onAdd,
+  onAutoFix,
+  onPinMoved,
+  onOfficeMoved,
+  onRealDistanceKm,
+  pickupTimes,
+  onPickupTimeChange,
+}: Props) {
+  const mapEl = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const officeMarkerRef = useRef<google.maps.Marker | null>(null);
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+  const directionsRef = useRef<google.maps.DirectionsService | null>(null);
+  const geocoderRef = useRef<google.maps.Geocoder | null>(null);
+
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [computedKm, setComputedKm] = useState<number | null>(null);
+  const [computedMin, setComputedMin] = useState<number | null>(null);
+
+  // ── Boot the map once ──────────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleMaps()
+      .then((g) => {
+        if (cancelled || !mapEl.current) return;
+        mapRef.current = new g.maps.Map(mapEl.current, {
+          center: { lat: route.drop.point.lat, lng: route.drop.point.lng },
+          zoom: 12,
+          disableDefaultUI: true,
+          zoomControl: true,
+          styles: mapStyle,
+        });
+        directionsRef.current = new g.maps.DirectionsService();
+        geocoderRef.current = new g.maps.Geocoder();
+        setReady(true);
+      })
+      .catch((e) => setError(e.message));
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const stopsKey = useMemo(
+    () =>
+      route.stops
+        .map((s) => `${s.empId}:${s.point.lat.toFixed(5)},${s.point.lng.toFixed(5)}`)
+        .join("|") +
+      ":" +
+      type,
+    [route.stops, type],
+  );
+
+  // ── Redraw markers + route whenever stops or office change ─────────────────
+  useEffect(() => {
+    if (!ready || !mapRef.current) return;
+    const g = (window as any).google as typeof google;
+
+    // Clear old markers
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+    officeMarkerRef.current?.setMap(null);
+    officeMarkerRef.current = null;
+    polylineRef.current?.setMap(null);
+
+    const office = route.drop.point;
+    const stops = route.stops;
+    const isDraggable = !!editable;
+
+    // Bounds
+    const bounds = new g.maps.LatLngBounds();
+    bounds.extend({ lat: office.lat, lng: office.lng });
+    stops.forEach((s) => bounds.extend({ lat: s.point.lat, lng: s.point.lng }));
+
+    // ── Office marker ──────────────────────────────────────────────────────
+    const officeLabel = type === "logout" ? "S" : "★";
+    const officeMarker = new g.maps.Marker({
+      map: mapRef.current,
+      position: { lat: office.lat, lng: office.lng },
+      draggable: isDraggable && !!onOfficeMoved,
+      cursor: isDraggable && onOfficeMoved ? "grab" : "default",
+      label: { text: officeLabel, color: "#fff", fontWeight: "700" },
+      title: `${type === "logout" ? "Start" : "Final drop"} · ${route.drop.name}${isDraggable && onOfficeMoved ? " — drag to adjust" : ""}`,
+      icon: {
+        path: g.maps.SymbolPath.CIRCLE,
+        scale: 14,
+        fillColor: "#111",
+        fillOpacity: 1,
+        strokeColor: "#fff",
+        strokeWeight: 3,
+      },
+    });
+
+    if (isDraggable && onOfficeMoved && geocoderRef.current) {
+      const geocoder = geocoderRef.current;
+      officeMarker.addListener("dragend", async () => {
+        const pos = officeMarker.getPosition();
+        if (!pos) return;
+        const lat = pos.lat();
+        const lng = pos.lng();
+        const address = await reverseGeocode(geocoder, lat, lng);
+        onOfficeMoved(lat, lng, address);
+      });
+    }
+
+    officeMarkerRef.current = officeMarker;
+
+    // ── Employee stop markers ──────────────────────────────────────────────
+    stops.forEach((s, i) => {
+      const marker = new g.maps.Marker({
+        map: mapRef.current,
+        position: { lat: s.point.lat, lng: s.point.lng },
+        draggable: isDraggable && !!onPinMoved,
+        cursor: isDraggable && onPinMoved ? "grab" : "default",
+        label: { text: String(i + 1), color: "#111", fontWeight: "700" },
+        title: `${s.name} · ${s.location}${isDraggable && onPinMoved ? " — drag to adjust" : ""}`,
+        icon: {
+          path: g.maps.SymbolPath.CIRCLE,
+          scale: 14,
+          fillColor: "#D4AF37",
+          fillOpacity: 1,
+          strokeColor: "#fff",
+          strokeWeight: 3,
+        },
+      });
+
+      if (isDraggable && onPinMoved && geocoderRef.current) {
+        const geocoder = geocoderRef.current;
+        const empId = s.empId;
+        marker.addListener("dragend", async () => {
+          const pos = marker.getPosition();
+          if (!pos) return;
+          const lat = pos.lat();
+          const lng = pos.lng();
+          const address = await reverseGeocode(geocoder, lat, lng);
+          onPinMoved(empId, lat, lng, address);
+        });
+      }
+
+      markersRef.current.push(marker);
+    });
+
+    if (stops.length === 0) {
+      mapRef.current.setCenter({ lat: office.lat, lng: office.lng });
+      mapRef.current.setZoom(12);
+      setComputedKm(null);
+      setComputedMin(null);
+      return;
+    }
+
+    mapRef.current.fitBounds(bounds, 60);
+
+    // ── Directions polyline ────────────────────────────────────────────────
+    // Use a local cancelled flag so stale Directions callbacks don't draw
+    // over a newer route when stops change rapidly.
+    let cancelled = false;
+
+    const ordered =
+      type === "logout"
+        ? [{ lat: office.lat, lng: office.lng }, ...stops.map((s) => ({ lat: s.point.lat, lng: s.point.lng }))]
+        : [...stops.map((s) => ({ lat: s.point.lat, lng: s.point.lng })), { lat: office.lat, lng: office.lng }];
+
+    const origin = ordered[0];
+    const destination = ordered[ordered.length - 1];
+    const waypoints = ordered.slice(1, -1).map((p) => ({ location: p, stopover: true }));
+
+    directionsRef.current?.route(
+      {
+        origin,
+        destination,
+        waypoints,
+        travelMode: g.maps.TravelMode.DRIVING,
+        optimizeWaypoints: false,
+      },
+      (res, status) => {
+        if (cancelled) return; // stale response — a newer route is already drawn
+        if (status !== "OK" || !res) {
+          drawStraight(g, mapRef.current!, ordered);
+          return;
+        }
+        const path: google.maps.LatLng[] = [];
+        let km = 0;
+        let secs = 0;
+        res.routes[0].legs.forEach((leg) => {
+          km += (leg.distance?.value ?? 0) / 1000;
+          secs += leg.duration?.value ?? 0;
+          leg.steps.forEach((step) => step.path.forEach((p) => path.push(p)));
+        });
+        polylineRef.current = new g.maps.Polyline({
+          map: mapRef.current!,
+          path,
+          strokeColor: "#D4AF37",
+          strokeWeight: 5,
+          strokeOpacity: 0.95,
+        });
+        const realKm = Math.round(km * 10) / 10;
+        setComputedKm(realKm);
+        setComputedMin(Math.round(secs / 60));
+        onRealDistanceKm?.(realKm);
+      },
+    );
+
+    function drawStraight(g: typeof google, map: google.maps.Map, pts: google.maps.LatLngLiteral[]) {
+      polylineRef.current = new g.maps.Polyline({
+        map,
+        path: pts,
+        strokeColor: "#D4AF37",
+        strokeWeight: 4,
+        strokeOpacity: 0.9,
+        icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "14px" }],
+      });
+    }
+
+    return () => { cancelled = true; };
+  }, [
+    ready,
+    stopsKey,
+    route.drop.point.lat,
+    route.drop.point.lng,
+    route.drop.name,
+    type,
+    editable,
+    onPinMoved,
+    onOfficeMoved,
+    onRealDistanceKm,
+  ]);
+
+  const totalKm = computedKm ?? route.totalKm;
+  const etaMin = computedMin ?? route.etaMin;
+  const officeLabelText = type === "logout" ? "Start" : "Final drop";
+  const showDragHint = editable && (!!onPinMoved || !!onOfficeMoved);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-4">
+      {/* Map canvas */}
+      <div className="relative rounded-lg border overflow-hidden bg-muted" style={{ aspectRatio: "2 / 1" }}>
+        <div ref={mapEl} className="absolute inset-0" />
+
+        {!ready && !error && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading map…
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-destructive p-6 text-center">
+            {error}
+          </div>
+        )}
+
+        {ready && (
+          <>
+            <div className="absolute bottom-3 left-3 bg-card/95 rounded-md px-3 py-2 text-xs flex items-center gap-3 border shadow-sm">
+              <span className="flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded-full bg-gold" />
+                {type === "logout" ? "Drop" : "Pickup"}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded-full bg-foreground" />
+                {officeLabelText}: {route.drop.name}
+              </span>
+            </div>
+
+            <div className="absolute top-3 right-3 bg-card/95 rounded-md px-3 py-2 text-xs border shadow-sm space-y-0.5">
+              <div className="font-semibold">{totalKm} km · ~{etaMin} min</div>
+              <div className="text-muted-foreground">{route.stops.length} stop{route.stops.length === 1 ? "" : "s"}</div>
+            </div>
+
+            {showDragHint && route.stops.length > 0 && (
+              <div className="absolute top-3 left-3 bg-card/95 rounded-md px-2.5 py-1.5 text-xs border shadow-sm flex items-center gap-1.5 text-muted-foreground">
+                <Move className="h-3 w-3" />
+                Drag pins to adjust
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Safety banner */}
+      {route.stops.length > 0 && (
+        <div className={cn(
+          "flex items-center gap-3 p-3 rounded-md border text-sm",
+          route.safetyOk
+            ? "bg-success/5 border-success/30 text-success"
+            : "bg-warning/10 border-warning/40 text-warning",
+        )}>
+          {route.safetyOk
+            ? <ShieldCheck className="h-4 w-4 shrink-0" />
+            : <ShieldAlert className="h-4 w-4 shrink-0" />}
+          <div className="flex-1">
+            {route.safetyOk ? "All female-safety rules satisfied" : route.safetyIssue}
+          </div>
+          {!route.safetyOk && onAutoFix && (
+            <Button size="sm" variant="outline" onClick={onAutoFix}>Auto-fix</Button>
+          )}
+        </div>
+      )}
+
+      {/* Stop list */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+            {type === "logout" ? "Drop sequence" : "Pickup sequence"}
+            {editable ? " · drag row to reorder" : ""}
+          </div>
+          {editable && onAdd && (
+            <Button size="sm" variant="outline" onClick={onAdd}>
+              <Plus className="h-3.5 w-3.5" /> Add stop
+            </Button>
+          )}
+        </div>
+
+        {route.stops.length === 0 && (
+          <div className="text-sm text-muted-foreground p-6 text-center border-2 border-dashed rounded-md">
+            Pick employees to build a route
+          </div>
+        )}
+
+        {route.stops.map((s, i) => (
+          <StopRow
+            key={s.empId}
+            stop={s}
+            idx={i}
+            editable={!!editable}
+            pickupTime={pickupTimes?.[s.empId] ?? ""}
+            onTimeChange={onPickupTimeChange ? (t) => onPickupTimeChange(s.empId, t) : undefined}
+            onDragStart={() => setDragIdx(i)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => {
+              if (dragIdx !== null && dragIdx !== i && onReorder) onReorder(dragIdx, i);
+              setDragIdx(null);
+            }}
+            onRemove={onRemove ? () => onRemove(s.empId) : undefined}
+          />
+        ))}
+
+        {route.stops.length > 0 && (
+          <div className="flex items-center gap-3 p-3 rounded-md border-2 border-foreground bg-foreground/5">
+            <div className="h-8 w-8 rounded-md bg-foreground text-background flex items-center justify-center text-xs">★</div>
+            <div className="flex-1">
+              <div className="font-medium text-sm">{route.drop.name}</div>
+              <div className="text-xs text-muted-foreground">{officeLabelText} · Office</div>
+            </div>
+            <div className="text-xs font-medium">~{etaMin} min total</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Stop row ─────────────────────────────────────────────────────────────────
+
+function StopRow({
+  stop, idx, editable, onRemove, onDragStart, onDragOver, onDrop, pickupTime, onTimeChange,
+}: {
+  stop: RouteStop;
+  idx: number;
+  editable: boolean;
+  pickupTime?: string;
+  onTimeChange?: (time: string) => void;
+  onRemove?: () => void;
+  onDragStart?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: () => void;
+}) {
+  return (
+    <div
+      draggable={editable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={cn(
+        "flex items-center gap-3 p-3 rounded-md border bg-card",
+        editable && "cursor-move hover:border-gold",
+      )}
+    >
+      {editable && <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />}
+      <div className="h-8 w-8 rounded-full bg-gold text-gold-foreground flex items-center justify-center text-xs font-bold shrink-0">
+        {idx + 1}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm flex items-center gap-2">
+          {stop.name}
+          {stop.gender === "F" && (
+            <Badge variant="outline" className="border-gold/40 bg-gold-soft text-gold-dark text-[10px] py-0">
+              Female
+            </Badge>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
+          <MapPin className="h-3 w-3 shrink-0" /> {stop.location}
+        </div>
+      </div>
+      {/* Pickup time picker — visible only in editable mode */}
+      {editable && onTimeChange && (
+        <div className="flex flex-col items-end shrink-0 gap-0.5">
+          <span className="text-[10px] text-muted-foreground">Stop pickup time</span>
+          <input
+            type="time"
+            value={pickupTime ?? ""}
+            onChange={(e) => onTimeChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            draggable={false}
+            className="h-7 rounded border border-border bg-background px-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-gold w-[80px]"
+          />
+        </div>
+      )}
+      {editable && onRemove && (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+          onClick={onRemove}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ─── Map style ────────────────────────────────────────────────────────────────
+
+const mapStyle: google.maps.MapTypeStyle[] = [
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+];

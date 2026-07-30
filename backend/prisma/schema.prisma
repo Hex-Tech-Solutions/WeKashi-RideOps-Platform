@@ -1,0 +1,478 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         UserRole
+  fullName     String   @map("full_name")
+  phone        String?
+  org          String?
+  officeLat     Float?  @map("office_lat")
+  officeLng     Float?  @map("office_lng")
+  officeAddress String? @map("office_address")
+  facility      String? @map("facility")
+  isActive     Boolean  @default(true) @map("is_active")
+  pendingCancellationFee Float @default(0) @map("pending_cancellation_fee")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  refreshTokens   RefreshToken[]
+  rides           Ride[]           @relation("SupervisorRides")
+  vendor          Vendor?          @relation("VendorUser")
+  employees       Employee[]       @relation("SupervisorEmployees")
+  issuesRaised    DriverIssue[]    @relation("SupervisorIssues")
+  officeLocations OfficeLocation[]
+  routeTemplates  RouteTemplate[]
+
+  @@map("users")
+}
+
+model Driver {
+  id              String       @id @default(uuid())
+  phone           String       @unique
+  fullName        String       @map("full_name")
+  vendorId        String       @map("vendor_id")
+  status          DriverStatus @default(pending)
+  kycStatus       KycStatus    @default(pending) @map("kyc_status")
+  currentLocation Unsupported("geography(Point, 4326)")? @map("current_location")
+  isOnline        Boolean      @default(false) @map("is_online")
+  rating          Float        @default(5.0)
+  vehicleId       String?      @map("vehicle_id")
+  vehicleType     String?      @map("vehicle_type") // hatchback | sedan | suv
+  seats           Int?         // total seats including driver
+  walletBalance   Float        @default(0) @map("wallet_balance")
+  razorpayAccountId    String?  @map("razorpay_account_id")
+  razorpayAccountVerified Boolean @default(false) @map("razorpay_account_verified")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  vendor        Vendor         @relation(fields: [vendorId], references: [id])
+  vehicle       Vehicle?       @relation(fields: [vehicleId], references: [id])
+  refreshTokens RefreshToken[]
+  rides         Ride[]         @relation("DriverRides")
+  rideOffers    RideOffer[]
+  documents     DriverDocument[]
+  issues        DriverIssue[]
+  locationLogs  RideLocationLog[]
+  bankDetail    DriverBankDetail?
+
+  @@index([vendorId])
+  @@index([isOnline, status])
+  @@map("drivers")
+}
+
+model DriverDocument {
+  id        String    @id @default(uuid())
+  driverId  String    @map("driver_id")
+  type      String    // aadhaar | dl | rc | puc | insurance | photo
+  fileUrl   String    @map("file_url")
+  number    String?
+  expiry    DateTime?
+  status    String    @default("pending") // pending | verified | rejected
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@map("driver_documents")
+}
+
+model DriverIssue {
+  id           String   @id @default(uuid())
+  supervisorId String   @map("supervisor_id")
+  driverId     String   @map("driver_id")
+  vendorId     String   @map("vendor_id")
+  rideId       String?  @map("ride_id")
+  description  String
+  issueType    String?  @map("issue_type") // vehicle_issue | medical_emergency | other
+  isSos        Boolean  @default(false) @map("is_sos")
+  status       String   @default("open") // open | resolved
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  supervisor User   @relation("SupervisorIssues", fields: [supervisorId], references: [id])
+  driver     Driver @relation(fields: [driverId], references: [id])
+  vendor     Vendor @relation(fields: [vendorId], references: [id])
+  ride       Ride?  @relation("RideIssues", fields: [rideId], references: [id])
+  messages   IssueMessage[]
+
+  @@index([vendorId])
+  @@index([supervisorId])
+  @@map("driver_issues")
+}
+
+model IssueMessage {
+  id         String   @id @default(uuid())
+  issueId    String   @map("issue_id")
+  senderId   String   @map("sender_id")
+  senderRole String   @map("sender_role")
+  senderName String   @map("sender_name")
+  body       String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  issue DriverIssue @relation(fields: [issueId], references: [id])
+
+  @@index([issueId])
+  @@map("issue_messages")
+}
+
+model DriverBankDetail {
+  id           String   @id @default(uuid())
+  driverId     String   @unique @map("driver_id")
+  upiId        String?  @map("upi_id")
+  accountNo    String?  @map("account_no")
+  ifsc         String?  @map("ifsc")
+  accountName  String?  @map("account_name")
+  verified     Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@map("driver_bank_details")
+}
+
+model DriverOtp {
+  phone        String   @id
+  otpHash      String   @map("otp_hash")
+  expiresAt    DateTime @map("expires_at")
+  attemptCount Int      @default(0) @map("attempt_count")
+
+  @@map("driver_otps")
+}
+
+model RegistrationRequest {
+  id           String   @id @default(uuid())
+  role         String                          // supervisor | vendor
+  fullName     String   @map("full_name")
+  email        String   @unique
+  passwordHash String   @map("password_hash")  // hashed at submission — never shown to admin
+  mobile       String
+  companyName  String   @map("company_name")
+  gstin        String?
+  address      String
+  status       String   @default("pending")    // pending | approved | rejected
+  reviewNote   String?  @map("review_note")
+  createdAt    DateTime @default(now()) @map("created_at")
+  reviewedAt   DateTime? @map("reviewed_at")
+
+  @@index([status])
+  @@map("registration_requests")
+}
+
+model OfficeLocation {
+  id           String   @id @default(uuid())
+  supervisorId String   @map("supervisor_id")
+  name         String                          // e.g. "HQ", "Whitefield Campus"
+  address      String
+  lat          Float
+  lng          Float
+  isDefault    Boolean  @default(false) @map("is_default")
+  gracePeriodSecs Int   @default(600)   @map("grace_period_secs")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  supervisor      User            @relation(fields: [supervisorId], references: [id])
+  routeTemplates  RouteTemplate[]
+
+  @@index([supervisorId])
+  @@map("office_locations")
+}
+
+model RouteTemplate {
+  id                  String   @id @default(uuid())
+  supervisorId        String   @map("supervisor_id")
+  name                String                          // e.g. "Morning HSR batch"
+  rideType            String   @map("ride_type")      // login | logout
+  vehicleType         String?  @map("vehicle_type")   // hatchback | sedan | suv
+  officeLocationId    String?  @map("office_location_id")
+  orderedEmployeeIds  Json     @map("ordered_employee_ids") // string[]
+  createdAt           DateTime @default(now()) @map("created_at")
+  lastUsedAt          DateTime? @map("last_used_at")
+
+  supervisor     User            @relation(fields: [supervisorId], references: [id])
+  officeLocation OfficeLocation? @relation(fields: [officeLocationId], references: [id], onDelete: SetNull)
+
+  @@index([supervisorId])
+  @@map("route_templates")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String?   @map("user_id")
+  driverId  String?   @map("driver_id")
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user   User?   @relation(fields: [userId], references: [id])
+  driver Driver? @relation(fields: [driverId], references: [id])
+
+  @@index([userId])
+  @@index([driverId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model Vendor {
+  id           String   @id @default(uuid())
+  vendorCode   String   @unique @map("vendor_code") // e.g. VND-A1B2C3 — auto-generated on creation
+  name         String
+  contactName  String   @map("contact_name")
+  contactPhone String   @map("contact_phone")
+  contactEmail String   @map("contact_email")
+  payoutDetails Json?   @map("payout_details")
+  createdAt    DateTime @default(now()) @map("created_at")
+  userId       String   @unique @map("user_id")
+
+  user     User      @relation("VendorUser", fields: [userId], references: [id])
+  drivers  Driver[]
+  vehicles Vehicle[]
+  rides    Ride[]    @relation("VendorRides")
+  payouts  Payout[]
+  issues   DriverIssue[]
+
+  @@map("vendors")
+}
+
+model Vehicle {
+  id        String   @id @default(uuid())
+  vendorId  String   @map("vendor_id")
+  regNo     String   @unique @map("reg_no")
+  capacity  Int
+  fuelType  String   @map("fuel_type")
+  documents Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  vendor  Vendor   @relation(fields: [vendorId], references: [id])
+  drivers Driver[]
+
+  @@index([vendorId])
+  @@map("vehicles")
+}
+
+model Employee {
+  id             String   @id @default(uuid())
+  supervisorId   String   @map("supervisor_id")
+  empId          String   @map("emp_id")
+  name           String
+  gender         String
+  phone          String?
+  pickupLocation Unsupported("geography(Point, 4326)") @map("pickup_location")
+  dropLocation   Unsupported("geography(Point, 4326)") @map("drop_location")
+  pickupAddress  String   @map("pickup_address")
+  dropAddress    String   @map("drop_address")
+  shiftStart     String   @map("shift_start")
+  shiftEnd       String   @map("shift_end")
+  companyLabel   String?  @map("company_label") // links to OfficeLocation.name
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  supervisor User          @relation("SupervisorEmployees", fields: [supervisorId], references: [id])
+  rides      RideEmployee[]
+  pax        RidePax[]
+
+  @@unique([supervisorId, empId])
+  @@index([supervisorId])
+  @@map("employees")
+}
+
+model Ride {
+  id                 String     @id @default(uuid())
+  type               RideType
+  status             RideStatus @default(pending)
+  supervisorId       String     @map("supervisor_id")
+  driverId           String?    @map("driver_id")
+  vendorId           String?    @map("vendor_id")
+  pickupPoint        Unsupported("geography(Point, 4326)") @map("pickup_point")
+  dropPoint          Unsupported("geography(Point, 4326)") @map("drop_point")
+  pickupAddress      String     @map("pickup_address")
+  dropAddress        String     @map("drop_address")
+  routePolyline      String?    @map("route_polyline")
+  distanceKm         Float?     @map("distance_km")
+  price              Float?
+  platformFee        Float?   @default(20) @map("platform_fee")
+  totalAmount        Float?   @map("total_amount")
+  cancellationFee    Float?   @map("cancellation_fee")
+  vehicleType        String?    @map("vehicle_type") // hatchback | sedan | suv
+  paxCount           Int        @map("pax_count")
+  capacity           Int
+  scheduledFor       DateTime?  @map("scheduled_for")
+  broadcastStartedAt DateTime?  @map("broadcast_started_at")
+  broadcastExpiresAt DateTime?  @map("broadcast_expires_at")
+  claimedAt          DateTime?  @map("claimed_at")
+  acceptedAt         DateTime?  @map("accepted_at")
+  startedAt          DateTime?  @map("started_at")
+  plannedStartTime   DateTime?  @map("planned_start_time")
+  driverReportingTime DateTime? @map("driver_reporting_time")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  completedAt        DateTime?  @map("completed_at")
+  paymentStatus      String     @default("unpaid") @map("payment_status") // unpaid | paid
+  razorpayOrderId    String?    @map("razorpay_order_id")
+  razorpayPaymentId  String?    @map("razorpay_payment_id")
+  paidAt             DateTime?  @map("paid_at")
+
+  supervisor    User           @relation("SupervisorRides", fields: [supervisorId], references: [id])
+  driver        Driver?        @relation("DriverRides", fields: [driverId], references: [id])
+  vendor        Vendor?        @relation("VendorRides", fields: [vendorId], references: [id])
+  rideEmployees RideEmployee[]
+  rideOffers    RideOffer[]
+  incidents     SafetyIncident[]
+  pax           RidePax[]
+  issues        DriverIssue[]    @relation("RideIssues")
+  locationLogs  RideLocationLog[]
+
+  @@index([supervisorId])
+  @@index([driverId])
+  @@index([vendorId])
+  @@index([status])
+  @@index([status, broadcastExpiresAt])
+  @@map("rides")
+}
+
+model RideEmployee {
+  rideId     String @map("ride_id")
+  employeeId String @map("employee_id")
+
+  ride     Ride     @relation(fields: [rideId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@id([rideId, employeeId])
+  @@map("ride_employees")
+}
+
+model RidePax {
+  id                  String    @id @default(uuid())
+  rideId              String    @map("ride_id")
+  employeeId          String    @map("employee_id")
+  seq                 Int
+  pickupOtp           String    @map("pickup_otp")
+  dropOtp             String    @map("drop_otp")
+  scheduledPickupTime String?   @map("scheduled_pickup_time") // HH:MM expected pickup time
+  pickedAt            DateTime? @map("picked_at")
+  droppedAt           DateTime? @map("dropped_at")
+  noShow              Boolean   @default(false) @map("no_show")
+
+  ride     Ride     @relation(fields: [rideId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([rideId])
+  @@map("ride_pax")
+}
+
+model RideOffer {
+  rideId    String        @map("ride_id")
+  driverId  String        @map("driver_id")
+  offeredAt DateTime      @default(now()) @map("offered_at")
+  response  OfferResponse @default(pending)
+
+  ride   Ride   @relation(fields: [rideId], references: [id])
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@id([rideId, driverId])
+  @@index([rideId])
+  @@index([driverId])
+  @@map("ride_offers")
+}
+
+model Payout {
+  id          String       @id @default(uuid())
+  vendorId    String       @map("vendor_id")
+  period      String
+  amount      Float
+  ratePerRide Float?       @map("rate_per_ride")
+  fileUrl     String?      @map("file_url")
+  status      PayoutStatus @default(pending)
+  paidAt      DateTime?    @map("paid_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+
+  @@index([vendorId])
+  @@map("payouts")
+}
+
+model RideLocationLog {
+  id         String   @id @default(uuid())
+  rideId     String   @map("ride_id")
+  driverId   String   @map("driver_id")
+  lat        Float
+  lng        Float
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  ride   Ride   @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([rideId])
+  @@index([rideId, recordedAt])
+  @@map("ride_location_logs")
+}
+
+model SafetyIncident {
+  id          String   @id @default(uuid())
+  rideId      String   @map("ride_id")
+  reportedBy  String   @map("reported_by")
+  description String
+  status      String   @default("open")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  ride Ride @relation(fields: [rideId], references: [id])
+
+  @@index([rideId])
+  @@map("safety_incidents")
+}
+
+enum UserRole {
+  admin
+  supervisor
+  vendor
+}
+
+enum DriverStatus {
+  pending
+  active
+  blacklisted
+  expired
+}
+
+enum KycStatus {
+  pending
+  approved
+  rejected
+  expired
+}
+
+enum RideType {
+  login
+  logout
+  scheduled
+}
+
+enum RideStatus {
+  pending
+  broadcasting
+  assigned
+  in_progress
+  completed
+  cancelled
+  expired
+  scheduled
+}
+
+enum OfferResponse {
+  pending
+  accepted
+  rejected
+  expired
+}
+
+enum PayoutStatus {
+  pending
+  paid
+}

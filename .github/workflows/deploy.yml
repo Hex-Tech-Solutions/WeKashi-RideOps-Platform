@@ -1,0 +1,47 @@
+name: Deploy to Server
+
+# Auto-deploys on every push to main. The whole stack runs in Docker on the
+# server, so the runner just SSHes in, pulls, and rebuilds the compose stack.
+#
+# Required GitHub repo secrets (Settings → Secrets and variables → Actions):
+#   SERVER_HOST      server public IP or DNS
+#   SERVER_USER      ssh username
+#   SERVER_PASSWORD  ssh password for that user
+#   SERVER_PORT      ssh port (optional, defaults to 22)
+#   SERVER_APP_DIR   repo path on the server (optional, defaults to $HOME/rideops-platform)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH (password auth)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -e
+            APP_DIR="${{ secrets.SERVER_APP_DIR }}"
+            cd "${APP_DIR:-$HOME/rideops-platform}"
+
+            echo "==> Pulling latest code..."
+            git pull --ff-only origin main
+
+            echo "==> Building & starting the full stack (postgres, redis, api, web)..."
+            docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+
+            echo "==> Pruning dangling images..."
+            docker image prune -f
+
+            echo "==> Deploy complete at $(date)"
