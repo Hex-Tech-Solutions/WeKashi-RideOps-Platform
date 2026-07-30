@@ -4,7 +4,12 @@ import { parsePagination } from '../lib/pagination';
 import { createPayout, listPayouts, markPayoutPaid, countCompletedRides, attachPayoutFile } from '../services/payout.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
-import { upload } from '../lib/storage';
+import { upload, USE_AZURE_STORAGE, uploadToAzureBlob } from '../lib/storage';
+
+async function resolveFileUrl(file: Express.Multer.File): Promise<string> {
+  if (USE_AZURE_STORAGE) return uploadToAzureBlob(file.buffer, file.originalname, file.mimetype);
+  return `/api/files/${file.filename}`;
+}
 import type { AuthRequest } from '../types';
 
 const router = Router();
@@ -66,7 +71,7 @@ router.post('/', requireRole('admin'), upload.single('file'), async (req: AuthRe
       ratePerRide: req.body.ratePerRide != null && req.body.ratePerRide !== '' ? Number(req.body.ratePerRide) : undefined,
     };
     const body = CreatePayoutSchema.parse(raw);
-    const fileUrl = req.file ? `/api/files/${req.file.filename}` : undefined;
+    const fileUrl = req.file ? await resolveFileUrl(req.file) : undefined;
     const payout = await createPayout({ ...body, fileUrl });
     res.status(201).json(payout);
   } catch (err) {
@@ -78,7 +83,7 @@ router.post('/', requireRole('admin'), upload.single('file'), async (req: AuthRe
 router.patch('/:id/file', requireRole('admin'), upload.single('file'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.file) { res.status(400).json({ error: 'A file is required' }); return; }
-    const payout = await attachPayoutFile(req.params.id, `/api/files/${req.file.filename}`);
+    const payout = await attachPayoutFile(req.params.id, await resolveFileUrl(req.file));
     res.json(payout);
   } catch (err) {
     next(err);

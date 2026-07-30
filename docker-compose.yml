@@ -1,33 +1,46 @@
+# ============================================================
+# WeKashi RideOps — Local development stack
+#
+# Runs everything locally — Postgres + Redis as containers.
+# The API and frontend run outside Docker (npm run dev) for
+# hot reload. Use this compose only for the DB + Redis.
+#
+# Start DB + Redis:
+#   docker compose up -d
+#
+# Then start the app (two terminals):
+#   cd backend && npm run dev      → http://localhost:3000
+#   npm run dev                    → http://localhost:8080
+# ============================================================
+
 services:
-  db:
-    image: supabase/postgres:15.1.1.78
+  postgres:
+    image: postgis/postgis:16-3.4
     restart: unless-stopped
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: postgres
+      POSTGRES_USER: rideops
+      POSTGRES_PASSWORD: rideops
+      POSTGRES_DB: rideops
     ports:
       - "5432:5432"
     volumes:
-      - db_data:/var/lib/postgresql/data
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/10_schema.sql:ro
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U rideops"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  web:
-    build: .
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     ports:
-      - "${PORT:-8080}:80"
-    environment:
-      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
-      VITE_SUPABASE_PROJECT_ID: ${VITE_SUPABASE_PROJECT_ID:-}
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
-  db_data:
+  pgdata:

@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { NotFoundError, ForbiddenError, NearbyDriver } from '../types';
 import { logger } from '../lib/logger';
+import { bufferDriverLocation } from '../lib/locationBuffer';
 
 export interface CreateDriverInput {
   phone: string;
@@ -98,41 +99,36 @@ export async function updateDriverLocation(
   lng: number,
   io?: import('socket.io').Server,
 ): Promise<void> {
-  await prisma.$executeRaw`
-    UPDATE drivers
-    SET current_location = ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
-        is_online = true
-    WHERE id = ${driverId}
-  `;
-
-  // Record a breadcrumb for any in_progress ride this driver is on.
+  // ── Find active ride (lightweight read — still needed for Socket.io emit) ──
   const activeRide = await prisma.ride.findFirst({
     where: { driverId, status: { in: ['in_progress', 'assigned'] } },
     select: { id: true, supervisorId: true, status: true },
   });
 
-  if (activeRide) {
-    // Write breadcrumb only when actually moving
-    if (activeRide.status === 'in_progress') {
-      await prisma.rideLocationLog.create({
-        data: { rideId: activeRide.id, driverId, lat, lng },
+  // ── Buffer position in Redis (bulk DB write happens every 60s) ────────────
+  // This replaces the direct DB write on every ping.
+  await bufferDriverLocation(
+    driverId,
+    lat,
+    lng,
+    activeRide?.id ?? null,
+    activeRide?.status === 'in_progress',
+  );
+
+  // ── Socket.io: emit to supervisor immediately (real-time, no buffer) ──────
+  if (io && activeRide) {
+    io.of('/supervisor')
+      .to(`supervisor:${activeRide.supervisorId}`)
+      .emit('driver:location_update', {
+        rideId:   activeRide.id,
+        driverId,
+        lat,
+        lng,
+        ts: Date.now(),
       });
-    }
-    // Push live location to the supervisor via Socket.io
-    if (io) {
-      io.of('/supervisor')
-        .to(`supervisor:${activeRide.supervisorId}`)
-        .emit('driver:location_update', {
-          rideId:   activeRide.id,
-          driverId,
-          lat,
-          lng,
-          ts: Date.now(),
-        });
-    }
   }
 
-  logger.debug({ driverId, lat, lng }, 'Driver location updated');
+  logger.debug({ driverId, lat, lng }, 'Driver location buffered');
 }
 
 // All online cabs with a known GPS position — for the admin live map.

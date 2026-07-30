@@ -1,7 +1,45 @@
-node_modules
-dist
-.git
-.lovable
+# Dependencies — never copy these into the image
+node_modules/
+backend/node_modules/
+
+# Build outputs — rebuilt inside the container
+dist/
+backend/dist/
+
+# Git
+.git/
+.github/
+
+# Environment files — secrets must never be in the image
+.env
+.env.*
+backend/.env
+
+# Dev / test artifacts
+coverage/
+.nyc_output/
+*.log
 .app.log
 .app.pid
+
+# Android build — not needed for web/api container
+android/
+
+# Uploads — runtime data, not source code
+backend/uploads/
+uploads/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+
+# Documentation — reduces image size slightly
 *.md
+PRODUCTION_ISSUES.txt
+API_REFERENCE.md
+SETUP.md
+INTEGRATIONS.md
+DRIVER_APP.md
+README.md

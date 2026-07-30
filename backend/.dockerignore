@@ -1,5 +1,8 @@
-node_modules
-dist
-.git
+node_modules/
+dist/
 .env
+*.env.local
 *.log
+coverage/
+uploads/
+.DS_Store

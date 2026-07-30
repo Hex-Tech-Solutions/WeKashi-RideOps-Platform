@@ -1,55 +1,41 @@
 # ============================================================
-# RideOps — full stack (production / EC2)
-#   postgres (PostGIS) + redis + api (Express) + web (React/nginx)
+# RideOps — Production stack (Azure managed services)
 #
-#   Bring up:   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
-#   Seed once:  docker compose --env-file .env.prod -f docker-compose.prod.yml exec api npm run db:seed
-#   Logs:       docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f api
-#   Open:       http://<EC2_PUBLIC_IP>/      (web → nginx → /api → api)
+# This compose file assumes:
+#   - PostgreSQL  → Azure Database for PostgreSQL Flexible Server
+#   - Redis       → Azure Cache for Redis
+#   - File storage → Azure Blob Storage
+#
+# The postgres and redis containers are REMOVED — they are replaced by
+# Azure managed services whose connection strings are in .env.prod.
+#
+# Bring up:   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+# Seed once:  docker compose --env-file .env.prod -f docker-compose.prod.yml exec api npm run db:seed
+# Logs:       docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f api
+# Open:       http://<SERVER_IP>/  (nginx → /api → api)
 # ============================================================
+
 services:
-  postgres:
-    image: postgis/postgis:16-3.4
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-rideops}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rideops}
-      POSTGRES_DB: ${POSTGRES_DB:-rideops}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rideops}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   api:
     build: ./backend
     restart: unless-stopped
     env_file: .env.prod
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-rideops}:${POSTGRES_PASSWORD:-rideops}@postgres:5432/${POSTGRES_DB:-rideops}
-      REDIS_URL: redis://redis:6379
-      UPLOAD_DIR: /app/uploads
-      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
-      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
-    volumes:
-      - uploads:/app/uploads
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    # Apply DB schema on every boot (idempotent), then start the server.
+      # ── These come from .env.prod ──────────────────────────────────────────
+      # DATABASE_URL: postgresql://user:pass@your-azure-pg.postgres.database.azure.com:5432/rideops?sslmode=require
+      # REDIS_URL:    rediss://:your-redis-key@your-redis.redis.cache.windows.net:6380
+      # AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=https;AccountName=...
+      # AZURE_STORAGE_CONTAINER: rideops-uploads
+      NODE_ENV: production
+      PORT: "3000"
+    # No volume mount needed — files go to Azure Blob Storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Apply DB migrations on boot, then start the server
     command: sh -c "npx prisma migrate deploy && node dist/server.js"
 
   web:
@@ -60,10 +46,11 @@ services:
         VITE_RAZORPAY_KEY_ID: ${VITE_RAZORPAY_KEY_ID:-}
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-80}:80"
 
-volumes:
-  pgdata:
-  uploads:
+# No volumes needed:
+#   pgdata  → Azure PostgreSQL manages its own storage
+#   uploads → Azure Blob Storage

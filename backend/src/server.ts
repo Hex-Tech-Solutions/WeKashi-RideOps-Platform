@@ -4,6 +4,7 @@ import { initSockets } from './sockets';
 import { createApp } from './app';
 import { initBroadcastSweeper, stopBroadcastSweeper } from './lib/broadcastSweeper';
 import { initKycSweeper, stopKycSweeper } from './lib/kycSweeper';
+import { startLocationFlusher, stopLocationFlusher, flushLocationBuffer } from './lib/locationBuffer';
 import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
 import { logger } from './lib/logger';
@@ -55,6 +56,9 @@ async function bootstrap(): Promise<void> {
   // Start KYC expiry sweeper
   initKycSweeper();
 
+  // Start location buffer flusher (bulk-writes GPS positions to DB every 60s)
+  startLocationFlusher();
+
   httpServer.listen(PORT, () => {
     logger.info({ port: PORT, env: process.env.NODE_ENV }, 'RideOps API server started');
   });
@@ -65,9 +69,12 @@ async function bootstrap(): Promise<void> {
 
     stopBroadcastSweeper();
     stopKycSweeper();
+    stopLocationFlusher();
 
     httpServer.close(async () => {
       try {
+        // Final flush before shutdown — don't lose buffered positions
+        await flushLocationBuffer();
         await prisma.$disconnect();
         redis.disconnect();
         logger.info('Graceful shutdown complete');

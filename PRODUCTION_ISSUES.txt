@@ -864,3 +864,179 @@ FILES TO CHANGE:
   F5 requires coordinated backend + frontend change (pricing engine).
   F1 requires the most new backend work (new model + email integration).
 ================================================================================
+
+================================================================================
+  WEKASHI RIDEOPS — REMAINING ITEMS (POST BUILD)
+  Updated: 2026-07-30
+  Items tracked after initial build completion.
+  Grouped: Must-do before launch / Should-do soon / Technical debt
+================================================================================
+
+════════════════════════════════════════════════════════════════════════════════
+ MUST DO BEFORE GOING LIVE
+════════════════════════════════════════════════════════════════════════════════
+
+[P1] PUSH LATEST CODE CHANGES TO GITHUB
+  Status: Pending
+  Issue:  GPS buffering, Azure Blob Storage, security hardening, SETUP.md
+          updates are all local. Not yet committed or pushed to the repo.
+  Fix:    git add . && git commit -m "feat: GPS buffering, Azure Blob Storage,
+          security hardening, prod setup" && git push
+  Risk:   Server deployed from old code would be missing performance and
+          security improvements.
+
+[P2] RAZORPAY ROUTE — PLACEHOLDER ACCOUNT ID IN CODE
+  File:   backend/src/routes/payments.ts
+  Code:   account: `acct_${ride.driverId}`  ← placeholder, not a real Razorpay ID
+  Issue:  The Route transfer uses a fake linked account ID. When supervisor
+          pays, the ₹750 driver share cannot be transferred to the driver's
+          bank because no real Razorpay linked account exists yet.
+  Fix:    1. Enable Razorpay Route product on the business account.
+          2. Complete driver onboarding flow (UI + backend already built at
+             POST /payments/driver/onboard) — this creates a real acc_xxx ID
+             stored in drivers.razorpay_account_id.
+          3. Replace the placeholder in the Route transfer call with
+             ride.driver.razorpayAccountId (already fetched in the query).
+  Impact: CRITICAL for payment flow — drivers will not receive money
+          directly until this is done. Wallet credit still works as fallback.
+
+[P3] HTTPS / SSL NOT CONFIGURED
+  Status: Pending (same as original C3 — still open)
+  Issue:  All traffic runs over plain HTTP. Tokens, OTPs, KYC documents
+          transmitted unencrypted over the wire.
+  Fix:    1. Point a domain to the Azure server IP (A record).
+          2. Install Caddy or Certbot + nginx for automatic Let's Encrypt cert.
+          3. Update CORS_ORIGIN in .env.prod to https://yourdomain.com
+          4. Update capacitor.config.ts server.url to https://yourdomain.com
+             and set cleartext: false before rebuilding the APK.
+
+[P4] SMS OTP NOT CONFIGURED FOR PRODUCTION
+  File:   backend/src/lib/sms.ts
+  Issue:  OTPs are logged to the server console. Real drivers cannot receive
+          OTPs on their phones without Twilio configured.
+  Fix:    1. Create a Twilio account, get Account SID + Auth Token + from number.
+          2. Set in .env.prod:
+               SMS_PROVIDER=twilio
+               TWILIO_ACCOUNT_SID=ACxxx
+               TWILIO_AUTH_TOKEN=xxx
+               TWILIO_FROM_NUMBER=+1xxx
+          3. Remove DEV_OTP_BYPASS from .env.prod (server blocks it in prod anyway).
+  Impact: Without this, no real driver can log in using their phone number.
+
+
+════════════════════════════════════════════════════════════════════════════════
+ SHOULD DO SOON AFTER LAUNCH
+════════════════════════════════════════════════════════════════════════════════
+
+[S1] DRIVER BANK WITHDRAWAL — "COMING SOON" IN UI
+  File:   src/pages/driver/DriverAccount.tsx  (WalletCard → BankDetailSection)
+  Issue:  Driver can see their wallet balance and payment history.
+          The withdrawal section shows "Coming soon".
+          The onboarding UI and backend endpoint are built
+          (POST /payments/driver/onboard/bank) but the actual payout
+          from RazorpayX to the driver's bank is not wired.
+  Fix:    1. Enable RazorpayX (Payouts) on the Razorpay account.
+          2. After driver completes onboarding and bank is verified,
+             call Razorpay Payouts API when driver requests withdrawal.
+          3. Implement POST /payments/driver/withdraw endpoint.
+          4. Replace "Coming soon" UI with amount input + confirm button.
+
+[S2] SCHEDULED RIDE REMINDER — NO DRIVER CLAIMED
+  Issue:  When a scheduled ride has no driver claimed 30 minutes before
+          the ride time, the supervisor gets no notification.
+          They only discover it on the Live → Scheduled tab manually.
+  Fix:    Add a cron check (e.g. every 5 min) in broadcastSweeper.ts:
+          - Find scheduled rides where scheduledFor < NOW() + 30min AND no driver
+          - Emit socket event to supervisor: 'ride:unclaimed_warning'
+          - Frontend shows a toast/badge on the Live page
+
+[S3] EMPLOYEE ACTIVE/INACTIVE TOGGLE
+  Issue:  Supervisors can only delete employees. No way to temporarily
+          deactivate an employee on leave without losing their data and
+          ride history.
+  Fix:    1. Add isActive Boolean @default(true) to Employee schema.
+          2. New migration to add the column.
+          3. Add toggle button in Roster page.
+          4. Filter inactive employees from booking flow (Step 1 picker).
+  Impact: Low risk change — additive schema field.
+
+[S4] FCM PUSH NOTIFICATIONS FOR DRIVERS
+  File:   INTEGRATIONS.md (section 4)
+  Issue:  Driver app polls for new ride broadcasts every 8 seconds.
+          This drains battery and adds latency. FCM push would be instant.
+  Fix:    See INTEGRATIONS.md section 4 for full setup.
+          Requires: Firebase project, google-services.json in android/app/,
+          @capacitor/push-notifications, and a POST /api/driver/push-token
+          endpoint to store FCM device tokens.
+
+[S5] REBOOK RIDE FROM HISTORY
+  Issue:  Supervisors frequently book the same routes repeatedly.
+          No way to click a completed ride and instantly rebook it.
+  Fix:    Add "Rebook this ride" button in CompletedRideDetailSheet.
+          On click: navigate to /supervisor/routes with the ride's employees
+          pre-selected (similar to ?loadGroup= pattern for saved groups).
+
+
+════════════════════════════════════════════════════════════════════════════════
+ TECHNICAL DEBT (low risk — do when time allows)
+════════════════════════════════════════════════════════════════════════════════
+
+[T1] DEPRECATED GOOGLE MAPS MARKER API
+  Files:  src/components/LiveCabMap.tsx
+          src/components/GoogleRouteMap.tsx
+          src/components/CompletedRideDetailSheet.tsx
+  Issue:  All map components use google.maps.Marker which Google has
+          deprecated. Will be removed in a future Maps JS API version.
+  Fix:    Migrate to google.maps.marker.AdvancedMarkerElement.
+          Requires maps ID to be set on the map instance.
+  Timeline: Not urgent now — Google has not set a removal date yet.
+
+[T2] OTP IS 4-DIGIT (LOW ENTROPY)
+  File:   backend/src/services/ridePax.service.ts
+  Code:   const gen4 = () => String(Math.floor(1000 + Math.random() * 9000));
+  Issue:  4-digit OTPs have 9,000 combinations. Industry standard is 6-digit.
+  Fix:    Change to 6-digit: String(Math.floor(100000 + Math.random() * 900000))
+          Update Zod schema validation in rides.ts to accept min(6) instead of min(4).
+  Note:   Existing in-progress rides with 4-digit OTPs must complete first.
+
+[T3] Math.random() USED FOR OTP GENERATION — NOT CSPRNG
+  File:   backend/src/lib/otp.ts, backend/src/services/ridePax.service.ts
+  Issue:  Math.random() is not cryptographically secure.
+  Fix:    Replace with: import { randomInt } from 'crypto';
+          const otp = String(randomInt(100000, 999999));
+  Risk:   Low practical risk in this context. Fix alongside T2.
+
+[T4] DEAD NPM PACKAGES STILL IN DEPENDENCIES
+  File:   package.json (root frontend)
+  Packages:
+    @supabase/supabase-js     — all Supabase code deleted, package not removed
+    @lovable.dev/cloud-auth-js — Lovable OAuth deleted, package not removed
+    lovable-tagger             — Lovable build tool, not used
+  Fix:    npm uninstall @supabase/supabase-js @lovable.dev/cloud-auth-js lovable-tagger
+  Impact: Reduces bundle size slightly. Zero functional impact.
+
+[T5] DOCKER-COMPOSE.PROD.YML — MIGRATION RACE ON MULTI-INSTANCE
+  File:   docker-compose.prod.yml
+  Code:   command: sh -c "npx prisma migrate deploy && node dist/server.js"
+  Issue:  If both API servers start simultaneously, both run
+          `prisma migrate deploy` at the same time and may race on
+          the same migration.
+  Fix:    Run migrations as a one-shot init container or a separate
+          deploy step before rolling out both API servers.
+          Alternatively, Prisma migrate deploy is idempotent — the race
+          is usually harmless but can cause transient startup failures.
+
+================================================================================
+ SUMMARY — REMAINING ITEMS
+================================================================================
+  Must-do before launch : P1–P4   (4 items)
+  Should-do after launch : S1–S5  (5 items)
+  Technical debt          : T1–T5  (5 items)
+  TOTAL remaining         : 14 items
+
+  QUICKEST WINS:
+  P1 — Push to GitHub (5 min)
+  T4 — Remove dead npm packages (5 min)
+  T2+T3 — Fix OTP generation (15 min)
+  S3 — Employee active/inactive toggle (1 hour)
+================================================================================

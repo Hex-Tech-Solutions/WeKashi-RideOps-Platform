@@ -1,49 +1,40 @@
-# Stage 1: builder
-FROM node:20-slim AS builder
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
+FROM node:22-alpine AS build
+
 WORKDIR /app
 
-# openssl is required by Prisma; build tools are needed for native modules (bcrypt)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      openssl python3 make g++ ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
+# Install dependencies first (cached layer unless package.json changes)
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
+# Copy source and build TypeScript
 COPY . .
-RUN npx prisma generate
 RUN npm run build
 
-# Stage 2: runtime
-FROM node:20-slim AS runtime
+# Prune dev dependencies — only keep production deps in the next stage
+RUN npm prune --production
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+FROM node:22-alpine AS runtime
+
+# Security: run as non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
 
-# openssl for Prisma at runtime; wget for the healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      openssl wget ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Copy only what's needed to run
+COPY --from=build /app/dist           ./dist
+COPY --from=build /app/node_modules   ./node_modules
+COPY --from=build /app/package.json   ./package.json
+COPY --from=build /app/prisma         ./prisma
 
-# Create non-root user
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+# Install curl for health checks (minimal)
+RUN apk add --no-cache curl
 
-# Copy built artifacts
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/package.json ./package.json
-
-# Uploads dir (persistent volume mounts here); created so the named volume
-# inherits appuser ownership on first mount.
-RUN mkdir -p /app/uploads
-
-# Set ownership
-RUN chown -R appuser:appgroup /app
-
+# Switch to non-root user
 USER appuser
 
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:3000/health || exit 1
-
+# Migrations run in docker-compose command before starting server
 CMD ["node", "dist/server.js"]

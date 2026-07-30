@@ -10,7 +10,15 @@ import {
   setDriverOnlineStatus,
 } from '../services/driver.service';
 import { addDriverDocument, listDriverDocuments, deleteDriverDocument } from '../services/document.service';
-import { upload } from '../lib/storage';
+import { upload, USE_AZURE_STORAGE, uploadToAzureBlob } from '../lib/storage';
+
+// Helper: after multer processes a file, get its final URL (local path or Azure Blob)
+async function resolveFileUrl(file: Express.Multer.File): Promise<string> {
+  if (USE_AZURE_STORAGE) {
+    return uploadToAzureBlob(file.buffer, file.originalname, file.mimetype);
+  }
+  return `/api/files/${file.filename}`;
+}
 import { listRides, listScheduledRidesForDriver } from '../services/ride.service';
 import type { AuthRequest } from '../types';
 import type { Server as IoServer } from 'socket.io';
@@ -136,7 +144,7 @@ router.post('/documents', upload.single('file'), async (req: AuthRequest, res: R
     }
     const doc = await addDriverDocument(req.driver!.id, {
       type,
-      fileUrl: `/api/files/${req.file.filename}`,
+      fileUrl: await resolveFileUrl(req.file),
       number: number || undefined,
       expiry: expiry ? new Date(expiry) : undefined,
     });
