@@ -9,7 +9,7 @@ import {
   updateDriverLocation,
   listLiveDriverLocations,
 } from '../services/driver.service';
-import { listDocumentsForVendor, setDocumentStatus } from '../services/document.service';
+import { listDocumentsForVendor, setDocumentStatus, countPendingDocsForVendor } from '../services/document.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
 import type { AuthRequest } from '../types';
@@ -63,6 +63,23 @@ export function createDriversRouter(io: IoServer): Router {
 
         const result = await listDrivers({ vendorId, status, page, limit });
         res.json(result);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // GET /drivers/pending-docs-count — vendor only: number of docs awaiting approval
+  // NOTE: must be declared BEFORE /:id so Express doesn't treat "pending-docs-count" as an id
+  router.get(
+    '/pending-docs-count',
+    requireRole('vendor'),
+    async (req: AuthRequest, res: Response, next: NextFunction) => {
+      try {
+        const vendorId = await vendorIdFor(req);
+        if (!vendorId) { res.json({ count: 0 }); return; }
+        const count = await countPendingDocsForVendor(vendorId);
+        res.json({ count });
       } catch (err) {
         next(err);
       }
@@ -170,9 +187,16 @@ export function createDriversRouter(io: IoServer): Router {
     requireRole('vendor', 'admin'),
     async (req: AuthRequest, res: Response, next: NextFunction) => {
       try {
-        const { status } = z.object({ status: z.enum(['pending', 'verified', 'rejected']) }).parse(req.body);
+        const { status, rejectionNote } = z.object({
+          status: z.enum(['pending', 'verified', 'rejected']),
+          rejectionNote: z.string().max(500).optional(),
+        }).parse(req.body);
         const vendorId = await vendorIdFor(req);
-        res.json(await setDocumentStatus(req.params.docId, status, vendorId));
+        // reviewedBy: use the logged-in user's full name / email
+        const { prisma } = await import('../lib/prisma');
+        const reviewer = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { fullName: true } });
+        const reviewedBy = reviewer?.fullName ?? 'Unknown';
+        res.json(await setDocumentStatus(req.params.docId, status, reviewedBy, rejectionNote, vendorId));
       } catch (err) {
         next(err);
       }

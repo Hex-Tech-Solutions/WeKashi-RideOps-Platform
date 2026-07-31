@@ -25,22 +25,28 @@ import {
 import { toast } from "sonner";
 
 const REQUIRED = [
-  { type: "aadhaar",   label: "Aadhaar Card",      wantsNumber: true },
-  { type: "dl",        label: "Driving Licence",    wantsNumber: true,  wantsExpiry: true },
-  { type: "rc",        label: "Vehicle RC",         wantsNumber: true },
-  { type: "puc",       label: "PUC Certificate",                        wantsExpiry: true },
-  { type: "insurance", label: "Insurance",                               wantsExpiry: true },
-  { type: "photo",     label: "Profile Photo" },
+  { type: "aadhaar",              label: "Aadhaar Card",             wantsNumber: true },
+  { type: "dl",                   label: "Driving Licence",          wantsNumber: true,  wantsExpiry: true },
+  { type: "rc",                   label: "Vehicle RC",               wantsNumber: true },
+  { type: "puc",                  label: "PUC Certificate",                               wantsExpiry: true },
+  { type: "insurance",            label: "Insurance",                                      wantsExpiry: true },
+  { type: "fitness_certificate",  label: "Fitness Certificate",      wantsNumber: true,  wantsExpiry: true },
+  { type: "commercial_permit",    label: "Commercial Permit",        wantsNumber: true,  wantsExpiry: true },
+  { type: "road_tax",             label: "Road Tax",                 wantsNumber: true,  wantsExpiry: true },
+  { type: "photo",                label: "Profile Photo" },
 ];
 
 // Doc-type label lookup for the banner message
 const DOC_LABELS: Record<string, string> = {
-  aadhaar: "Aadhaar Card",
-  dl: "Driving Licence",
-  rc: "Vehicle RC",
-  puc: "PUC Certificate",
-  insurance: "Insurance",
-  photo: "Profile Photo",
+  aadhaar:             "Aadhaar Card",
+  dl:                  "Driving Licence",
+  rc:                  "Vehicle RC",
+  puc:                 "PUC Certificate",
+  insurance:           "Insurance",
+  fitness_certificate: "Fitness Certificate",
+  commercial_permit:   "Commercial Permit",
+  road_tax:            "Road Tax",
+  photo:               "Profile Photo",
 };
 
 function isDocExpired(doc: DocumentRow): boolean {
@@ -171,6 +177,12 @@ function DocCard({
             {existing?.expiry && (
               <div className={`text-xs ${docExpired ? "text-destructive" : "text-muted-foreground"}`}>
                 Expiry: {new Date(existing.expiry).toLocaleDateString()}
+              </div>
+            )}
+            {existing?.status === "rejected" && existing.rejectionNote && (
+              <div className="text-xs text-destructive mt-0.5 flex items-start gap-1">
+                <XCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                <span>Rejected: {existing.rejectionNote}</span>
               </div>
             )}
           </div>

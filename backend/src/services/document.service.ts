@@ -27,7 +27,7 @@ export async function deleteDriverDocument(id: string, driverId: string) {
   const doc = await prisma.driverDocument.findUnique({ where: { id } });
   if (!doc || doc.driverId !== driverId) throw new NotFoundError('Document not found');
   await prisma.driverDocument.delete({ where: { id } });
-  // Best-effort file cleanup
+  // Best-effort file cleanup (local dev only)
   const filename = path.basename(doc.fileUrl);
   fs.promises.unlink(path.join(UPLOAD_DIR, filename)).catch(() => undefined);
 }
@@ -42,10 +42,31 @@ export async function listDocumentsForVendor(driverId: string, vendorId?: string
 export async function setDocumentStatus(
   docId: string,
   status: 'pending' | 'verified' | 'rejected',
+  reviewedBy: string,
+  rejectionNote?: string,
   vendorId?: string,
 ) {
   const doc = await prisma.driverDocument.findUnique({ where: { id: docId }, include: { driver: true } });
   if (!doc) throw new NotFoundError('Document not found');
   if (vendorId && doc.driver.vendorId !== vendorId) throw new ForbiddenError('Access denied');
-  return prisma.driverDocument.update({ where: { id: docId }, data: { status } });
+
+  return prisma.driverDocument.update({
+    where: { id: docId },
+    data: {
+      status,
+      reviewedBy,
+      reviewedAt: new Date(),
+      rejectionNote: status === 'rejected' ? (rejectionNote ?? null) : null,
+    },
+  });
+}
+
+// Count pending documents per vendor — used for approval badge in vendor nav
+export async function countPendingDocsForVendor(vendorId: string): Promise<number> {
+  return prisma.driverDocument.count({
+    where: {
+      status: 'pending',
+      driver: { vendorId },
+    },
+  });
 }

@@ -449,6 +449,7 @@ export interface DriverProfile {
   id: string;
   fullName: string;
   phone: string;
+  altPhone?: string | null;
   status: string;
   kycStatus: string;
   isOnline: boolean;
@@ -456,6 +457,10 @@ export interface DriverProfile {
   vehicleType?: string | null;
   seats?: number | null;
   walletBalance?: number;
+  // Licence / ID details
+  dlNumber?: string | null;
+  dlExpiry?: string | null;
+  govIdNumber?: string | null;
   vendor?: { name: string; vendorCode?: string };
   vehicle?: { regNo: string; capacity: number; fuelType: string } | null;
   /** Document types that are verified but have expired. */
@@ -854,6 +859,9 @@ export interface DocumentRow {
   number: string | null;
   expiry: string | null;
   status: "pending" | "verified" | "rejected";
+  rejectionNote?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
   createdAt: string;
 }
 
@@ -893,9 +901,13 @@ export function useDriverDocsForVendor(driverId: string | null) {
 export function useSetDocumentStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ driverId, docId, status }: { driverId: string; docId: string; status: DocumentRow["status"] }) =>
-      api(`/drivers/${driverId}/documents/${docId}`, { method: "PATCH", body: JSON.stringify({ status }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["documents"] }),
+    mutationFn: ({ driverId, docId, status, rejectionNote }: { driverId: string; docId: string; status: DocumentRow["status"]; rejectionNote?: string }) =>
+      api(`/drivers/${driverId}/documents/${docId}`, { method: "PATCH", body: JSON.stringify({ status, rejectionNote }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["documents"] });
+      qc.invalidateQueries({ queryKey: ["drivers"] });
+      qc.invalidateQueries({ queryKey: ["pendingDocsCount"] });
+    },
   });
 }
 
@@ -1074,14 +1086,47 @@ export interface DriverRow {
   id: string;
   fullName: string;
   phone: string;
+  altPhone?: string | null;
   vendorId: string;
   status: "pending" | "active" | "blacklisted" | "expired";
-  kycStatus: "pending" | "approved" | "rejected";
+  kycStatus: "pending" | "approved" | "rejected" | "expired";
   isOnline: boolean;
   rating: number;
   createdAt: string;
+  // Licence / ID details
+  dlNumber?: string | null;
+  dlExpiry?: string | null;
+  govIdNumber?: string | null;
   vendor?: { name: string };
   vehicle?: { regNo: string; capacity: number; fuelType: string } | null;
+  expiredDocTypes?: string[];
+}
+
+export function useDriver(id: string | null) {
+  return useQuery({
+    queryKey: ["driver", id],
+    queryFn: () => api<DriverRow>(`/drivers/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function usePendingDocsCount() {
+  return useQuery({
+    queryKey: ["pendingDocsCount"],
+    queryFn: () => api<{ count: number }>("/drivers/pending-docs-count"),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useUpdateDriverProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { fullName?: string; altPhone?: string | null; dlNumber?: string | null; dlExpiry?: string | null; govIdNumber?: string | null }) =>
+      api("/driver/profile", { method: "PATCH", body: JSON.stringify(p) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", "me"] });
+    },
+  });
 }
 
 export function useDrivers(params?: { vendorId?: string }) {

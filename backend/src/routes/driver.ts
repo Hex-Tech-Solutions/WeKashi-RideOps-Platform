@@ -119,6 +119,35 @@ router.post('/vehicle', async (req: AuthRequest, res: Response, next: NextFuncti
   }
 });
 
+// PATCH /api/driver/profile — update personal / licence details
+router.patch('/profile', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const ProfileSchema = z.object({
+      fullName:    z.string().min(2).max(100).optional(),
+      altPhone:    z.string().min(10).max(15).optional().nullable(),
+      dlNumber:    z.string().max(20).optional().nullable(),
+      dlExpiry:    z.string().datetime().optional().nullable(),   // ISO date string
+      govIdNumber: z.string().max(30).optional().nullable(),
+    });
+    const body = ProfileSchema.parse(req.body);
+    const { prisma } = await import('../lib/prisma');
+    const d = await prisma.driver.update({
+      where: { id: req.driver!.id },
+      data: {
+        ...(body.fullName    !== undefined && { fullName: body.fullName }),
+        ...(body.altPhone    !== undefined && { altPhone: body.altPhone }),
+        ...(body.dlNumber    !== undefined && { dlNumber: body.dlNumber }),
+        ...(body.dlExpiry    !== undefined && { dlExpiry: body.dlExpiry ? new Date(body.dlExpiry) : null }),
+        ...(body.govIdNumber !== undefined && { govIdNumber: body.govIdNumber }),
+      },
+      select: { id: true, fullName: true, phone: true, altPhone: true, dlNumber: true, dlExpiry: true, govIdNumber: true },
+    });
+    res.json(d);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── KYC / vehicle documents ─────────────────────────────────────────────────
 
 // GET /api/driver/documents

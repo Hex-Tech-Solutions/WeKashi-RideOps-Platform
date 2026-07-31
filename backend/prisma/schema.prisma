@@ -52,6 +52,11 @@ model Driver {
   walletBalance   Float        @default(0) @map("wallet_balance")
   razorpayAccountId    String?  @map("razorpay_account_id")
   razorpayAccountVerified Boolean @default(false) @map("razorpay_account_verified")
+  // ── Additional personal / licence details ─────────────────────────────────
+  dlNumber        String?      @map("dl_number")       // Driving Licence number
+  dlExpiry        DateTime?    @map("dl_expiry")        // DL expiry date
+  govIdNumber     String?      @map("gov_id_number")    // Aadhaar / PAN / Voter ID
+  altPhone        String?      @map("alt_phone")        // Alternate phone number
   createdAt       DateTime     @default(now()) @map("created_at")
 
   vendor        Vendor         @relation(fields: [vendorId], references: [id])
@@ -70,18 +75,22 @@ model Driver {
 }
 
 model DriverDocument {
-  id        String    @id @default(uuid())
-  driverId  String    @map("driver_id")
-  type      String    // aadhaar | dl | rc | puc | insurance | photo
-  fileUrl   String    @map("file_url")
-  number    String?
-  expiry    DateTime?
-  status    String    @default("pending") // pending | verified | rejected
-  createdAt DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(uuid())
+  driverId       String    @map("driver_id")
+  type           String    // aadhaar | dl | rc | puc | insurance | photo | fitness_certificate | commercial_permit | road_tax
+  fileUrl        String    @map("file_url")
+  number         String?
+  expiry         DateTime?
+  status         String    @default("pending") // pending | verified | rejected
+  rejectionNote  String?   @map("rejection_note") // vendor/admin can leave a reason when rejecting
+  reviewedBy     String?   @map("reviewed_by")    // name of vendor/admin who reviewed
+  reviewedAt     DateTime? @map("reviewed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   driver Driver @relation(fields: [driverId], references: [id])
 
   @@index([driverId])
+  @@index([driverId, status])
   @@map("driver_documents")
 }
 

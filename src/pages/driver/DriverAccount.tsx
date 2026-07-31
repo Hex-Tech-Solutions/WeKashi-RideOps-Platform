@@ -10,12 +10,14 @@ import {
   useDriverMe, useSetDriverVehicle, useDriverWallet,
   useDriverBankDetail, useSaveDriverBankDetail,
   useOnboardingStatus, useStartOnboarding, useSubmitBankForOnboarding,
+  useUpdateDriverProfile,
 } from "@/lib/queries";
 import { VEHICLE_LABELS, type VehicleType } from "@/lib/pricing";
 import { useDriverAuth } from "./useDriverAuth";
 import {
   LogOut, Star, Building2, BadgeCheck, Phone, Car, Wallet,
   AlertTriangle, IndianRupee, CheckCircle2, Pencil, X, Check, Loader2,
+  CreditCard, FileText, Save,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -78,6 +80,9 @@ export default function DriverAccount() {
         </CardContent>
       </Card>
 
+      {/* Personal details (DL, Gov ID, alt phone) */}
+      <ProfileDetailsCard me={me} />
+
       {/* Vehicle */}
       <VehicleCard currentType={me?.vehicleType} currentSeats={me?.seats} />
 
@@ -95,6 +100,97 @@ export default function DriverAccount() {
         <LogOut className="h-4 w-4" /> Sign out
       </Button>
     </div>
+  );
+}
+
+// ─── Personal / Licence details card ─────────────────────────────────────────
+
+function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>["data"] }) {
+  const update = useUpdateDriverProfile();
+  const [fullName,    setFullName]    = useState(me?.fullName ?? "");
+  const [altPhone,    setAltPhone]    = useState(me?.altPhone ?? "");
+  const [dlNumber,    setDlNumber]    = useState(me?.dlNumber ?? "");
+  const [dlExpiry,    setDlExpiry]    = useState(
+    me?.dlExpiry ? new Date(me.dlExpiry).toISOString().split("T")[0] : ""
+  );
+  const [govIdNumber, setGovIdNumber] = useState(me?.govIdNumber ?? "");
+
+  useEffect(() => {
+    if (me) {
+      setFullName(me.fullName ?? "");
+      setAltPhone(me.altPhone ?? "");
+      setDlNumber(me.dlNumber ?? "");
+      setDlExpiry(me.dlExpiry ? new Date(me.dlExpiry).toISOString().split("T")[0] : "");
+      setGovIdNumber(me.govIdNumber ?? "");
+    }
+  }, [me]);
+
+  const submit = () => {
+    update.mutate(
+      {
+        fullName:    fullName.trim() || undefined,
+        altPhone:    altPhone.trim() || null,
+        dlNumber:    dlNumber.trim() || null,
+        dlExpiry:    dlExpiry ? new Date(dlExpiry).toISOString() : null,
+        govIdNumber: govIdNumber.trim() || null,
+      },
+      {
+        onSuccess: () => toast.success("Profile updated"),
+        onError: (e: any) => toast.error(e?.message ?? "Failed to save"),
+      }
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <FileText className="h-4 w-4 text-gold" /> Personal &amp; Licence Details
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Full Name</Label>
+          <Input value={fullName} onChange={(e) => setFullName(e.target.value)} className="h-9" placeholder="Full name" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Phone (primary)</Label>
+            <Input value={me?.phone ?? ""} disabled className="h-9 bg-muted/50 text-muted-foreground" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Alternate Phone</Label>
+            <Input value={altPhone} onChange={(e) => setAltPhone(e.target.value)} className="h-9" placeholder="+91 …" maxLength={15} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">DL Number</Label>
+            <Input value={dlNumber} onChange={(e) => setDlNumber(e.target.value.toUpperCase())} className="h-9 font-mono" placeholder="KA1920240001234" maxLength={20} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">DL Expiry Date</Label>
+            <Input type="date" value={dlExpiry} onChange={(e) => setDlExpiry(e.target.value)} className="h-9" />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Gov ID Number (Aadhaar / PAN / Voter ID)</Label>
+          <Input value={govIdNumber} onChange={(e) => setGovIdNumber(e.target.value)} className="h-9 font-mono" placeholder="XXXX XXXX XXXX" maxLength={30} />
+        </div>
+        <Button
+          className="w-full bg-foreground text-background hover:bg-foreground/90"
+          onClick={submit}
+          disabled={update.isPending}
+        >
+          {update.isPending
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+            : <><Save className="h-3.5 w-3.5" /> Save details</>}
+        </Button>
+        <p className="text-[11px] text-muted-foreground">
+          These details are shared with your vendor for KYC verification. Keep them accurate.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
