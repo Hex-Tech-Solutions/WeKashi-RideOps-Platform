@@ -1,111 +1,78 @@
 /**
- * Women's Safety Escort Policy — MoveInSync-style rules.
+ * Women's Safety Escort Policy
  *
- * LOGIN rides (individual pickups from homes):
- *   Only seq=0 (first pickup) is an isolation risk.
- *   After seq=0 boards, every subsequent pickup enters an already-occupied cab.
- *   Escort required when: no male exists to occupy seq=0.
- *   Night window: safe as long as a male is seq=0 — same rule applies.
+ * Escort is ONLY required when the ride is in the restricted time window
+ * (19:00–07:00) AND a female passenger cannot be buffered by a male.
  *
- * LOGOUT rides (all board at office, drop at individual homes):
- *   No "first pickup alone" problem — everyone boards together.
- *   Only the last drop is an isolation risk.
- *   Route optimizer puts females first → a male is always the last drop.
- *   Escort required when: all-female, lone female, or (night window + females > males).
+ * Outside the window → never an escort, regardless of gender mix.
  *
- * Time window: before 07:00 or after 19:00.
- * rideTime = null → window rules are skipped (supervisor hasn't set a time yet).
+ * LOGIN (individual pickups):
+ *   Reorder puts a male at seq=0. Safe as long as ≥1 male exists.
+ *   Escort required in window when: no male exists.
+ *
+ * LOGOUT (all board at office, drop individually):
+ *   Reorder drops females first, males last. Safe as long as ≥1 male exists.
+ *   Escort required in window when: no male exists.
+ *
+ * Time window: 19:00 (inclusive) to 07:00 (exclusive next day).
+ * rideTime = null → window check skipped (supervisor hasn't set a time yet).
  */
 
 export const ESCORT_WINDOW_START_HOUR = 7;   // before 07:00
 export const ESCORT_WINDOW_END_HOUR   = 19;  // at or after 19:00
 
 export interface EscortPassenger {
-  gender: 'M' | 'F' | string; // 'F'/'f'/'Female' all treated as female
+  gender: string;
 }
 
 export interface EscortPolicyInput {
   passengers: EscortPassenger[];
-  /** Scheduled ride time — used for time-window check. null = now. */
   rideTime: Date | null;
-  /** 'login' | 'logout' | 'scheduled' */
   rideType: string;
 }
 
 export interface EscortPolicyResult {
   required: boolean;
   reason?: string;
-  /** True when the route was (or should be) reordered and escort is NOT required. */
   reordered?: boolean;
 }
 
 function isFemale(gender: string): boolean {
-  const g = gender.trim().toLowerCase();
+  const g = (gender ?? '').trim().toLowerCase();
   return g === 'f' || g === 'female';
 }
 
 function inRestrictedWindow(rideTime: Date | null): boolean {
-  // If no ride time has been set, skip the window check — don't assume current time.
   if (!rideTime) return false;
   const h = rideTime.getHours() + rideTime.getMinutes() / 60;
   return h < ESCORT_WINDOW_START_HOUR || h >= ESCORT_WINDOW_END_HOUR;
 }
 
 export function evaluateEscortPolicy(input: EscortPolicyInput): EscortPolicyResult {
-  const { passengers, rideTime, rideType } = input;
+  const { passengers, rideTime } = input;
   if (!passengers.length) return { required: false };
 
-  const females = passengers.filter((p) => isFemale(p.gender));
-  const males   = passengers.filter((p) => !isFemale(p.gender));
+  const femaleCount = passengers.filter((p) => isFemale(p.gender)).length;
+  const maleCount   = passengers.length - femaleCount;
 
-  const femaleCount = females.length;
-  const maleCount   = males.length;
-
-  // No females at all → no escort
+  // No females → nothing to protect
   if (femaleCount === 0) return { required: false };
 
-  const isLogout = rideType === 'logout';
-
-  // ── LOGOUT: everyone boards together at the office ─────────────────────────
-  // There is no "first pickup alone" problem. The only danger is at drop-offs.
-  if (isLogout) {
-    // Case B: all female → no male buffer at any point
-    if (maleCount === 0) {
-      return { required: true, reason: 'All passengers are female — no male buffer available' };
-    }
-    // Case A: lone female → she will be the last one dropped, alone with driver
-    if (femaleCount === 1) {
-      return {
-        required: true,
-        reason: 'Only one female in the ride — she will be alone with the driver at the last drop-off',
-      };
-    }
-    // Last drop is female AND restricted window → reorder can fix first/middle but
-    // if femaleCount > maleCount a female must be at the last drop.
-    if (inRestrictedWindow(rideTime) && femaleCount > maleCount) {
-      return {
-        required: true,
-        reason: `Night window — ${femaleCount} female(s) but only ${maleCount} male(s); a female will be at the last drop-off`,
-      };
-    }
-    // Otherwise reorder handles it (put a male last)
-    return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
+  // Outside restricted window → no escort ever needed
+  if (!inRestrictedWindow(rideTime)) {
+    return { required: false, reordered: maleCount > 0 };
   }
 
-  // ── LOGIN: individual pickups — only seq=0 is an isolation risk ────────────
-  // After seq=0 boards, every subsequent pickup happens into an occupied cab.
-  // Escort needed only when no male exists to occupy seq=0.
+  // ── Inside restricted window (19:00–07:00) ────────────────────────────────
 
-  // Case A: lone female (total = 1)
-  if (femaleCount === 1 && maleCount === 0) {
-    return { required: true, reason: 'Single female passenger travelling alone with driver' };
-  }
-
-  // Case B: all female — no male can take seq=0
+  // No male → cannot buffer → escort required
   if (maleCount === 0) {
-    return { required: true, reason: 'All passengers are female — no male buffer available' };
+    const reason = femaleCount === 1
+      ? 'Single female travelling alone with driver during restricted hours (19:00–07:00)'
+      : 'All passengers are female — no male buffer during restricted hours (19:00–07:00)';
+    return { required: true, reason };
   }
 
-  // At least 1 male → he takes seq=0, all females board into an occupied cab → safe
-  return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
+  // ≥1 male → reorder handles it
+  return { required: false, reordered: true };
 }
