@@ -339,7 +339,17 @@ export default function RoutesPage() {
   };
 
   const escortNameMissing = escortPolicy.required && !escortName.trim();
-  const canNext = step === 1 ? selected.length > 0 : step === 2 ? displayKm != null : true;
+
+  // If any female is selected, a pickup time must be set before moving to Step 3.
+  // This prevents bypassing the time-window safety check by leaving times empty.
+  const hasFemaleSelected = selected.some((e) => e.gender === "F");
+  const timeRequiredButMissing = hasFemaleSelected && !plannedPickupTime && !Object.values(pickupTimes).some(Boolean);
+
+  const canNext = step === 1
+    ? selected.length > 0
+    : step === 2
+    ? displayKm != null && !timeRequiredButMissing
+    : true;
 
   return (
     <div>
@@ -492,23 +502,23 @@ export default function RoutesPage() {
               }
             />
 
-            {/* Shift/pickup time picker — here in Step 2 so the escort badge
-                updates in real-time as the supervisor sets the time */}
-            <div className="mt-4 rounded-md border px-3 py-2.5 space-y-2">
+            {/* Shift/pickup time picker — required when females are in the ride */}
+            <div className={`mt-4 rounded-md border px-3 py-2.5 space-y-2 ${timeRequiredButMissing ? "border-destructive/60 bg-destructive/5" : ""}`}>
               <div className="flex items-center gap-2 text-sm">
-                <Clock className="h-4 w-4 text-muted-foreground" />
+                <Clock className={`h-4 w-4 shrink-0 ${timeRequiredButMissing ? "text-destructive" : "text-muted-foreground"}`} />
                 <div className="flex-1">
-                  <div className="font-medium">Shift / pickup time</div>
+                  <div className={`font-medium ${timeRequiredButMissing ? "text-destructive" : ""}`}>
+                    Shift / pickup time
+                    {timeRequiredButMissing && <span className="ml-1 text-xs font-semibold uppercase tracking-wide">— required</span>}
+                  </div>
                   <div className="text-[11px] text-muted-foreground">
-                    Set the scheduled pickup time — women's safety window rules (before 07:00 or after 19:00) are checked based on this.
+                    {timeRequiredButMissing
+                      ? "Female employees are in this ride — a pickup time is required to check the 19:00–07:00 safety window."
+                      : "Set the scheduled pickup time — women's safety window rules (before 07:00 or after 19:00) are checked based on this."}
                   </div>
                 </div>
                 {plannedPickupTime && (
-                  <button
-                    type="button"
-                    onClick={() => setPlannedPickupTime("")}
-                    className="text-[11px] text-muted-foreground hover:text-destructive underline shrink-0"
-                  >
+                  <button type="button" onClick={() => setPlannedPickupTime("")} className="text-[11px] text-muted-foreground hover:text-destructive underline shrink-0">
                     Clear
                   </button>
                 )}
@@ -517,7 +527,11 @@ export default function RoutesPage() {
                 type="time"
                 value={plannedPickupTime}
                 onChange={(e) => setPlannedPickupTime(e.target.value)}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-gold"
+                className={`w-full h-9 rounded-md border bg-background px-3 text-sm font-mono focus:outline-none focus:ring-1 ${
+                  timeRequiredButMissing
+                    ? "border-destructive focus:ring-destructive"
+                    : "border-input focus:ring-gold"
+                }`}
               />
               {plannedPickupTime && inRestrictedWindow((() => {
                 const [hh, mm] = plannedPickupTime.split(":").map(Number);
@@ -712,7 +726,12 @@ export default function RoutesPage() {
         </div>
         {step < 3 ? (
           <Button onClick={() => setStep((s) => (s + 1) as 1 | 2 | 3)} disabled={!canNext} className="bg-foreground text-background hover:bg-foreground/90">
-            {step === 1 ? "Create group & view route" : "Continue"} <ArrowRight className="h-4 w-4" />
+            {step === 1
+              ? "Create group & view route"
+              : timeRequiredButMissing
+              ? "Set pickup time to continue"
+              : "Continue"
+            } <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
           <Button onClick={broadcast} disabled={createRide.isPending || price == null || escortNameMissing} className="bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">
