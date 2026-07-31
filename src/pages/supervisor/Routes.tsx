@@ -147,8 +147,12 @@ export default function RoutesPage() {
 
   const [vehicleType, setVehicleType] = useState<VehicleType>("suv");
   const allowedTypes = allowedVehicleTypes(selected.length);
-  const firstPickup = route.stops[0]?.point;
-  const { data: vehOpts } = useVehicleOptions(firstPickup?.lat, firstPickup?.lng, selected.length || undefined);
+  // For logout the driver picks everyone up at the OFFICE — search radius from office.
+  // For login the driver starts from the first employee's home.
+  const searchOrigin = type === "logout"
+    ? (officeOverride ?? activeOffice ?? (officeData?.officeLat != null ? { lat: officeData.officeLat, lng: officeData.officeLng! } : null))
+    : route.stops[0]?.point;
+  const { data: vehOpts } = useVehicleOptions(searchOrigin?.lat, searchOrigin?.lng, selected.length || undefined);
   const availLoaded = !!vehOpts;
   const availabilityFor = (t: VehicleType) => vehOpts?.options.find((o) => o.type === t)?.availableCount ?? 0;
   // Selectable = allowed by group size. Show all types regardless of availability
