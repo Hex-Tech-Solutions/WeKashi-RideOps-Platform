@@ -1,19 +1,19 @@
 /**
  * Women's Safety Escort Policy
  *
- * Escort is required when the ride is in the restricted window (19:00–07:00)
- * AND a female passenger will be alone with the driver at a dangerous position.
+ * Simple rule: escort required when ALL of these are true:
+ *   1. Ride time is in restricted window: 19:00–07:00
+ *   2. At least one female passenger is present
+ *   3. The final route has a female in a dangerous position:
+ *        LOGIN  → first stop is female (alone with driver before anyone boards)
+ *        LOGOUT → last stop is female (alone with driver after everyone exits)
  *
- * Dangerous positions:
- *   LOGIN  — seq=0 (first pickup, driver arrives alone)
- *   LOGOUT — last stop (last drop, everyone else has exited)
- *
- * The policy checks the ACTUAL final route order (after auto-reorder AND any
- * manual drag-reorder by the supervisor), not just passenger counts.
- * If orderedStops is not provided, falls back to count-based check.
+ * The auto-reorder in geo.ts tries to avoid dangerous positions.
+ * If the supervisor manually changes the route and puts a female at risk,
+ * the policy fires on that final order too.
  *
  * Outside 07:00–19:00 → never an escort.
- * rideTime = null      → window check skipped (time not set yet).
+ * rideTime = null      → window unknown, skip window check.
  */
 
 export const ESCORT_WINDOW_START_HOUR = 7;   // before 07:00
@@ -26,12 +26,11 @@ export interface EscortPassenger {
 export interface EscortPolicyResult {
   required: boolean;
   reason?: string;
-  reordered: boolean;
 }
 
-function isFemale(gender: string): boolean {
-  const g = (gender ?? '').trim().toLowerCase();
-  return g === 'f' || g === 'female';
+function isFemale(g: string): boolean {
+  const s = (g ?? '').trim().toLowerCase();
+  return s === 'f' || s === 'female';
 }
 
 export function inRestrictedWindow(rideTime: Date | null): boolean {
@@ -40,62 +39,47 @@ export function inRestrictedWindow(rideTime: Date | null): boolean {
   return h < ESCORT_WINDOW_START_HOUR || h >= ESCORT_WINDOW_END_HOUR;
 }
 
+/**
+ * @param orderedStops  Final route order (seq 0, 1, 2 …) as gender strings.
+ *                      Pass route.stops.map(s => s.gender) from geo.ts.
+ * @param allPassengers All selected passengers (used for count-based fallback
+ *                      when orderedStops is unavailable).
+ */
 export function evaluateEscortPolicy(
-  passengers: EscortPassenger[],
+  allPassengers: EscortPassenger[],
   rideTime: Date | null,
   rideType: string = 'login',
-  /** The actual ordered stops after reorder + any manual drag changes. */
-  orderedStops?: EscortPassenger[],
+  orderedStops: EscortPassenger[] = [],
 ): EscortPolicyResult {
-  if (!passengers.length) return { required: false, reordered: false };
+  if (!allPassengers.length) return { required: false };
 
-  const femaleCount = passengers.filter((p) => isFemale(p.gender)).length;
-  const maleCount   = passengers.length - femaleCount;
+  const hasFemale = allPassengers.some((p) => isFemale(p.gender));
+  if (!hasFemale) return { required: false };
 
-  // No females → nothing to protect
-  if (femaleCount === 0) return { required: false, reordered: false };
+  // Outside restricted window — never an escort
+  if (!inRestrictedWindow(rideTime)) return { required: false };
 
-  // Outside restricted window → no escort needed; route still reordered for good practice
-  if (!inRestrictedWindow(rideTime)) {
-    return { required: false, reordered: maleCount > 0 };
+  // ── In restricted window ──────────────────────────────────────────────────
+  const stops = orderedStops.length ? orderedStops : allPassengers;
+  const isLogin = rideType !== 'logout';
+  const first   = stops[0];
+  const last    = stops[stops.length - 1];
+
+  // Login: first stop female = alone with driver on arrival
+  if (isLogin && isFemale(first.gender)) {
+    return {
+      required: true,
+      reason: 'First pickup is female — she will be alone with the driver during restricted hours (19:00–07:00)',
+    };
   }
 
-  // ── Inside restricted window (19:00–07:00) ────────────────────────────────
-
-  // No male at all → cannot buffer → escort required regardless of order
-  if (maleCount === 0) {
-    const reason = femaleCount === 1
-      ? 'Single female travelling alone with driver during restricted hours (19:00–07:00)'
-      : 'All passengers are female — no male buffer during restricted hours (19:00–07:00)';
-    return { required: true, reordered: false, reason };
+  // Both login and logout: last stop female = alone with driver at the end
+  if (isFemale(last.gender)) {
+    return {
+      required: true,
+      reason: 'Last stop is female — she will be alone with the driver during restricted hours (19:00–07:00)',
+    };
   }
 
-  // ≥1 male exists — check the ACTUAL order if available
-  if (orderedStops && orderedStops.length > 0) {
-    const isLogin  = rideType !== 'logout';
-    const first = orderedStops[0];
-    const last  = orderedStops[orderedStops.length - 1];
-
-    if (isLogin && isFemale(first.gender)) {
-      return {
-        required: true,
-        reordered: false,
-        reason: 'First pickup is female — she will be alone with the driver before others board (restricted hours)',
-      };
-    }
-
-    if (isFemale(last.gender)) {
-      return {
-        required: true,
-        reordered: false,
-        reason: 'Last stop is female — she will be alone with the driver after others exit (restricted hours)',
-      };
-    }
-
-    // Route order is safe
-    return { required: false, reordered: true };
-  }
-
-  // No ordered stops provided — fall back to count-based: ≥1 male can buffer
-  return { required: false, reordered: true };
+  return { required: false };
 }

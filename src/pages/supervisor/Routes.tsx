@@ -15,7 +15,7 @@ import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFOR
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, Shield, UserCheck } from "lucide-react";
+import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck } from "lucide-react";
 import { GoogleRouteMap } from "@/components/GoogleRouteMap";
 import { SaveRouteDialog } from "@/components/SaveRouteDialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -430,10 +430,6 @@ export default function RoutesPage() {
                   <Badge variant="outline" className="border-destructive/40 bg-destructive/10 text-destructive gap-1">
                     <AlertTriangle className="h-3 w-3" /> Escort required
                   </Badge>
-                ) : escortPolicy.reordered ? (
-                  <Badge variant="outline" className="border-blue-400/40 bg-blue-50 text-blue-700 gap-1">
-                    <ShieldCheck className="h-3 w-3" /> Route reordered for women's safety
-                  </Badge>
                 ) : (
                   <Badge variant="outline" className="border-success/40 bg-success/10 text-success gap-1">
                     <ShieldCheck className="h-3 w-3" /> All female-safety rules satisfied
@@ -552,8 +548,6 @@ export default function RoutesPage() {
               <Row label="Safety" value={
                 escortPolicy.required
                   ? <span className="text-destructive flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Escort mandatory</span>
-                  : escortPolicy.reordered
-                  ? <span className="text-blue-600 flex items-center gap-1"><Shield className="h-3.5 w-3.5" /> Route reordered — no escort needed</span>
                   : <span className="text-success flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" /> All rules satisfied</span>
               } />
               {isAc && <Row label="AC surcharge" value={<span className="text-foreground">+₹{AC_SURCHARGE}</span>} />}
@@ -598,15 +592,6 @@ export default function RoutesPage() {
                 </div>
               )}
 
-              {escortPolicy.reordered && !escortPolicy.required && (
-                <div className="rounded-lg border border-blue-400/40 bg-blue-50 p-3 flex items-start gap-2">
-                  <Shield className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-                  <div className="text-xs text-blue-700">
-                    <div className="font-semibold">Route reordered for women's safety</div>
-                    <div className="mt-0.5">Female employees have been moved away from the first and last positions. No escort required.</div>
-                  </div>
-                </div>
-              )}
               <div>
                 <Label>Vehicle type</Label>
                 <div className="grid grid-cols-3 gap-2 mt-1">
