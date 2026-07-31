@@ -165,21 +165,31 @@ export default function RoutesPage() {
   const price = displayKm != null ? computeFare(displayKm, vehicleType, isAc) : null;
 
   // ── Escort policy ─────────────────────────────────────────────────────────
-  // Compute in real-time as employees are selected, time is set, OR the
-  // supervisor manually reorders stops. Uses the actual route order so a
-  // manually placed female-at-last position is caught correctly.
+  // Uses per-stop pickup times (set beside each employee in Step 2) to check
+  // the restricted window for each dangerous position.
+  // Falls back to the global plannedPickupTime if a stop has no individual time.
   const escortPolicy = useMemo(() => {
-    if (!selected.length) return { required: false, reordered: false } as const;
-    const rideTime = plannedPickupTime
+    if (!selected.length) return { required: false } as const;
+
+    // Global fallback time (shift time picker)
+    const fallback = plannedPickupTime
       ? (() => { const [hh, mm] = plannedPickupTime.split(":").map(Number); const d = new Date(); d.setHours(hh, mm, 0, 0); return d; })()
       : null;
+
+    // Per-stop times in current route order
+    const stopsWithTimes = route.stops.map((s) => ({
+      gender:   s.gender as string,
+      stopTime: pickupTimes[s.empId] ?? null,
+    }));
+
     return evaluateEscortPolicy(
       selected.map((e) => ({ gender: e.gender })),
-      rideTime,
+      fallback,
       type,
       route.stops.map((s) => ({ gender: s.gender })),
+      stopsWithTimes,
     );
-  }, [selected, plannedPickupTime, type, route.stops]);
+  }, [selected, plannedPickupTime, type, route.stops, pickupTimes]);
 
   // Effective capacity: when escort is required, subtract 1 extra seat (driver + escort).
   const effectiveCapFor = (n: number) => {

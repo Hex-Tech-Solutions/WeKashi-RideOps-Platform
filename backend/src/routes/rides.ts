@@ -145,6 +145,8 @@ export function createRidesRouter(io: IoServer): Router {
         // Preserve submitted order (not DB fetch order)
         const genderById = Object.fromEntries(employeeMap.map((e) => [e.id, e.gender]));
         const orderedGenders = body.employeeIds.map((id) => genderById[id] ?? 'M');
+        // Per-stop times in route order (from scheduledPickupTimes map)
+        const orderedTimes = body.employeeIds.map((id) => body.scheduledPickupTimes?.[id] ?? null);
 
         const { evaluateEscortPolicy } = await import('../lib/escortPolicy');
         const rideTime = body.plannedStartTime
@@ -157,6 +159,7 @@ export function createRidesRouter(io: IoServer): Router {
           rideTime,
           rideType: body.type,
           orderedGenders,
+          orderedTimes,
         });
 
         // Hard block: if escort is required but no name was provided
