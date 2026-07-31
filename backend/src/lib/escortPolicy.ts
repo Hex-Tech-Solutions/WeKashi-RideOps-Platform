@@ -1,26 +1,23 @@
 /**
  * Women's Safety Escort Policy
  *
- * Escort required only when ride time is in restricted window (19:00–07:00)
- * AND a female is in a dangerous position in the final route:
+ * Escort required when a female is in a dangerous position AND the stop time
+ * is in the restricted window (19:00–07:00).
  *
- *   LOGIN  → seq=0 (first pickup) is female.
- *            After seq=0 boards, every subsequent pickup enters an occupied cab — safe.
- *            Last login pickup is NOT dangerous.
+ * Dangerous positions:
+ *   LOGIN/SCHEDULED → seq=0 (first pickup): female alone with driver before others board.
+ *   LOGOUT          → last stop: female alone with driver after everyone else exits.
  *
- *   LOGOUT → last stop is female (last drop, alone with driver after others exit).
- *            First logout stop is NOT dangerous — everyone boards at the office together.
- *
- * orderedGenders + orderedTimes: genders and per-stop times in final route order.
- * Falls back to global rideTime if a stop has no individual time set.
+ * Time resolution (per dangerous stop):
+ *   1. Use the per-stop time if set (orderedTimes[index]).
+ *   2. Fall back to the global rideTime.
+ *   3. If NEITHER is set → assume worst case → require escort.
  */
 
 export const ESCORT_WINDOW_START_HOUR = 7;
 export const ESCORT_WINDOW_END_HOUR   = 19;
 
-export interface EscortPassenger {
-  gender: string;
-}
+export interface EscortPassenger { gender: string; }
 
 export interface EscortPolicyInput {
   passengers:      EscortPassenger[];
@@ -35,7 +32,7 @@ export interface EscortPolicyResult {
   reason?:  string;
 }
 
-function isFemale(g: string): boolean {
+export function isFemale(g: string): boolean {
   const s = (g ?? '').trim().toLowerCase();
   return s === 'f' || s === 'female';
 }
@@ -66,34 +63,34 @@ export function evaluateEscortPolicy(input: EscortPolicyInput): EscortPolicyResu
   const ordered = orderedGenders?.length ? orderedGenders : passengers.map((p) => p.gender);
   const times: (string | null)[] = orderedTimes?.length ? orderedTimes : ordered.map(() => null);
 
-  const isLogin = rideType !== 'logout';
+  const isLogout = rideType === 'logout';
 
-  if (isLogin) {
-    // LOGIN: only seq=0 is dangerous
-    const firstGender = ordered[0];
-    const firstTime   = times[0];
-    if (isFemale(firstGender)) {
-      const t = resolveTime(firstTime, rideTime);
-      if (inRestrictedWindow(t)) {
-        return {
-          required: true,
-          reason: `First pickup is female at ${firstTime ?? 'unknown time'} — alone with driver before others board (19:00–07:00)`,
-        };
-      }
+  const checkPosition = (gender: string, stopTime: string | null, label: string): EscortPolicyResult | null => {
+    if (!isFemale(gender)) return null;
+    const t = resolveTime(stopTime, rideTime);
+    if (!t) {
+      // Time completely unknown — assume worst case
+      return {
+        required: true,
+        reason: `${label} is female and no pickup time is set — cannot verify safety window. Set a stop time or add an escort.`,
+      };
     }
+    if (inRestrictedWindow(t)) {
+      return {
+        required: true,
+        reason: `${label} is female at ${stopTime ?? t.toTimeString().slice(0, 5)} — alone with driver during restricted hours (19:00–07:00)`,
+      };
+    }
+    return null;
+  };
+
+  if (isLogout) {
+    const result = checkPosition(ordered[ordered.length - 1], times[times.length - 1], 'Last drop');
+    if (result) return result;
   } else {
-    // LOGOUT: only last stop is dangerous
-    const lastGender = ordered[ordered.length - 1];
-    const lastTime   = times[times.length - 1];
-    if (isFemale(lastGender)) {
-      const t = resolveTime(lastTime, rideTime);
-      if (inRestrictedWindow(t)) {
-        return {
-          required: true,
-          reason: `Last drop is female at ${lastTime ?? 'unknown time'} — alone with driver after others exit (19:00–07:00)`,
-        };
-      }
-    }
+    // login or scheduled
+    const result = checkPosition(ordered[0], times[0], 'First pickup');
+    if (result) return result;
   }
 
   return { required: false };
