@@ -1,19 +1,19 @@
 /**
  * Women's Safety Escort Policy
  *
- * Simple rule: escort required when ALL of these are true:
- *   1. Ride time is in restricted window: 19:00–07:00
- *   2. At least one female passenger is present
- *   3. The final route has a female in a dangerous position:
- *        LOGIN  → first stop is female (alone with driver before anyone boards)
- *        LOGOUT → last stop is female (alone with driver after everyone exits)
+ * Escort required only when ride time is in restricted window (19:00–07:00)
+ * AND a female is in a dangerous position in the final route:
  *
- * The auto-reorder in geo.ts tries to avoid dangerous positions.
- * If the supervisor manually changes the route and puts a female at risk,
- * the policy fires on that final order too.
+ *   LOGIN  → seq=0 (first pickup) is female.
+ *            After seq=0 boards, every subsequent pickup enters an occupied cab — safe.
+ *            Last login pickup is NOT dangerous.
  *
- * Outside 07:00–19:00 → never an escort.
- * rideTime = null      → window unknown, skip window check.
+ *   LOGOUT → last stop is female (last drop, alone with driver after others exit).
+ *            First logout stop is NOT dangerous — everyone boards at the office together.
+ *
+ * Time checked per stop using the supervisor's per-stop pickup time.
+ * Falls back to the global shift time if a stop has no individual time set.
+ * If neither is set, the window check is skipped (no escort triggered).
  */
 
 export const ESCORT_WINDOW_START_HOUR = 7;   // before 07:00
@@ -21,6 +21,11 @@ export const ESCORT_WINDOW_END_HOUR   = 19;  // at or after 19:00
 
 export interface EscortPassenger {
   gender: string;
+}
+
+export interface EscortStop {
+  gender: string;
+  stopTime: string | null; // HH:MM or null
 }
 
 export interface EscortPolicyResult {
@@ -39,17 +44,16 @@ export function inRestrictedWindow(rideTime: Date | null): boolean {
   return h < ESCORT_WINDOW_START_HOUR || h >= ESCORT_WINDOW_END_HOUR;
 }
 
-export interface EscortStop {
-  gender: string;
-  /** HH:MM pickup/drop time for this specific stop. null = not set. */
-  stopTime: string | null;
+function resolveTime(stopTime: string | null, fallback: Date | null): Date | null {
+  if (stopTime) {
+    const [hh, mm] = stopTime.split(':').map(Number);
+    const d = new Date();
+    d.setHours(hh, mm, 0, 0);
+    return d;
+  }
+  return fallback;
 }
 
-/**
- * @param stops         Final route order with gender + per-stop time.
- * @param fallbackTime  Global shift/pickup time used when a stop has no individual time.
- * @param rideType      'login' | 'logout'
- */
 export function evaluateEscortPolicy(
   allPassengers: EscortPassenger[],
   fallbackTime: Date | null,
@@ -62,50 +66,39 @@ export function evaluateEscortPolicy(
   const hasFemale = allPassengers.some((p) => isFemale(p.gender));
   if (!hasFemale) return { required: false };
 
-  // ── Determine the effective time for each dangerous position ─────────────
-  // Use per-stop time when available, fall back to global time.
-  const stops = stopsWithTimes.length ? stopsWithTimes : orderedStops.map((s) => ({ gender: s.gender, stopTime: null }));
+  const stops: EscortStop[] = stopsWithTimes.length
+    ? stopsWithTimes
+    : orderedStops.map((s) => ({ gender: s.gender, stopTime: null }));
+
+  if (!stops.length) return { required: false };
+
   const isLogin = rideType !== 'logout';
-  const first   = stops[0];
-  const last    = stops[stops.length - 1];
 
-  function stopRideTime(stop: EscortStop): Date | null {
-    if (stop.stopTime) {
-      const [hh, mm] = stop.stopTime.split(':').map(Number);
-      const d = new Date();
-      d.setHours(hh, mm, 0, 0);
-      return d;
+  if (isLogin) {
+    // LOGIN: only seq=0 is dangerous
+    const first = stops[0];
+    if (isFemale(first.gender)) {
+      const t = resolveTime(first.stopTime, fallbackTime);
+      if (inRestrictedWindow(t)) {
+        return {
+          required: true,
+          reason: `First pickup is female at ${first.stopTime ?? (t ? t.toTimeString().slice(0,5) : 'unknown')} — she will be alone with the driver before others board (19:00–07:00)`,
+        };
+      }
     }
-    return fallbackTime;
-  }
-
-  // Login: first stop is dangerous
-  if (isLogin && isFemale(first.gender)) {
-    const t = stopRideTime(first);
-    if (inRestrictedWindow(t)) {
-      return {
-        required: true,
-        reason: `First pickup (${first.gender === 'F' || first.gender === 'f' ? 'female' : first.gender}) is at ${first.stopTime ?? 'unknown time'} — she will be alone with the driver during restricted hours (19:00–07:00)`,
-      };
-    }
-  }
-
-  // Both login and logout: last stop is dangerous
-  if (isFemale(last.gender)) {
-    const t = stopRideTime(last);
-    if (inRestrictedWindow(t)) {
-      return {
-        required: true,
-        reason: `Last stop (female) is at ${last.stopTime ?? 'unknown time'} — she will be alone with the driver during restricted hours (19:00–07:00)`,
-      };
+  } else {
+    // LOGOUT: only last stop is dangerous
+    const last = stops[stops.length - 1];
+    if (isFemale(last.gender)) {
+      const t = resolveTime(last.stopTime, fallbackTime);
+      if (inRestrictedWindow(t)) {
+        return {
+          required: true,
+          reason: `Last drop is female at ${last.stopTime ?? (t ? t.toTimeString().slice(0,5) : 'unknown')} — she will be alone with the driver after others exit (19:00–07:00)`,
+        };
+      }
     }
   }
-
-  // Also check: if any female stop has a restricted-window time and she'd be
-  // alone (no other passenger in the cab at that moment).
-  // For login: first stop only (seq=0).
-  // For logout: last stop only (everyone else has exited).
-  // Both already covered above.
 
   return { required: false };
 }
