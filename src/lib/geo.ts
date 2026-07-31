@@ -75,20 +75,31 @@ function nearestNeighborOrder(start: GeoPoint, stops: RouteStop[]): RouteStop[] 
   return ordered;
 }
 
-// Female safety check — flags if a female is exposed at the route ends.
-// For login: both first and last position are checked.
-// For logout: only last position matters (all board at office together).
+// Validates the final ordered stop list for obvious safety violations.
+// This is used ONLY to flag display issues — the escort decision is made by
+// escortPolicy.ts, which is the single source of truth.
+// Returns ok=false only when the reorder could not fix a position (e.g. all-female).
 export function checkSafety(stops: RouteStop[], type: "login" | "logout" = "login"): { ok: boolean; issue?: string } {
-  if (stops.length <= 1) return { ok: true };
-  const hasMale = stops.some((s) => s.gender === "M");
+  if (!stops.length) return { ok: true };
+
+  const hasMale   = stops.some((s) => s.gender === "M");
+  const hasFemale = stops.some((s) => s.gender === "F");
+
+  // Only-female or only-male — escortPolicy handles this; route order is fine
+  if (!hasMale || !hasFemale) return { ok: true };
+
   const first = stops[0];
-  const last = stops[stops.length - 1];
-  if (type === "login" && hasMale && first.gender === "F") {
-    return { ok: false, issue: `${first.name} (F) is the first pickup — she will be alone with the driver before others board` };
+  const last  = stops[stops.length - 1];
+
+  // For login: first pickup should not be female after reorder
+  if (type === "login" && first.gender === "F") {
+    return { ok: false, issue: `${first.name} is first pickup — route reorder needed` };
   }
-  if (hasMale && last.gender === "F") {
-    return { ok: false, issue: `${last.name} (F) should not be the last stop — female-safety` };
+  // Last stop should not be female after reorder (both login and logout)
+  if (last.gender === "F") {
+    return { ok: false, issue: `${last.name} is last stop — route reorder needed` };
   }
+
   return { ok: true };
 }
 
@@ -110,34 +121,46 @@ export function optimizeStops(
   drop: { name: string; point: GeoPoint },
   type: "login" | "logout" = "login",
 ): RouteResult {
-  // Login collects employees toward the office. Logout starts from the office and drops at homes.
+  // ── Step 1: nearest-neighbour ordering ───────────────────────────────────
+  // Login: collect from homes toward the office → reverse so we start at the
+  // furthest-from-office stop and end nearest.
+  // Logout: start from office and drop at homes in nearest-first order.
   let ordered = nearestNeighborOrder(drop.point, stops);
   if (type === "login") ordered = ordered.reverse();
 
-  const hasMale = ordered.some((s) => s.gender === "M");
+  const hasMale   = ordered.some((s) => s.gender === "M");
+  const hasFemale = ordered.some((s) => s.gender === "F");
 
-  // ── Female-safety: fix LAST position ─────────────────────────────────────
-  // A female must not be the last in the sequence — she would be alone with
-  // the driver after all other passengers have exited.
-  const lastIdx = ordered.length - 1;
-  if (ordered.length >= 2 && hasMale && ordered[lastIdx].gender === "F") {
-    for (let i = lastIdx - 1; i >= 0; i--) {
-      if (ordered[i].gender === "M") {
-        [ordered[lastIdx], ordered[i]] = [ordered[i], ordered[lastIdx]];
-        break;
+  // ── Step 2: female-safety reordering ─────────────────────────────────────
+  // Only possible when there is at least one male to act as buffer.
+  if (hasMale && hasFemale) {
+    if (type === "logout") {
+      // LOGOUT: all board at the office together.
+      // Drop females FIRST (early in sequence) so a male is always the last
+      // passenger exiting — a female is never alone with the driver at the end.
+      // Strategy: stable partition — females before males, preserving
+      //           nearest-neighbour order within each group.
+      const females = ordered.filter((s) => s.gender === "F");
+      const males   = ordered.filter((s) => s.gender === "M");
+      ordered = [...females, ...males];
+    } else {
+      // LOGIN: pickups are individual — protect both ends.
+      // First position: must not be female (alone with driver before others board).
+      if (ordered[0].gender === "F") {
+        const firstMaleIdx = ordered.findIndex((s) => s.gender === "M");
+        if (firstMaleIdx > 0) {
+          [ordered[0], ordered[firstMaleIdx]] = [ordered[firstMaleIdx], ordered[0]];
+        }
       }
-    }
-  }
-
-  // ── Female-safety: fix FIRST position (login only) ───────────────────────
-  // For login, a female at seq=0 would be alone with the driver before anyone
-  // else boards. For logout everyone boards at the office together, so there is
-  // no "first pickup alone" exposure — skip this fix for logout rides.
-  if (type === "login" && ordered.length >= 2 && hasMale && ordered[0].gender === "F") {
-    for (let i = 1; i < ordered.length; i++) {
-      if (ordered[i].gender === "M") {
-        [ordered[0], ordered[i]] = [ordered[i], ordered[0]];
-        break;
+      // Last position: must not be female (alone with driver after others exit).
+      const lastIdx = ordered.length - 1;
+      if (ordered[lastIdx].gender === "F") {
+        for (let i = lastIdx - 1; i >= 0; i--) {
+          if (ordered[i].gender === "M") {
+            [ordered[lastIdx], ordered[i]] = [ordered[i], ordered[lastIdx]];
+            break;
+          }
+        }
       }
     }
   }

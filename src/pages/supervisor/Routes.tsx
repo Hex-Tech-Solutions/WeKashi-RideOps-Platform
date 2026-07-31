@@ -423,12 +423,17 @@ export default function RoutesPage() {
             <CardTitle className="text-base flex items-center justify-between">
               Optimized route preview
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className={route.safetyOk ? "border-success/40 bg-success/10 text-success gap-1" : "border-warning/40 bg-warning/10 text-warning gap-1"}>
-                  <ShieldCheck className="h-3 w-3" /> {route.safetyOk ? "Safety rules applied" : "Review needed"}
-                </Badge>
-                {escortPolicy.reordered && !escortPolicy.required && (
-                  <Badge variant="outline" className="border-blue-400/40 bg-blue-50 text-blue-700 gap-1 text-[10px]">
-                    <Shield className="h-3 w-3" /> Route reordered for women's safety
+                {escortPolicy.required ? (
+                  <Badge variant="outline" className="border-destructive/40 bg-destructive/10 text-destructive gap-1">
+                    <AlertTriangle className="h-3 w-3" /> Escort required
+                  </Badge>
+                ) : escortPolicy.reordered ? (
+                  <Badge variant="outline" className="border-blue-400/40 bg-blue-50 text-blue-700 gap-1">
+                    <ShieldCheck className="h-3 w-3" /> Route reordered for women's safety
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="border-success/40 bg-success/10 text-success gap-1">
+                    <ShieldCheck className="h-3 w-3" /> All female-safety rules satisfied
                   </Badge>
                 )}
                 {selected.length > 0 && (
@@ -500,9 +505,7 @@ export default function RoutesPage() {
                   ? <span className="text-destructive flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Escort mandatory</span>
                   : escortPolicy.reordered
                   ? <span className="text-blue-600 flex items-center gap-1"><Shield className="h-3.5 w-3.5" /> Route reordered — no escort needed</span>
-                  : route.safetyOk
-                  ? <span className="text-success">All rules OK</span>
-                  : <span className="text-warning">{route.safetyIssue}</span>
+                  : <span className="text-success flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" /> All rules satisfied</span>
               } />
               {isAc && <Row label="AC surcharge" value={<span className="text-foreground">+₹{AC_SURCHARGE}</span>} />}
               <Row label="Platform fee" value={<span className="text-muted-foreground">+₹{PLATFORM_FEE}</span>} />
