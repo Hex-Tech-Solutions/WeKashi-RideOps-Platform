@@ -315,6 +315,9 @@ export interface RideRow {
   price: number | null;
   platformFee?: number | null;
   totalAmount?: number | null;
+  escortRequired?: boolean;
+  escortCharge?: number | null;
+  escortName?: string | null;
   paymentStatus?: string | null;
   distanceKm: number | null;
   paxCount: number;

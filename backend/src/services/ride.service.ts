@@ -690,6 +690,10 @@ async function getRidePublicPayload(rideId: string) {
       drop_address: string;
       pax_count: number;
       capacity: number;
+      price: number | null;
+      distance_km: number | null;
+      escort_required: boolean;
+      escort_charge: number | null;
       scheduled_for: Date | null;
       broadcast_expires_at: Date | null;
       pickup_lat: number;
@@ -698,6 +702,7 @@ async function getRidePublicPayload(rideId: string) {
   >`
     SELECT
       id, type, status, pickup_address, drop_address, pax_count, capacity,
+      price, distance_km, escort_required, escort_charge,
       scheduled_for, broadcast_expires_at,
       ST_Y(pickup_point::geometry) as pickup_lat,
       ST_X(pickup_point::geometry) as pickup_lng

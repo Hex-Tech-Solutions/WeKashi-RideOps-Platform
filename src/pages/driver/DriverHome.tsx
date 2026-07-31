@@ -9,7 +9,7 @@ import {
   useRide, useMarkDriverArrived,
   type RideRow,
 } from "@/lib/queries";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight } from "lucide-react";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import { getDevicePosition, watchDevicePosition } from "@/lib/deviceLocation";
@@ -231,12 +231,23 @@ export default function DriverHome() {
 }
 
 function RideSummary({ ride }: { ride: RideRow }) {
+  // Driver earnings = fare + escort charge (escort charge belongs to driver)
+  const driverEarnings = (ride.price ?? 0) + (ride.escortCharge ?? 0);
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      {/* Top badges row */}
+      <div className="flex items-center gap-2 flex-wrap">
         <Badge variant="outline" className="capitalize">{ride.type}</Badge>
         <Badge variant="outline" className="capitalize">{ride.status.replace("_", " ")}</Badge>
+        {ride.escortRequired && (
+          <Badge className="bg-amber-500 text-white gap-1 text-[11px]">
+            <Shield className="h-3 w-3" /> Escort Ride
+          </Badge>
+        )}
       </div>
+
+      {/* Route */}
       <div className="flex items-start gap-2 text-sm">
         <MapPin className="h-4 w-4 text-gold mt-0.5 shrink-0" />
         <div>
@@ -244,13 +255,27 @@ function RideSummary({ ride }: { ride: RideRow }) {
           <div className="text-muted-foreground text-xs">→ {ride.dropAddress}</div>
         </div>
       </div>
+
+      {/* Stats row */}
       <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
         <span className="flex items-center gap-1 font-medium text-foreground bg-gold/10 rounded px-1.5 py-0.5">
-          <Users className="h-3.5 w-3.5" /> {ride.paxCount} passenger{ride.paxCount === 1 ? "" : "s"}
+          <Users className="h-3.5 w-3.5" />
+          {ride.paxCount} passenger{ride.paxCount === 1 ? "" : "s"}
+          {ride.escortRequired && " + escort"}
         </span>
         {ride.capacity != null && <span>needs {ride.capacity}-seater</span>}
         {ride.distanceKm != null && <span>· {ride.distanceKm} km</span>}
-        {ride.price != null && <span className="flex items-center gap-0.5 font-semibold text-foreground ml-auto"><IndianRupee className="h-3 w-3" />{ride.price}</span>}
+
+        {/* Earnings — always show total including escort */}
+        {ride.price != null && (
+          <span className="flex items-center gap-0.5 font-semibold text-foreground ml-auto">
+            <IndianRupee className="h-3 w-3" />
+            {driverEarnings}
+            {ride.escortRequired && ride.escortCharge != null && (
+              <span className="text-amber-600 text-[10px] ml-0.5">(+₹{ride.escortCharge} escort)</span>
+            )}
+          </span>
+        )}
       </div>
     </div>
   );
