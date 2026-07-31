@@ -174,8 +174,9 @@ export default function RoutesPage() {
     return evaluateEscortPolicy(
       selected.map((e) => ({ gender: e.gender })),
       rideTime,
+      type,
     );
-  }, [selected, plannedPickupTime]);
+  }, [selected, plannedPickupTime, type]);
 
   // Effective capacity: when escort is required, subtract 1 extra seat (driver + escort).
   const effectiveCapFor = (n: number) => {

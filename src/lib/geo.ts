@@ -75,14 +75,15 @@ function nearestNeighborOrder(start: GeoPoint, stops: RouteStop[]): RouteStop[] 
   return ordered;
 }
 
-// Female safety: no lone female at the very first or very last pickup position.
-// (The drop is the office, not a pickup, so "last" means last pickup before office.)
-export function checkSafety(stops: RouteStop[]): { ok: boolean; issue?: string } {
+// Female safety check — flags if a female is exposed at the route ends.
+// For login: both first and last position are checked.
+// For logout: only last position matters (all board at office together).
+export function checkSafety(stops: RouteStop[], type: "login" | "logout" = "login"): { ok: boolean; issue?: string } {
   if (stops.length <= 1) return { ok: true };
   const hasMale = stops.some((s) => s.gender === "M");
   const first = stops[0];
   const last = stops[stops.length - 1];
-  if (hasMale && first.gender === "F") {
+  if (type === "login" && hasMale && first.gender === "F") {
     return { ok: false, issue: `${first.name} (F) is the first pickup — she will be alone with the driver before others board` };
   }
   if (hasMale && last.gender === "F") {
@@ -128,10 +129,11 @@ export function optimizeStops(
     }
   }
 
-  // ── Female-safety: fix FIRST position ────────────────────────────────────
-  // A female must not be seq=0 (first pickup) — she would be alone with the
-  // driver before any other passengers board.
-  if (ordered.length >= 2 && hasMale && ordered[0].gender === "F") {
+  // ── Female-safety: fix FIRST position (login only) ───────────────────────
+  // For login, a female at seq=0 would be alone with the driver before anyone
+  // else boards. For logout everyone boards at the office together, so there is
+  // no "first pickup alone" exposure — skip this fix for logout rides.
+  if (type === "login" && ordered.length >= 2 && hasMale && ordered[0].gender === "F") {
     for (let i = 1; i < ordered.length; i++) {
       if (ordered[i].gender === "M") {
         [ordered[0], ordered[i]] = [ordered[i], ordered[0]];
@@ -140,7 +142,7 @@ export function optimizeStops(
     }
   }
 
-  return buildResult(ordered, drop);
+  return buildResult(ordered, drop, type);
 }
 
 // Build a GeoPoint from raw coordinates (x/y only used for the demo SVG, so approximate).
@@ -148,14 +150,14 @@ export function coordPoint(lat: number, lng: number): GeoPoint {
   return { lat, lng, x: 400, y: 200 };
 }
 
-export function buildResult(ordered: RouteStop[], drop: { name: string; point: GeoPoint }): RouteResult {
+export function buildResult(ordered: RouteStop[], drop: { name: string; point: GeoPoint }, type: "login" | "logout" = "login"): RouteResult {
   let totalKm = 0;
   for (let i = 0; i < ordered.length - 1; i++) {
     totalKm += distanceKm(ordered[i].point, ordered[i + 1].point);
   }
   if (ordered.length) totalKm += distanceKm(ordered[ordered.length - 1].point, drop.point);
   const etaMin = Math.round(totalKm * 3 + ordered.length * 2.5);
-  const safety = checkSafety(ordered);
+  const safety = checkSafety(ordered, type);
   return {
     stops: ordered,
     drop,

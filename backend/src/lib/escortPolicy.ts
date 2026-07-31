@@ -70,51 +70,65 @@ export function evaluateEscortPolicy(input: EscortPolicyInput): EscortPolicyResu
   // No females at all → no escort
   if (femaleCount === 0) return { required: false };
 
-  // ── Case A: lone female (any time) ─────────────────────────────────────────
-  // With only one female, she will be alone with the driver at first pickup
-  // (before anyone else boards) or after all others exit. Reordering cannot fix this.
+  const isLogout = rideType === 'logout';
+
+  // ── LOGOUT: everyone boards together at the office ─────────────────────────
+  // There is no "first pickup alone" problem. The only danger is at drop-offs.
+  if (isLogout) {
+    // Case B: all female → no male buffer at any point
+    if (maleCount === 0) {
+      return { required: true, reason: 'All passengers are female — no male buffer available' };
+    }
+    // Case A: lone female → she will be the last one dropped, alone with driver
+    if (femaleCount === 1) {
+      return {
+        required: true,
+        reason: 'Only one female in the ride — she will be alone with the driver at the last drop-off',
+      };
+    }
+    // Last drop is female AND restricted window → reorder can fix first/middle but
+    // if femaleCount > maleCount a female must be at the last drop.
+    if (inRestrictedWindow(rideTime) && femaleCount > maleCount) {
+      return {
+        required: true,
+        reason: `Night window — ${femaleCount} female(s) but only ${maleCount} male(s); a female will be at the last drop-off`,
+      };
+    }
+    // Otherwise reorder handles it (put a male last)
+    return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
+  }
+
+  // ── LOGIN: pickups are individual — both first and last stop are exposed ────
+
+  // Case A: lone female (any time)
   if (femaleCount === 1 && total === 1) {
     return { required: true, reason: 'Single female passenger travelling alone with driver' };
   }
 
   if (femaleCount === 1 && maleCount >= 1) {
-    // She will be alone with driver at first pickup (before seq-1 boards)
-    // AND potentially at the last drop (after seq-last-male exits).
-    // Even with perfect reordering she is briefly alone at both ends.
     return {
       required: true,
       reason: 'Only one female in the ride — she will be alone with the driver during first pickup and last drop',
     };
   }
 
-  // ── Case B: all female ─────────────────────────────────────────────────────
+  // Case B: all female
   if (maleCount === 0) {
     return { required: true, reason: 'All passengers are female — no male buffer available' };
   }
 
-  // ── Case C: restricted time window ─────────────────────────────────────────
+  // Case C: restricted time window
   if (inRestrictedWindow(rideTime)) {
-    // Check if reordering can guarantee no female is ever alone with the driver.
-    // Reordering CAN fix it when:
-    //   - There are ≥ 2 females spread through the route with males between them.
-    // Reordering CANNOT fully fix it when:
-    //   - There are females at BOTH ends of the route (first pickup AND last drop)
-    //     and no males to occupy those positions.
-    //   - i.e. femaleCount > maleCount (more females than males means a female
-    //     must occupy an "exposed" end position).
     const canReorderSolveIt = femaleCount <= maleCount;
-
     if (!canReorderSolveIt) {
       return {
         required: true,
         reason: `Night/early window (before 07:00 or after 19:00) — ${femaleCount} female(s) but only ${maleCount} male(s); cannot avoid lone female at route ends`,
       };
     }
-
-    // Reorder solves it — note this for the UI ("Route reordered for safety")
     return { required: false, reordered: true };
   }
 
-  // ── Day-time, multiple genders, reorder handles it ────────────────────────
+  // Day-time, multiple genders, reorder handles it
   return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
 }

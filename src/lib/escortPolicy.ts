@@ -42,6 +42,7 @@ export function inRestrictedWindow(rideTime: Date | null): boolean {
 export function evaluateEscortPolicy(
   passengers: EscortPassenger[],
   rideTime: Date | null,
+  rideType: string = 'login',
 ): EscortPolicyResult {
   if (!passengers.length) return { required: false, reordered: false };
 
@@ -49,6 +50,36 @@ export function evaluateEscortPolicy(
   const maleCount   = passengers.length - femaleCount;
 
   if (femaleCount === 0) return { required: false, reordered: false };
+
+  const isLogout = rideType === 'logout';
+
+  // ── LOGOUT: everyone boards at the office together ─────────────────────────
+  // No "first pickup alone" problem. Risk is only at individual drop-offs.
+  if (isLogout) {
+    // Case B: all female
+    if (maleCount === 0) {
+      return { required: true, reordered: false, reason: 'All passengers are female — no male buffer available' };
+    }
+    // Case A: lone female → will be last drop, alone with driver
+    if (femaleCount === 1) {
+      return {
+        required: true,
+        reordered: false,
+        reason: 'Only one female in the ride — she will be alone with the driver at the last drop-off',
+      };
+    }
+    // Night window + more females than males → a female must be at last drop
+    if (inRestrictedWindow(rideTime) && femaleCount > maleCount) {
+      return {
+        required: true,
+        reordered: false,
+        reason: `Night window — ${femaleCount} female(s) but only ${maleCount} male(s); a female will be at the last drop-off`,
+      };
+    }
+    return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
+  }
+
+  // ── LOGIN: individual pickups — first and last stop are both exposed ────────
 
   // Case A: lone female
   if (femaleCount === 1) {
@@ -63,11 +94,7 @@ export function evaluateEscortPolicy(
 
   // Case B: all female
   if (maleCount === 0) {
-    return {
-      required: true,
-      reordered: false,
-      reason: 'All passengers are female — no male buffer available',
-    };
+    return { required: true, reordered: false, reason: 'All passengers are female — no male buffer available' };
   }
 
   // Case C: restricted window
