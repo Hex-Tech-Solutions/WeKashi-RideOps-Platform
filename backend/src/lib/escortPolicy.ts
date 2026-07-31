@@ -1,26 +1,20 @@
 /**
  * Women's Safety Escort Policy — MoveInSync-style rules.
  *
- * STEP 1 — Auto-reorder (called before this function, in route optimisation):
- *   The route is reordered so a female is never:
- *     - seq 0  (first pickup — alone with driver before anyone boards)
- *     - last   (last pickup/drop — alone with driver after everyone exits)
- *   If reordering solves the isolation, no escort is needed.
+ * LOGIN rides (individual pickups from homes):
+ *   Only seq=0 (first pickup) is an isolation risk.
+ *   After seq=0 boards, every subsequent pickup enters an already-occupied cab.
+ *   Escort required when: no male exists to occupy seq=0.
+ *   Night window: safe as long as a male is seq=0 — same rule applies.
  *
- * STEP 2 — Escort required (cannot be solved by reordering):
- *   Case A: Only ONE female in the ride → she will always be alone with the
- *           driver at SOME point regardless of order.
- *   Case B: ALL passengers are female → no male buffer exists.
- *   Case C: Restricted time window (before 07:00 or after 19:00) AND at least
- *           one female exists AND reordering cannot guarantee she is never
- *           adjacent-only-with-driver (e.g. lone female after all males drop).
+ * LOGOUT rides (all board at office, drop at individual homes):
+ *   No "first pickup alone" problem — everyone boards together.
+ *   Only the last drop is an isolation risk.
+ *   Route optimizer puts females first → a male is always the last drop.
+ *   Escort required when: all-female, lone female, or (night window + females > males).
  *
- * The function returns:
- *   { required: false }                        — no escort needed
- *   { required: true, reason: string }         — escort mandatory
- *
- * Both backend (Node) and frontend (browser) import this file — keep it
- * dependency-free (no prisma, no express).
+ * Time window: before 07:00 or after 19:00.
+ * rideTime = null → window rules are skipped (supervisor hasn't set a time yet).
  */
 
 export const ESCORT_WINDOW_START_HOUR = 7;   // before 07:00
@@ -66,7 +60,6 @@ export function evaluateEscortPolicy(input: EscortPolicyInput): EscortPolicyResu
 
   const femaleCount = females.length;
   const maleCount   = males.length;
-  const total       = passengers.length;
 
   // No females at all → no escort
   if (femaleCount === 0) return { required: false };
@@ -101,7 +94,7 @@ export function evaluateEscortPolicy(input: EscortPolicyInput): EscortPolicyResu
 
   // ── LOGIN: individual pickups — only seq=0 is an isolation risk ────────────
   // After seq=0 boards, every subsequent pickup happens into an occupied cab.
-  // The only true isolation is when no male is available to occupy seq=0.
+  // Escort needed only when no male exists to occupy seq=0.
 
   // Case A: lone female (total = 1)
   if (femaleCount === 1 && maleCount === 0) {
@@ -113,7 +106,6 @@ export function evaluateEscortPolicy(input: EscortPolicyInput): EscortPolicyResu
     return { required: true, reason: 'All passengers are female — no male buffer available' };
   }
 
-  // At least 1 male → he takes seq=0, females board into an occupied cab.
-  // Night window: still safe — a male is always first.
+  // At least 1 male → he takes seq=0, all females board into an occupied cab → safe
   return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
 }

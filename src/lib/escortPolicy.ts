@@ -4,14 +4,19 @@
  * Keep in sync with the backend version. This runs in the browser to give the
  * supervisor real-time feedback during booking (Steps 1-3 of Routes.tsx).
  *
- * STEP 1 — Auto-reorder (handled by optimizeStops in geo.ts):
- *   Female must not be seq=0 (first pickup) or last seq (last drop/pickup).
- *   The route optimizer already swaps the last stop. We also fix the first stop below.
+ * Single source of truth for escort decisions — geo.ts only handles ordering.
  *
- * STEP 2 — Escort required when reorder cannot solve it:
- *   Case A: Only 1 female → alone with driver at some point regardless of order
- *   Case B: All female → no male buffer
- *   Case C: Restricted window + females > males (can't fill both end positions with males)
+ * LOGIN rides (individual pickups from homes):
+ *   Only seq=0 (first pickup) is an isolation risk — the driver arrives alone.
+ *   After seq=0 boards, every subsequent pickup enters an already-occupied cab.
+ *   Escort required when: no male exists to occupy seq=0 (all-female or lone female).
+ *   Night window: same rule — as long as a male is seq=0, the ride is safe.
+ *
+ * LOGOUT rides (all board at the office together, drop at individual homes):
+ *   No "first pickup alone" problem — everyone boards together.
+ *   Only the last drop is an isolation risk — one passenger left alone with driver.
+ *   Strategy: drop females first → a male is always last.
+ *   Escort required when: all-female, lone female, or (night window + females > males).
  */
 
 export const ESCORT_WINDOW_START_HOUR = 7;   // before 07:00
@@ -84,9 +89,9 @@ export function evaluateEscortPolicy(
 
   // ── LOGIN: individual pickups — only seq=0 is an isolation risk ────────────
   // After seq=0 boards, every subsequent passenger boards into an occupied cab.
-  // So the only true isolation scenario is: no male available to be seq=0.
+  // Escort needed only when no male exists to occupy seq=0.
 
-  // Case A: lone female (total = 1) — she IS seq=0, alone with driver entire ride
+  // Case A: lone female (total = 1) — she IS seq=0, alone with driver the entire ride
   if (femaleCount === 1 && maleCount === 0) {
     return { required: true, reordered: false, reason: 'Single female passenger travelling alone with driver' };
   }
@@ -96,18 +101,7 @@ export function evaluateEscortPolicy(
     return { required: true, reordered: false, reason: 'All passengers are female — no male buffer available' };
   }
 
-  // When there is at least 1 male, he takes seq=0 → females board into an
-  // occupied cab. Reorder solves it — no escort needed during daytime.
-  // Night/early window: still safe as long as a male is seq=0.
-  // The only case we can't fix: femaleCount > 0 && maleCount === 0 (already handled above).
-  if (inRestrictedWindow(rideTime) && maleCount === 0) {
-    return {
-      required: true,
-      reordered: false,
-      reason: 'Night/early window — no male passenger to occupy first pickup position',
-    };
-  }
-
-  // At least 1 male exists → reorder puts him first → no escort needed
+  // At least 1 male exists → reorder puts him at seq=0 → all females board into
+  // an occupied cab → safe regardless of time window
   return { required: false, reordered: femaleCount > 0 };
 }
