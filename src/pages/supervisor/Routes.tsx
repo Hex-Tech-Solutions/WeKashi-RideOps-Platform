@@ -340,10 +340,12 @@ export default function RoutesPage() {
 
   const escortNameMissing = escortPolicy.required && !escortName.trim();
 
-  // If any female is selected, a pickup time must be set before moving to Step 3.
-  // This prevents bypassing the time-window safety check by leaving times empty.
-  const hasFemaleSelected = selected.some((e) => e.gender === "F");
-  const timeRequiredButMissing = hasFemaleSelected && !plannedPickupTime && !Object.values(pickupTimes).some(Boolean);
+  // Block Step 2→3 if any female stop has no per-stop pickup time set.
+  // The per-stop time beside each employee is what drives the safety window check.
+  const femaleStopsWithoutTime = route.stops.filter(
+    (s) => s.gender === "F" && !pickupTimes[s.empId]
+  );
+  const timeRequiredButMissing = femaleStopsWithoutTime.length > 0;
 
   const canNext = step === 1
     ? selected.length > 0
@@ -477,11 +479,11 @@ export default function RoutesPage() {
                 </div>
               </div>
             )}
-            {!escortPolicy.required && !plannedPickupTime && selected.some((e) => e.gender === "F") && (
+            {!escortPolicy.required && !timeRequiredButMissing && selected.some((e) => e.gender === "F") && (
               <div className="mb-4 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3">
                 <Clock className="h-4 w-4 text-warning mt-0.5 shrink-0" />
                 <div className="text-xs text-warning">
-                  <span className="font-semibold">Set the pickup time below</span> to check if the ride falls in the restricted window (before 07:00 or after 19:00). If it does, additional women's safety rules apply.
+                  <span className="font-semibold">Set the stop pickup time</span> beside each female employee to activate the 19:00–07:00 safety window check.
                 </div>
               </div>
             )}
@@ -502,19 +504,28 @@ export default function RoutesPage() {
               }
             />
 
-            {/* Shift/pickup time picker — required when females are in the ride */}
-            <div className={`mt-4 rounded-md border px-3 py-2.5 space-y-2 ${timeRequiredButMissing ? "border-destructive/60 bg-destructive/5" : ""}`}>
-              <div className="flex items-center gap-2 text-sm">
-                <Clock className={`h-4 w-4 shrink-0 ${timeRequiredButMissing ? "text-destructive" : "text-muted-foreground"}`} />
-                <div className="flex-1">
-                  <div className={`font-medium ${timeRequiredButMissing ? "text-destructive" : ""}`}>
-                    Shift / pickup time
-                    {timeRequiredButMissing && <span className="ml-1 text-xs font-semibold uppercase tracking-wide">— required</span>}
+            {/* Per-stop time block warning — shown when female stops are missing their time */}
+            {timeRequiredButMissing && (
+              <div className="mt-4 rounded-md border border-destructive/60 bg-destructive/5 px-3 py-2.5 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                <div className="text-xs text-destructive">
+                  <div className="font-semibold">Stop pickup time required for female employees</div>
+                  <div className="mt-0.5">
+                    Set the "Stop pickup time" beside{" "}
+                    {femaleStopsWithoutTime.map((s) => s.name).join(", ")} to check the 19:00–07:00 safety window before continuing.
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Shift/pickup time picker — for OTD reporting only, not safety */}
+            <div className="mt-4 rounded-md border px-3 py-2.5 space-y-2">
+              <div className="flex items-center gap-2 text-sm">
+                <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1">
+                  <div className="font-medium">Shift / pickup time</div>
                   <div className="text-[11px] text-muted-foreground">
-                    {timeRequiredButMissing
-                      ? "Female employees are in this ride — a pickup time is required to check the 19:00–07:00 safety window."
-                      : "Set the scheduled pickup time — women's safety window rules (before 07:00 or after 19:00) are checked based on this."}
+                    Used for OTD reports as "Planned Start Time". Women's safety window is checked from the per-stop times above.
                   </div>
                 </div>
                 {plannedPickupTime && (
@@ -527,21 +538,8 @@ export default function RoutesPage() {
                 type="time"
                 value={plannedPickupTime}
                 onChange={(e) => setPlannedPickupTime(e.target.value)}
-                className={`w-full h-9 rounded-md border bg-background px-3 text-sm font-mono focus:outline-none focus:ring-1 ${
-                  timeRequiredButMissing
-                    ? "border-destructive focus:ring-destructive"
-                    : "border-input focus:ring-gold"
-                }`}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-gold"
               />
-              {plannedPickupTime && inRestrictedWindow((() => {
-                const [hh, mm] = plannedPickupTime.split(":").map(Number);
-                const d = new Date(); d.setHours(hh, mm, 0, 0); return d;
-              })()) && (
-                <p className="text-xs text-warning flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                  This time is in the restricted window (before 07:00 or after 19:00) — women's safety rules are active.
-                </p>
-              )}
             </div>
           </CardContent>
         </Card>
