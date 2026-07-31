@@ -30,9 +30,8 @@ export interface EscortPolicyInput {
 }
 
 export interface EscortPolicyResult {
-  required:  boolean;
-  reason?:   string;
-  reordered?: boolean;
+  required: boolean;
+  reason?:  string;
 }
 
 function isFemale(g: string): boolean {
