@@ -2,10 +2,16 @@
  * Payment routes — Razorpay Route split + driver onboarding + wallet fines.
  *
  * Money flow:
- *   Supervisor pays totalAmount (fare + platformFee + pendingCancellationFee)
- *   → Razorpay order captures full amount into your account
- *   → Route transfer: price - |walletBalance deficit| → driver's linked account
- *   → Your account retains: platformFee + cancellationFee baked in + any fine recovered
+ *   Supervisor pays totalAmount = driverFare + escortCharge + platformFee + pendingCancellationFee
+ *   → Razorpay order captures the full amount into your account
+ *   → Route transfer to driver: (driverFare + escortCharge) - |walletFineDeficit|
+ *     (escort charge belongs to the driver — it compensates for the extra passenger/risk)
+ *   → Your account retains: platformFee + cancellationFee + any fine recovered
+ *
+ * Example: ₹500 fare, escort required (₹250 escort), no fine
+ *   Supervisor pays:  ₹500 + ₹250 + ₹20 = ₹770
+ *   Driver receives:  ₹500 + ₹250        = ₹750
+ *   Platform retains: ₹20 (platform fee only)
  *
  * Driver Route onboarding:
  *   POST /payments/driver/onboard        — create Razorpay linked account
@@ -158,7 +164,7 @@ router.post(
       res.json({
         orderId: order.id, amount: order.amount, currency: order.currency,
         keyId: process.env.RAZORPAY_KEY_ID,
-        rideId: ride.id, driverFare, platformFee, totalAmount, fineDeduction, driverReceives,
+        rideId: ride.id, driverFare, escortFee, platformFee, totalAmount, fineDeduction, driverReceives,
         driverName: ride.driver?.fullName ?? 'Driver', isMock: false,
       });
     } catch (err) { next(err); }
