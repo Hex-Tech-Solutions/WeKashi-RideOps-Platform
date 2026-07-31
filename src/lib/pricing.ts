@@ -30,6 +30,15 @@ export const AC_SURCHARGE = 100;
 export const PLATFORM_FEE = 20;
 /** Minimum fare floor — no ride is priced below this regardless of distance */
 export const MINIMUM_FARE = 500;
+/** Escort charge rate — 50% of driver fare, added when escort is mandatory */
+export const ESCORT_CHARGE_RATE = 0.5;
+
+/**
+ * Escort surcharge = 50% of the driver fare (after minimum floor, before platform fee).
+ */
+export function escortCharge(driverFare: number): number {
+  return Math.round(driverFare * ESCORT_CHARGE_RATE * 100) / 100;
+}
 
 /**
  * Base distance fare: whole distance billed at the single slab rate.

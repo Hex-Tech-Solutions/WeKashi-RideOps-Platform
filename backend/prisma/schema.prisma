@@ -329,6 +329,7 @@ model Ride {
   // ── Women's safety escort ─────────────────────────────────────────────────
   escortRequired     Boolean    @default(false) @map("escort_required")
   escortName         String?    @map("escort_name")
+  escortCharge       Float?     @map("escort_charge")
 
   supervisor    User           @relation("SupervisorRides", fields: [supervisorId], references: [id])
   driver        Driver?        @relation("DriverRides", fields: [driverId], references: [id])

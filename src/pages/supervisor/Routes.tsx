@@ -11,7 +11,7 @@ import {
   useOfficeLocations, useRouteTemplates,
   type CreateRidePayload, type OfficeLocationRow, type RouteTemplateRow,
 } from "@/lib/queries";import { optimizeStops, buildResult, coordPoint, getPoint, DROP, type RouteStop, type GeoPoint } from "@/lib/geo";
-import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, type VehicleType } from "@/lib/pricing";
+import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, escortCharge, type VehicleType } from "@/lib/pricing";
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -573,8 +573,17 @@ export default function RoutesPage() {
                   : <span className="text-success flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" /> All rules satisfied</span>
               } />
               {isAc && <Row label="AC surcharge" value={<span className="text-foreground">+₹{AC_SURCHARGE}</span>} />}
+              {escortPolicy.required && price != null && (
+                <Row label="Escort charge (50%)" value={<span className="text-destructive font-medium">+₹{escortCharge(price)}</span>} />
+              )}
               <Row label="Platform fee" value={<span className="text-muted-foreground">+₹{PLATFORM_FEE}</span>} />
-              {price != null && <Row label="Total you pay" value={<span className="font-bold text-base">₹{price + PLATFORM_FEE}</span>} />}
+              {price != null && (
+                <Row label="Total you pay" value={
+                  <span className="font-bold text-base">
+                    ₹{price + (escortPolicy.required ? escortCharge(price) : 0) + PLATFORM_FEE}
+                  </span>
+                } />
+              )}
             </CardContent>
           </Card>
           <Card className="shadow-card border-gold/40">
@@ -642,6 +651,15 @@ export default function RoutesPage() {
                     {price != null ? `₹${price}` : <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> calculating</span>}
                   </span>
                 </div>
+                {escortPolicy.required && price != null && (
+                  <div className="flex items-center justify-between text-sm rounded-md bg-destructive/10 border border-destructive/30 px-2 py-1.5">
+                    <span className="text-destructive flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5" />
+                      Escort charge (50% of fare)
+                    </span>
+                    <span className="font-semibold text-destructive">+₹{escortCharge(price)}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Platform fee</span>
                   <span className="font-semibold">₹{PLATFORM_FEE}</span>
@@ -660,12 +678,15 @@ export default function RoutesPage() {
                   <span className="text-sm font-semibold">You pay</span>
                   <span className="text-2xl font-bold">
                     {price != null
-                      ? `₹${(price + PLATFORM_FEE + pendingCancellationFee).toFixed(pendingCancellationFee > 0 ? 2 : 0)}`
+                      ? `₹${(price + (escortPolicy.required ? escortCharge(price) : 0) + PLATFORM_FEE + pendingCancellationFee).toFixed(pendingCancellationFee > 0 ? 2 : 0)}`
                       : <span className="flex items-center gap-1.5 text-muted-foreground text-base"><Loader2 className="h-4 w-4 animate-spin" /> calculating</span>}
                   </span>
                 </div>
                 <div className="text-[11px] text-muted-foreground">
-                  Driver receives ₹{price ?? "—"} · ₹{PLATFORM_FEE} platform fee{pendingCancellationFee > 0 ? ` · ₹${pendingCancellationFee.toFixed(2)} cancellation penalty` : ""}
+                  Driver receives ₹{price ?? "—"}
+                  {escortPolicy.required && price != null && ` · ₹${escortCharge(price)} escort charge`}
+                  {` · ₹${PLATFORM_FEE} platform fee`}
+                  {pendingCancellationFee > 0 ? ` · ₹${pendingCancellationFee.toFixed(2)} cancellation penalty` : ""}
                 </div>
               </div>
               {/* AC toggle */}

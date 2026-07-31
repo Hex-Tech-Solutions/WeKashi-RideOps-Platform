@@ -9,7 +9,7 @@ import {
   ValidationError,
 } from '../types';
 import { logger } from '../lib/logger';
-import { computeFare, type VehicleType, PLATFORM_FEE } from '../lib/pricing';
+import { computeFare, type VehicleType, PLATFORM_FEE, escortCharge } from '../lib/pricing';
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import type { Server as IoServer } from 'socket.io';
 
@@ -45,6 +45,7 @@ export async function createRide(
 ): Promise<{ ride: { id: string; status: string }; nearbyCount: number }> {
   // Server-authoritative fare from distance + vehicle type + AC option
   const price = input.distanceKm != null ? computeFare(input.distanceKm, input.vehicleType, input.isAc) : null;
+  const escort = input.escortRequired && price != null ? escortCharge(price) : 0;
 
   // Fetch supervisor's pending cancellation fee to roll into this booking
   const supervisor = await prisma.user.findUnique({
@@ -52,7 +53,7 @@ export async function createRide(
     select: { pendingCancellationFee: true },
   });
   const pendingCancellationFee = supervisor?.pendingCancellationFee ?? 0;
-  const totalAmount = price != null ? price + PLATFORM_FEE + pendingCancellationFee : null;
+  const totalAmount = price != null ? price + PLATFORM_FEE + escort + pendingCancellationFee : null;
 
   // Scheduled ride: goes to the marketplace (status 'scheduled'), not broadcast.
   if (input.scheduled) {
@@ -67,7 +68,7 @@ export async function createRide(
         pickup_point, drop_point, pickup_address, drop_address,
         distance_km, price, platform_fee, total_amount, vehicle_type,
         pax_count, capacity, scheduled_for, planned_start_time,
-        escort_required, escort_name,
+        escort_required, escort_name, escort_charge,
         created_at
       ) VALUES (
         gen_random_uuid(),
@@ -89,6 +90,7 @@ export async function createRide(
         ${input.plannedStartTime ?? null},
         ${input.escortRequired ?? false},
         ${input.escortName ?? null},
+        ${escort > 0 ? escort : null},
         NOW()
       )
       RETURNING id
@@ -116,7 +118,7 @@ export async function createRide(
       distance_km, price, platform_fee, total_amount, vehicle_type,
       pax_count, capacity, scheduled_for,
       planned_start_time,
-      escort_required, escort_name,
+      escort_required, escort_name, escort_charge,
       broadcast_started_at, broadcast_expires_at, created_at
     ) VALUES (
       gen_random_uuid(),
@@ -139,6 +141,7 @@ export async function createRide(
       ${input.plannedStartTime ?? null},
       ${input.escortRequired ?? false},
       ${input.escortName ?? null},
+      ${escort > 0 ? escort : null},
       NOW(),
       NOW() + INTERVAL '3 minutes',
       NOW()
