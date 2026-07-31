@@ -92,7 +92,7 @@ export default function Live() {
                   <div className="flex-1 min-w-[200px]">
                     <div className="flex items-center gap-2 mb-1"><AlertTriangle className="h-4 w-4 text-warning" /><span className="font-mono text-sm">{r.id.slice(0, 8)}</span><Badge variant="outline" className={statusColor(r.status)}>unclaimed scheduled</Badge></div>
                     <div className="font-medium">{r.pickupAddress} → {r.dropAddress}</div>
-                    <div className="text-xs text-muted-foreground">No driver claimed · {r.paxCount} PAX{r.price != null ? ` · ₹${r.price}` : ""}</div>
+                    <div className="text-xs text-muted-foreground">No driver claimed · {r.paxCount} PAX{r.totalAmount != null ? ` · ₹${r.totalAmount}` : r.price != null ? ` · ₹${r.price}` : ""}</div>
                   </div>
                   <div className="flex gap-2">
                     <Dialog>
@@ -240,7 +240,12 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
 
         <div className="flex items-center justify-between pt-2 border-t text-xs text-muted-foreground">
           <span>{ride.paxCount} PAX{ride.distanceKm ? ` · ${ride.distanceKm} km` : ""}</span>
-          {ride.price != null && <span className="font-semibold text-foreground">₹{ride.price}</span>}
+          {(ride.totalAmount ?? ride.price) != null && (
+            <span className="font-semibold text-foreground">
+              ₹{ride.totalAmount ?? ride.price}
+              {ride.escortRequired && <span className="text-amber-600 text-[10px] ml-1">(escort)</span>}
+            </span>
+          )}
         </div>
         {["assigned", "in_progress", "completed"].includes(ride.status) && (
           <Dialog>
@@ -270,7 +275,7 @@ function AttentionRow({ ride, canRebroadcast, onRebroadcast, onAssign }: { ride:
             <Badge variant="outline" className={statusColor(ride.status)}>{ride.status}</Badge>
           </div>
           <div className="font-medium">{ride.pickupAddress} → {ride.dropAddress}</div>
-          <div className="text-xs text-muted-foreground">{ride.paxCount} PAX{ride.price != null ? ` · ₹${ride.price}` : ""}</div>
+          <div className="text-xs text-muted-foreground">{ride.paxCount} PAX{(ride.totalAmount ?? ride.price) != null ? ` · ₹${ride.totalAmount ?? ride.price}` : ""}</div>
         </div>
         <div className="flex items-center justify-end gap-2">
           {canRebroadcast && (
