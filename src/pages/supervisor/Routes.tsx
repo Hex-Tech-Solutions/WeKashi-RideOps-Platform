@@ -15,7 +15,7 @@ import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFOR
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck } from "lucide-react";
+import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Shield, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck } from "lucide-react";
 import { GoogleRouteMap } from "@/components/GoogleRouteMap";
 import { SaveRouteDialog } from "@/components/SaveRouteDialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
