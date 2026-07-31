@@ -165,7 +165,9 @@ export default function RoutesPage() {
   const price = displayKm != null ? computeFare(displayKm, vehicleType, isAc) : null;
 
   // ── Escort policy ─────────────────────────────────────────────────────────
-  // Compute in real-time as employees are selected and time is set.
+  // Compute in real-time as employees are selected, time is set, OR the
+  // supervisor manually reorders stops. Uses the actual route order so a
+  // manually placed female-at-last position is caught correctly.
   const escortPolicy = useMemo(() => {
     if (!selected.length) return { required: false, reordered: false } as const;
     const rideTime = plannedPickupTime
@@ -175,8 +177,9 @@ export default function RoutesPage() {
       selected.map((e) => ({ gender: e.gender })),
       rideTime,
       type,
+      route.stops.map((s) => ({ gender: s.gender })),
     );
-  }, [selected, plannedPickupTime, type]);
+  }, [selected, plannedPickupTime, type, route.stops]);
 
   // Effective capacity: when escort is required, subtract 1 extra seat (driver + escort).
   const effectiveCapFor = (n: number) => {

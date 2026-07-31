@@ -135,23 +135,28 @@ export function createRidesRouter(io: IoServer): Router {
         const body = CreateRideSchema.parse(req.body);
 
         // ── Server-side escort policy re-validation ───────────────────────────
-        // Fetch employee genders from DB so the frontend cannot bypass the rule
-        // by sending escortRequired=false with female passengers.
+        // Fetch employee genders from DB in the EXACT order the supervisor submitted
+        // (employeeIds is already the final route order after any manual reorder).
         const { prisma } = await import('../lib/prisma');
-        const employees = await prisma.employee.findMany({
+        const employeeMap = await prisma.employee.findMany({
           where: { id: { in: body.employeeIds } },
           select: { id: true, gender: true },
         });
+        // Preserve submitted order (not DB fetch order)
+        const genderById = Object.fromEntries(employeeMap.map((e) => [e.id, e.gender]));
+        const orderedGenders = body.employeeIds.map((id) => genderById[id] ?? 'M');
+
         const { evaluateEscortPolicy } = await import('../lib/escortPolicy');
         const rideTime = body.plannedStartTime
           ? new Date(body.plannedStartTime)
           : body.scheduledFor
           ? new Date(body.scheduledFor)
-          : new Date();
+          : null;
         const policy = evaluateEscortPolicy({
-          passengers: employees.map((e) => ({ gender: e.gender })),
+          passengers: orderedGenders.map((g) => ({ gender: g })),
           rideTime,
           rideType: body.type,
+          orderedGenders,
         });
 
         // Hard block: if escort is required but no name was provided
