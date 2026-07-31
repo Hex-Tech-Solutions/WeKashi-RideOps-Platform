@@ -75,29 +75,33 @@ function nearestNeighborOrder(start: GeoPoint, stops: RouteStop[]): RouteStop[] 
   return ordered;
 }
 
-// Validates the final ordered stop list for obvious safety violations.
-// This is used ONLY to flag display issues — the escort decision is made by
-// escortPolicy.ts, which is the single source of truth.
-// Returns ok=false only when the reorder could not fix a position (e.g. all-female).
+// Validates the final ordered stop list for obvious safety violations after reorder.
+// This is used ONLY to flag display issues in the UI — escort decisions come from escortPolicy.ts.
+//
+// Login:  only seq=0 is dangerous (first pickup — alone with driver before anyone boards).
+//         Last pickup is SAFE — earlier passengers are already on board.
+// Logout: only last position is dangerous (last drop — alone with driver after everyone exits).
+//         First position is SAFE — everyone boards at the office together.
 export function checkSafety(stops: RouteStop[], type: "login" | "logout" = "login"): { ok: boolean; issue?: string } {
   if (!stops.length) return { ok: true };
 
   const hasMale   = stops.some((s) => s.gender === "M");
   const hasFemale = stops.some((s) => s.gender === "F");
 
-  // Only-female or only-male — escortPolicy handles this; route order is fine
+  // All-male or all-female — escortPolicy handles this; no reorder issue
   if (!hasMale || !hasFemale) return { ok: true };
 
-  const first = stops[0];
-  const last  = stops[stops.length - 1];
-
-  // For login: first pickup should not be female after reorder
-  if (type === "login" && first.gender === "F") {
-    return { ok: false, issue: `${first.name} is first pickup — route reorder needed` };
-  }
-  // Last stop should not be female after reorder (both login and logout)
-  if (last.gender === "F") {
-    return { ok: false, issue: `${last.name} is last stop — route reorder needed` };
+  if (type === "login") {
+    // Only seq=0 is an isolation risk for login
+    if (stops[0].gender === "F") {
+      return { ok: false, issue: `${stops[0].name} is first pickup — she will be alone with the driver before others board` };
+    }
+  } else {
+    // Only last position is an isolation risk for logout
+    const last = stops[stops.length - 1];
+    if (last.gender === "F") {
+      return { ok: false, issue: `${last.name} is last drop — she will be alone with the driver after others exit` };
+    }
   }
 
   return { ok: true };
@@ -136,30 +140,18 @@ export function optimizeStops(
   if (hasMale && hasFemale) {
     if (type === "logout") {
       // LOGOUT: all board at the office together.
-      // Drop females FIRST (early in sequence) so a male is always the last
-      // passenger exiting — a female is never alone with the driver at the end.
-      // Strategy: stable partition — females before males, preserving
-      //           nearest-neighbour order within each group.
+      // Drop females FIRST so a male is always the last to exit.
       const females = ordered.filter((s) => s.gender === "F");
       const males   = ordered.filter((s) => s.gender === "M");
       ordered = [...females, ...males];
     } else {
-      // LOGIN: pickups are individual — protect both ends.
-      // First position: must not be female (alone with driver before others board).
+      // LOGIN: only seq=0 is an isolation risk.
+      // After seq=0 boards, every subsequent pickup has at least one other
+      // passenger already in the cab — the last pickup is NOT alone with the driver.
       if (ordered[0].gender === "F") {
         const firstMaleIdx = ordered.findIndex((s) => s.gender === "M");
         if (firstMaleIdx > 0) {
           [ordered[0], ordered[firstMaleIdx]] = [ordered[firstMaleIdx], ordered[0]];
-        }
-      }
-      // Last position: must not be female (alone with driver after others exit).
-      const lastIdx = ordered.length - 1;
-      if (ordered[lastIdx].gender === "F") {
-        for (let i = lastIdx - 1; i >= 0; i--) {
-          if (ordered[i].gender === "M") {
-            [ordered[lastIdx], ordered[i]] = [ordered[i], ordered[lastIdx]];
-            break;
-          }
         }
       }
     }

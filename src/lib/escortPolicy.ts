@@ -79,36 +79,32 @@ export function evaluateEscortPolicy(
     return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
   }
 
-  // ── LOGIN: individual pickups — first and last stop are both exposed ────────
+  // ── LOGIN: individual pickups — only seq=0 is an isolation risk ────────────
+  // After seq=0 boards, every subsequent passenger boards into an occupied cab.
+  // So the only true isolation scenario is: no male available to be seq=0.
 
-  // Case A: lone female
-  if (femaleCount === 1) {
-    return {
-      required: true,
-      reordered: false,
-      reason: maleCount === 0
-        ? 'Single female passenger travelling alone with driver'
-        : 'Only one female in the ride — she will be alone with the driver during first pickup and last drop',
-    };
+  // Case A: lone female (total = 1) — she IS seq=0, alone with driver entire ride
+  if (femaleCount === 1 && maleCount === 0) {
+    return { required: true, reordered: false, reason: 'Single female passenger travelling alone with driver' };
   }
 
-  // Case B: all female
+  // Case B: all female — no male can take seq=0
   if (maleCount === 0) {
     return { required: true, reordered: false, reason: 'All passengers are female — no male buffer available' };
   }
 
-  // Case C: restricted window
-  if (inRestrictedWindow(rideTime)) {
-    const canReorderSolveIt = femaleCount <= maleCount;
-    if (!canReorderSolveIt) {
-      return {
-        required: true,
-        reordered: false,
-        reason: `Night/early window (before 07:00 or after 19:00) — ${femaleCount} female(s), ${maleCount} male(s); cannot avoid lone female at route ends`,
-      };
-    }
-    return { required: false, reordered: true };
+  // When there is at least 1 male, he takes seq=0 → females board into an
+  // occupied cab. Reorder solves it — no escort needed during daytime.
+  // Night/early window: still safe as long as a male is seq=0.
+  // The only case we can't fix: femaleCount > 0 && maleCount === 0 (already handled above).
+  if (inRestrictedWindow(rideTime) && maleCount === 0) {
+    return {
+      required: true,
+      reordered: false,
+      reason: 'Night/early window — no male passenger to occupy first pickup position',
+    };
   }
 
+  // At least 1 male exists → reorder puts him first → no escort needed
   return { required: false, reordered: femaleCount > 0 };
 }

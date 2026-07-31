@@ -98,37 +98,21 @@ export function evaluateEscortPolicy(input: EscortPolicyInput): EscortPolicyResu
     return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
   }
 
-  // ── LOGIN: pickups are individual — both first and last stop are exposed ────
+  // ── LOGIN: individual pickups — only seq=0 is an isolation risk ────────────
+  // After seq=0 boards, every subsequent pickup happens into an occupied cab.
+  // The only true isolation is when no male is available to occupy seq=0.
 
-  // Case A: lone female (any time)
-  if (femaleCount === 1 && total === 1) {
+  // Case A: lone female (total = 1)
+  if (femaleCount === 1 && maleCount === 0) {
     return { required: true, reason: 'Single female passenger travelling alone with driver' };
   }
 
-  if (femaleCount === 1 && maleCount >= 1) {
-    return {
-      required: true,
-      reason: 'Only one female in the ride — she will be alone with the driver during first pickup and last drop',
-    };
-  }
-
-  // Case B: all female
+  // Case B: all female — no male can take seq=0
   if (maleCount === 0) {
     return { required: true, reason: 'All passengers are female — no male buffer available' };
   }
 
-  // Case C: restricted time window
-  if (inRestrictedWindow(rideTime)) {
-    const canReorderSolveIt = femaleCount <= maleCount;
-    if (!canReorderSolveIt) {
-      return {
-        required: true,
-        reason: `Night/early window (before 07:00 or after 19:00) — ${femaleCount} female(s) but only ${maleCount} male(s); cannot avoid lone female at route ends`,
-      };
-    }
-    return { required: false, reordered: true };
-  }
-
-  // Day-time, multiple genders, reorder handles it
+  // At least 1 male → he takes seq=0, females board into an occupied cab.
+  // Night window: still safe — a male is always first.
   return { required: false, reordered: femaleCount > 0 && maleCount > 0 };
 }
