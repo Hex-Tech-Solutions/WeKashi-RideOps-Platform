@@ -12,9 +12,10 @@ import {
   type CreateRidePayload, type OfficeLocationRow, type RouteTemplateRow,
 } from "@/lib/queries";import { optimizeStops, buildResult, coordPoint, getPoint, DROP, type RouteStop, type GeoPoint } from "@/lib/geo";
 import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, type VehicleType } from "@/lib/pricing";
+import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle } from "lucide-react";
+import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, Shield, UserCheck } from "lucide-react";
 import { GoogleRouteMap } from "@/components/GoogleRouteMap";
 import { SaveRouteDialog } from "@/components/SaveRouteDialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -97,6 +98,9 @@ export default function RoutesPage() {
   const [pickupTimes, setPickupTimes] = useState<Record<string, string>>({});
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
+  // ── Escort policy state ───────────────────────────────────────────────────
+  const [escortName, setEscortName] = useState("");
+
   const templates = templatesData?.templates ?? [];
 
   // Auto-load a template when navigated from the Saved Groups page (?loadGroup=id)
@@ -159,6 +163,28 @@ export default function RoutesPage() {
   // null = still loading (Directions API hasn't responded yet).
   const displayKm = realDistanceKm;
   const price = displayKm != null ? computeFare(displayKm, vehicleType, isAc) : null;
+
+  // ── Escort policy ─────────────────────────────────────────────────────────
+  // Compute in real-time as employees are selected and time is set.
+  const escortPolicy = useMemo(() => {
+    if (!selected.length) return { required: false, reordered: false } as const;
+    const rideTime = plannedPickupTime
+      ? (() => { const [hh, mm] = plannedPickupTime.split(":").map(Number); const d = new Date(); d.setHours(hh, mm, 0, 0); return d; })()
+      : null;
+    return evaluateEscortPolicy(
+      selected.map((e) => ({ gender: e.gender })),
+      rideTime,
+    );
+  }, [selected, plannedPickupTime]);
+
+  // Effective capacity: when escort is required, subtract 1 extra seat (driver + escort).
+  const effectiveCapFor = (n: number) => {
+    const base = n <= 4 ? 4 : n <= 6 ? 6 : 7;
+    return base; // vehicle seats stays the same; we just use 1 for escort
+  };
+  const employeeSeats = escortPolicy.required
+    ? (selected.length <= 3 ? 4 : selected.length <= 5 ? 6 : 7) - 1  // -1 for escort
+    : (selected.length <= 4 ? 4 : selected.length <= 6 ? 6 : 7) - 0;
 
   const toggleEmployee = (id: string) => {
     setCustomStops(undefined);
@@ -240,7 +266,19 @@ export default function RoutesPage() {
     // Send employees in the OPTIMIZED route order (nearest-neighbour + female-safety),
     // so the driver's OTP legs (stop 1,2,3…) follow the exact sequence shown here.
     const orderedIds = route.stops.map((s) => s.empId);
-    const base = { employeeIds: orderedIds, capacity: capFor(selected.length), scheduledFor, distanceKm: displayKm, vehicleType, isAc, scheduledPickupTimes: pickupTimes };
+    // Capacity: vehicle seats = employee seats + 1 driver + (1 escort if required)
+    const capacity = capFor(selected.length);
+    const base = {
+      employeeIds: orderedIds,
+      capacity,
+      scheduledFor,
+      distanceKm: displayKm,
+      vehicleType,
+      isAc,
+      scheduledPickupTimes: pickupTimes,
+      escortRequired: escortPolicy.required,
+      escortName: escortPolicy.required ? (escortName.trim() || null) : null,
+    };
     // Build plannedStartTime from HH:MM time picker — use today's date as base
     let plannedStartTime: string | undefined;
     if (plannedPickupTime) {
@@ -256,6 +294,10 @@ export default function RoutesPage() {
 
   const broadcast = () => {
     if (displayKm == null) { toast.error("Wait for the route distance to calculate"); return; }
+    if (escortPolicy.required && !escortName.trim()) {
+      toast.error("Escort name is required before broadcasting", { description: escortPolicy.reason });
+      return;
+    }
     const payload = buildPayload();
     if (!payload) { toast.error("Select at least one employee"); return; }
     createRide.mutate(payload, {
@@ -270,6 +312,10 @@ export default function RoutesPage() {
   const schedule = () => {
     if (displayKm == null) { toast.error("Wait for the route distance to calculate"); return; }
     if (!scheduleAt) { toast.error("Pick a date & time first"); return; }
+    if (escortPolicy.required && !escortName.trim()) {
+      toast.error("Escort name is required before scheduling", { description: escortPolicy.reason });
+      return;
+    }
     const payload = buildPayload(new Date(scheduleAt).toISOString());
     if (!payload) { toast.error("Select at least one employee"); return; }
     createRide.mutate({ ...payload, scheduled: true }, {
@@ -278,6 +324,7 @@ export default function RoutesPage() {
     });
   };
 
+  const escortNameMissing = escortPolicy.required && !escortName.trim();
   const canNext = step === 1 ? selected.length > 0 : step === 2 ? displayKm != null : true;
 
   return (
@@ -378,6 +425,11 @@ export default function RoutesPage() {
                 <Badge variant="outline" className={route.safetyOk ? "border-success/40 bg-success/10 text-success gap-1" : "border-warning/40 bg-warning/10 text-warning gap-1"}>
                   <ShieldCheck className="h-3 w-3" /> {route.safetyOk ? "Safety rules applied" : "Review needed"}
                 </Badge>
+                {escortPolicy.reordered && !escortPolicy.required && (
+                  <Badge variant="outline" className="border-blue-400/40 bg-blue-50 text-blue-700 gap-1 text-[10px]">
+                    <Shield className="h-3 w-3" /> Route reordered for women's safety
+                  </Badge>
+                )}
                 {selected.length > 0 && (
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setSaveDialogOpen(true)}>
                     <BookmarkPlus className="h-3.5 w-3.5" /> Save group
@@ -387,6 +439,19 @@ export default function RoutesPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/* Escort warning banner in step 2 */}
+            {escortPolicy.required && (
+              <div className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3">
+                <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-semibold text-sm text-destructive">Escort required</div>
+                  <div className="text-xs text-destructive/80 mt-0.5">{escortPolicy.reason}</div>
+                  <div className="text-xs text-destructive/80 mt-1">
+                    1 seat will be reserved for the escort. Enter the escort name in Step 3 before broadcasting.
+                  </div>
+                </div>
+              </div>
+            )}
             <GoogleRouteMap
               route={route}
               type={type}
@@ -418,7 +483,26 @@ export default function RoutesPage() {
               <Row label="Distance" value={displayKm != null ? `${displayKm} km` : <span className="flex items-center gap-1 text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> calculating…</span>} />
               <Row label="ETA" value={`~${route.etaMin} min`} />
               <Row label="Vehicle needed" value={`${capFor(selected.length)}-seater`} />
-              <Row label="Safety" value={route.safetyOk ? <span className="text-success">All rules OK</span> : <span className="text-warning">{route.safetyIssue}</span>} />
+              {escortPolicy.required && (
+                <Row
+                  label="Escort seat"
+                  value={
+                    <span className="flex items-center gap-1.5 text-destructive font-medium">
+                      <Shield className="h-3.5 w-3.5" />
+                      1 seat reserved · {capFor(selected.length) - 1 - selected.length} spare
+                    </span>
+                  }
+                />
+              )}
+              <Row label="Safety" value={
+                escortPolicy.required
+                  ? <span className="text-destructive flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Escort mandatory</span>
+                  : escortPolicy.reordered
+                  ? <span className="text-blue-600 flex items-center gap-1"><Shield className="h-3.5 w-3.5" /> Route reordered — no escort needed</span>
+                  : route.safetyOk
+                  ? <span className="text-success">All rules OK</span>
+                  : <span className="text-warning">{route.safetyIssue}</span>
+              } />
               {isAc && <Row label="AC surcharge" value={<span className="text-foreground">+₹{AC_SURCHARGE}</span>} />}
               <Row label="Platform fee" value={<span className="text-muted-foreground">+₹{PLATFORM_FEE}</span>} />
               {price != null && <Row label="Total you pay" value={<span className="font-bold text-base">₹{price + PLATFORM_FEE}</span>} />}
@@ -427,6 +511,49 @@ export default function RoutesPage() {
           <Card className="shadow-card border-gold/40">
             <CardHeader><CardTitle className="text-base">Send to drivers</CardTitle></CardHeader>
             <CardContent className="space-y-4">
+
+              {/* ── Escort banner + name input ── */}
+              {escortPolicy.required && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Shield className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-sm text-destructive">Escort mandatory</div>
+                      <div className="text-xs text-destructive/80 mt-0.5">{escortPolicy.reason}</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        Seating: <strong>{capFor(selected.length)}</strong> total · 1 driver · <strong>1 escort</strong> · {selected.length} employee{selected.length !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-destructive">
+                      Escort Name <span className="text-destructive">*</span>
+                    </Label>
+                    <div className="relative">
+                      <UserCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={escortName}
+                        onChange={(e) => setEscortName(e.target.value)}
+                        placeholder="Enter escort's full name"
+                        className={`pl-9 ${escortNameMissing ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                      />
+                    </div>
+                    {escortNameMissing && (
+                      <p className="text-xs text-destructive">Escort name is required to broadcast this ride.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {escortPolicy.reordered && !escortPolicy.required && (
+                <div className="rounded-lg border border-blue-400/40 bg-blue-50 p-3 flex items-start gap-2">
+                  <Shield className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                  <div className="text-xs text-blue-700">
+                    <div className="font-semibold">Route reordered for women's safety</div>
+                    <div className="mt-0.5">Female employees have been moved away from the first and last positions. No escort required.</div>
+                  </div>
+                </div>
+              )}
               <div>
                 <Label>Vehicle type</Label>
                 <div className="grid grid-cols-3 gap-2 mt-1">
@@ -512,8 +639,8 @@ export default function RoutesPage() {
                 <div>• Notifies online <b className="text-foreground">{VEHICLE_LABELS[vehicleType]}</b> drivers within <b className="text-foreground">10 km</b> of first pickup</div>
                 <div>• <b className="text-foreground">3-min</b> auction window</div>
               </div>
-              <Button onClick={broadcast} disabled={createRide.isPending || price == null} className="w-full bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">
-                <Radio className="h-4 w-4" /> {createRide.isPending ? "Broadcasting…" : "Broadcast now"}
+              <Button onClick={broadcast} disabled={createRide.isPending || price == null || escortNameMissing} className="w-full bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">
+                <Radio className="h-4 w-4" /> {createRide.isPending ? "Broadcasting…" : escortNameMissing ? "Enter escort name to broadcast" : "Broadcast now"}
               </Button>
               <div className="pt-3 border-t space-y-2">
                 <Label>Or schedule for later (up to 2 days ahead)</Label>
@@ -543,8 +670,8 @@ export default function RoutesPage() {
             {step === 1 ? "Create group & view route" : "Continue"} <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={broadcast} disabled={createRide.isPending || price == null} className="bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">
-            <Radio className="h-4 w-4" /> Broadcast
+          <Button onClick={broadcast} disabled={createRide.isPending || price == null || escortNameMissing} className="bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">
+            <Radio className="h-4 w-4" /> {escortNameMissing ? "Enter escort name" : "Broadcast"}
           </Button>
         )}
       </div>

@@ -354,6 +354,9 @@ export interface CreateRidePayload {
   scheduledPickupTimes?: Record<string, string>;
   /** Planned departure time (ISO) — stored for OTD reporting */
   plannedStartTime?: string;
+  /** Women's safety escort */
+  escortRequired?: boolean;
+  escortName?: string | null;
 }
 
 export interface VehicleOption {
@@ -597,7 +600,7 @@ export function multiStopMapsUrl(stops: { lat: number; lng: number }[]): string 
 export function useRidePax(rideId?: string) {
   return useQuery({
     queryKey: ["ridepax", rideId],
-    queryFn: () => api<{ type: string; pax: RidePaxRow[] }>(`/rides/${rideId}/pax`),
+    queryFn: () => api<{ type: string; escortRequired: boolean; escortName: string | null; pax: RidePaxRow[] }>(`/rides/${rideId}/pax`),
     enabled: !!rideId,
     refetchInterval: 6_000,
   });

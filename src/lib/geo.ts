@@ -77,13 +77,14 @@ function nearestNeighborOrder(start: GeoPoint, stops: RouteStop[]): RouteStop[] 
 
 // Female safety: no lone female at the very first or very last pickup position.
 // (The drop is the office, not a pickup, so "last" means last pickup before office.)
-// Female-safety: a female must not be the LAST stop (she'd be alone with the
-// driver at the end — the last drop on logout / last pickup on login). This is
-// enforced whenever the group has at least one male to swap in.
 export function checkSafety(stops: RouteStop[]): { ok: boolean; issue?: string } {
   if (stops.length <= 1) return { ok: true };
   const hasMale = stops.some((s) => s.gender === "M");
+  const first = stops[0];
   const last = stops[stops.length - 1];
+  if (hasMale && first.gender === "F") {
+    return { ok: false, issue: `${first.name} (F) is the first pickup — she will be alone with the driver before others board` };
+  }
   if (hasMale && last.gender === "F") {
     return { ok: false, issue: `${last.name} (F) should not be the last stop — female-safety` };
   }
@@ -112,12 +113,28 @@ export function optimizeStops(
   let ordered = nearestNeighborOrder(drop.point, stops);
   if (type === "login") ordered = ordered.reverse();
 
-  // Female-safety: ensure the last stop is not a female (swap in the nearest male).
+  const hasMale = ordered.some((s) => s.gender === "M");
+
+  // ── Female-safety: fix LAST position ─────────────────────────────────────
+  // A female must not be the last in the sequence — she would be alone with
+  // the driver after all other passengers have exited.
   const lastIdx = ordered.length - 1;
-  if (ordered.length >= 2 && ordered.some((s) => s.gender === "M") && ordered[lastIdx].gender === "F") {
+  if (ordered.length >= 2 && hasMale && ordered[lastIdx].gender === "F") {
     for (let i = lastIdx - 1; i >= 0; i--) {
       if (ordered[i].gender === "M") {
         [ordered[lastIdx], ordered[i]] = [ordered[i], ordered[lastIdx]];
+        break;
+      }
+    }
+  }
+
+  // ── Female-safety: fix FIRST position ────────────────────────────────────
+  // A female must not be seq=0 (first pickup) — she would be alone with the
+  // driver before any other passengers board.
+  if (ordered.length >= 2 && hasMale && ordered[0].gender === "F") {
+    for (let i = 1; i < ordered.length; i++) {
+      if (ordered[i].gender === "M") {
+        [ordered[0], ordered[i]] = [ordered[i], ordered[0]];
         break;
       }
     }

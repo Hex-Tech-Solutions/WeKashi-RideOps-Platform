@@ -56,7 +56,10 @@ export async function sendPaxOtpSms(rideId: string): Promise<void> {
 // Ordered pax with the stop coordinates relevant to the ride type
 // (login → home pickup; logout → home drop). OTPs only for supervisor/admin.
 export async function getRidePax(rideId: string, opts: { includeOtp: boolean }) {
-  const ride = await prisma.ride.findUnique({ where: { id: rideId }, select: { type: true } });
+  const ride = await prisma.ride.findUnique({
+    where: { id: rideId },
+    select: { type: true, escortRequired: true, escortName: true },
+  });
   if (!ride) throw new NotFoundError('Ride not found');
   const isLogout = ride.type === 'logout';
 
@@ -79,6 +82,8 @@ export async function getRidePax(rideId: string, opts: { includeOtp: boolean }) 
 
   return {
     type: ride.type,
+    escortRequired: ride.escortRequired,
+    escortName: ride.escortName,
     pax: rows.map((r) => {
       const female = (r.gender ?? '').toLowerCase().startsWith('f');
       return {

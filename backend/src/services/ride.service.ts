@@ -32,6 +32,9 @@ export interface CreateRideInput {
   scheduledPickupTimes?: Record<string, string>;
   /** Planned departure/pickup time set by supervisor — stored for OTD reporting */
   plannedStartTime?: Date;
+  /** Women's safety escort */
+  escortRequired?: boolean;
+  escortName?: string | null;
 }
 
 const BROADCAST_RADIUS_KM = 10;
@@ -63,7 +66,9 @@ export async function createRide(
         id, type, status, supervisor_id,
         pickup_point, drop_point, pickup_address, drop_address,
         distance_km, price, platform_fee, total_amount, vehicle_type,
-        pax_count, capacity, scheduled_for, planned_start_time, created_at
+        pax_count, capacity, scheduled_for, planned_start_time,
+        escort_required, escort_name,
+        created_at
       ) VALUES (
         gen_random_uuid(),
         ${input.type}::"RideType",
@@ -82,6 +87,8 @@ export async function createRide(
         ${input.capacity ?? input.employeeIds.length},
         ${input.scheduledFor ?? null},
         ${input.plannedStartTime ?? null},
+        ${input.escortRequired ?? false},
+        ${input.escortName ?? null},
         NOW()
       )
       RETURNING id
@@ -109,6 +116,7 @@ export async function createRide(
       distance_km, price, platform_fee, total_amount, vehicle_type,
       pax_count, capacity, scheduled_for,
       planned_start_time,
+      escort_required, escort_name,
       broadcast_started_at, broadcast_expires_at, created_at
     ) VALUES (
       gen_random_uuid(),
@@ -129,6 +137,8 @@ export async function createRide(
       ${input.capacity ?? input.employeeIds.length},
       ${input.scheduledFor ?? null},
       ${input.plannedStartTime ?? null},
+      ${input.escortRequired ?? false},
+      ${input.escortName ?? null},
       NOW(),
       NOW() + INTERVAL '3 minutes',
       NOW()
@@ -720,6 +730,8 @@ export interface RideDetailResult {
   startedAt: Date | null;
   plannedStartTime: Date | null;
   driverReportingTime: Date | null;
+  escortRequired: boolean;
+  escortName: string | null;
   supervisor: { fullName: string; email: string; phone: string | null; org: string | null } | null;
   driver: {
     id: string;
@@ -810,6 +822,8 @@ export async function getRideDetail(rideId: string): Promise<RideDetailResult> {
     startedAt: ride.startedAt,
     plannedStartTime: ride.plannedStartTime,
     driverReportingTime: ride.driverReportingTime,
+    escortRequired: ride.escortRequired,
+    escortName: ride.escortName,
     supervisor: ride.supervisor,
     driver: ride.driver,
     vendor: ride.vendor,

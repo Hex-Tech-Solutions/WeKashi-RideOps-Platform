@@ -46,6 +46,9 @@ const CreateRideSchema = z.object({
   scheduledPickupTimes: z.record(z.string().regex(/^\d{2}:\d{2}$/)).optional(),
   /** Planned departure time set by supervisor (ISO string) */
   plannedStartTime: z.string().datetime().optional(),
+  /** Women's safety escort */
+  escortRequired: z.boolean().optional(),
+  escortName: z.string().max(100).optional().nullable(),
 });
 
 const AdvanceStatusSchema = z.object({
@@ -130,12 +133,45 @@ export function createRidesRouter(io: IoServer): Router {
     async (req: AuthRequest, res: Response, next: NextFunction) => {
       try {
         const body = CreateRideSchema.parse(req.body);
+
+        // ── Server-side escort policy re-validation ───────────────────────────
+        // Fetch employee genders from DB so the frontend cannot bypass the rule
+        // by sending escortRequired=false with female passengers.
+        const { prisma } = await import('../lib/prisma');
+        const employees = await prisma.employee.findMany({
+          where: { id: { in: body.employeeIds } },
+          select: { id: true, gender: true },
+        });
+        const { evaluateEscortPolicy } = await import('../lib/escortPolicy');
+        const rideTime = body.plannedStartTime
+          ? new Date(body.plannedStartTime)
+          : body.scheduledFor
+          ? new Date(body.scheduledFor)
+          : new Date();
+        const policy = evaluateEscortPolicy({
+          passengers: employees.map((e) => ({ gender: e.gender })),
+          rideTime,
+          rideType: body.type,
+        });
+
+        // Hard block: if escort is required but no name was provided
+        if (policy.required && !body.escortName?.trim()) {
+          res.status(422).json({
+            error: 'Escort is mandatory for this ride but no escort name was provided',
+            code: 'ESCORT_REQUIRED',
+            reason: policy.reason,
+          });
+          return;
+        }
+
         const result = await createRide(
           {
             ...body,
             supervisorId: req.user!.id,
             scheduledFor: body.scheduledFor ? new Date(body.scheduledFor) : undefined,
             plannedStartTime: body.plannedStartTime ? new Date(body.plannedStartTime) : undefined,
+            escortRequired: policy.required,
+            escortName: policy.required ? (body.escortName?.trim() ?? null) : null,
           },
           io,
         );

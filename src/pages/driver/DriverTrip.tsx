@@ -22,6 +22,8 @@ import {
   Route,
   LogIn,
   LogOut,
+  Shield,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -89,6 +91,8 @@ export default function DriverTrip({
   const [otp, setOtp] = useState("");
 
   const pax = data?.pax ?? [];
+  const escortRequired = data?.escortRequired ?? false;
+  const escortName     = data?.escortName ?? null;
 
   const currentPickup = isLogin
     ? pax.find((p) => getPaxPhase(p) === "awaiting_pickup")
@@ -152,6 +156,24 @@ export default function DriverTrip({
 
   return (
     <div className="space-y-3">
+      {/* Escort card — shown prominently at the top when escort is assigned */}
+      {escortRequired && escortName && (
+        <div className="rounded-lg border border-amber-400/60 bg-amber-50 p-3 flex items-center gap-3">
+          <div className="h-9 w-9 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+            <Shield className="h-4 w-4 text-amber-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs uppercase tracking-wider font-semibold text-amber-700">Escort on board</div>
+            <div className="font-semibold text-sm text-amber-900 flex items-center gap-1.5 mt-0.5">
+              <UserCheck className="h-3.5 w-3.5" /> {escortName}
+            </div>
+            <div className="text-[10px] text-amber-700 mt-0.5">
+              Escort occupies 1 seat. Not counted in passenger OTP flow.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Multi-stop nav */}
       {navStops.length > 1 && (
         <a

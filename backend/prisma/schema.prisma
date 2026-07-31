@@ -326,6 +326,9 @@ model Ride {
   razorpayOrderId    String?    @map("razorpay_order_id")
   razorpayPaymentId  String?    @map("razorpay_payment_id")
   paidAt             DateTime?  @map("paid_at")
+  // ── Women's safety escort ─────────────────────────────────────────────────
+  escortRequired     Boolean    @default(false) @map("escort_required")
+  escortName         String?    @map("escort_name")
 
   supervisor    User           @relation("SupervisorRides", fields: [supervisorId], references: [id])
   driver        Driver?        @relation("DriverRides", fields: [driverId], references: [id])
