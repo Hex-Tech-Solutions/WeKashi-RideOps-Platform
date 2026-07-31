@@ -125,20 +125,23 @@ router.post(
 
       const driverFare     = ride.price;
       const platformFee    = ride.platformFee  ?? 20;
-      const totalAmount    = ride.totalAmount  ?? (driverFare + platformFee);
+      const escortFee      = (ride as any).escortCharge ?? 0;
+      // totalAmount stored at ride creation already includes escortFee; fall back to recompute
+      const totalAmount    = ride.totalAmount  ?? (driverFare + escortFee + platformFee);
       const amountPaise    = Math.round(totalAmount * 100);
 
       // Driver fine deficit
       const walletBalance  = ride.driver?.walletBalance ?? 0;
       const fineDeduction  = walletBalance < 0 ? Math.abs(walletBalance) : 0;
-      const driverReceives = Math.max(0, driverFare - fineDeduction);
+      // Driver receives: fare + escort charge (escort belongs to driver, not platform)
+      const driverReceives = Math.max(0, driverFare + escortFee - fineDeduction);
 
       if (isDev) {
         const mockOrderId = `order_mock_${Date.now()}`;
         await prisma.ride.update({ where: { id: ride.id }, data: { razorpayOrderId: mockOrderId } });
         res.json({
           orderId: mockOrderId, amount: amountPaise, currency: 'INR', keyId: 'rzp_test_mock',
-          rideId: ride.id, driverFare, platformFee, totalAmount, fineDeduction, driverReceives,
+          rideId: ride.id, driverFare, escortFee, platformFee, totalAmount, fineDeduction, driverReceives,
           driverName: ride.driver?.fullName ?? 'Driver', isMock: true,
         });
         return;
@@ -195,9 +198,11 @@ router.post(
       }
 
       const driverFare    = ride.price!;
+      const escortFee     = (ride as any).escortCharge ?? 0;
       const walletBalance = ride.driver?.walletBalance ?? 0;
       const fineDeduction = walletBalance < 0 ? Math.abs(walletBalance) : 0;
-      const driverReceives = Math.max(0, driverFare - fineDeduction);
+      // Driver receives fare + escort charge
+      const driverReceives = Math.max(0, driverFare + escortFee - fineDeduction);
 
       // ── Razorpay Route transfer ─────────────────────────────────────────────
       let routeTransferred = false;
@@ -210,20 +215,20 @@ router.post(
               account:  rzpAccountId,
               amount:   Math.round(driverReceives * 100), // paise
               currency: 'INR',
-              notes:    { rideId: ride.id, fineDeduction },
+              notes:    { rideId: ride.id, escortFee, fineDeduction },
               on_hold:  0,
             }],
           });
           routeTransferred = true;
-          logger.info({ rideId: ride.id, driverReceives, fineDeduction }, 'Razorpay Route transfer succeeded');
+          logger.info({ rideId: ride.id, driverFare, escortFee, driverReceives, fineDeduction }, 'Razorpay Route transfer succeeded');
         } catch (e: any) {
           logger.warn({ rideId: ride.id, err: e.message }, 'Route transfer failed — wallet fallback');
         }
       }
 
       // ── DB: mark paid + adjust driver walletBalance ────────────────────────
-      // walletBalance: reset fine deficit to 0 (we recovered it), then add driverFare
-      const newWalletBalance = walletBalance + driverFare; // fine was negative, driverFare positive — net = driverReceives
+      // walletBalance += driverFare + escortFee (fine deficit was already negative)
+      const newWalletBalance = walletBalance + driverFare + escortFee;
 
       await prisma.$transaction([
         prisma.ride.update({
@@ -236,8 +241,8 @@ router.post(
         }),
       ]);
 
-      logger.info({ rideId: ride.id, driverFare, fineDeduction, driverReceives, routeTransferred }, 'Payment confirmed');
-      res.json({ ok: true, routeTransferred, driverFare, fineDeduction, driverReceives });
+      logger.info({ rideId: ride.id, driverFare, escortFee, fineDeduction, driverReceives, routeTransferred }, 'Payment confirmed');
+      res.json({ ok: true, routeTransferred, driverFare, escortFee, fineDeduction, driverReceives });
     } catch (err) { next(err); }
   },
 );
@@ -264,7 +269,8 @@ router.post('/webhook', async (req: Request, res: Response, next: NextFunction) 
         });
         if (ride && ride.paymentStatus !== 'paid' && ride.driverId && ride.price) {
           const walletBalance  = ride.driver?.walletBalance ?? 0;
-          const newBalance     = walletBalance + ride.price;
+          const escortFee      = (ride as any).escortCharge ?? 0;
+          const newBalance     = walletBalance + ride.price + escortFee;
           await prisma.$transaction([
             prisma.ride.update({ where: { id: rideId }, data: { paymentStatus: 'paid', razorpayPaymentId: payment.id, paidAt: new Date() } }),
             prisma.driver.update({ where: { id: ride.driverId }, data: { walletBalance: newBalance } }),
