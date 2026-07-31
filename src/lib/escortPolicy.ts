@@ -34,8 +34,11 @@ function isFemale(gender: string): boolean {
 }
 
 export function inRestrictedWindow(rideTime: Date | null): boolean {
-  const t = rideTime ?? new Date();
-  const h = t.getHours() + t.getMinutes() / 60;
+  // If no ride time has been set by the supervisor, we cannot determine the
+  // window — do NOT assume the current time. Return false so the window rule
+  // is skipped until the supervisor actually picks a time.
+  if (!rideTime) return false;
+  const h = rideTime.getHours() + rideTime.getMinutes() / 60;
   return h < ESCORT_WINDOW_START_HOUR || h >= ESCORT_WINDOW_END_HOUR;
 }
 

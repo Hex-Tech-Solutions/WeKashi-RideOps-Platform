@@ -458,6 +458,14 @@ export default function RoutesPage() {
                 </div>
               </div>
             )}
+            {!escortPolicy.required && !plannedPickupTime && selected.some((e) => e.gender === "F") && (
+              <div className="mb-4 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3">
+                <Clock className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+                <div className="text-xs text-warning">
+                  <span className="font-semibold">Set the pickup time below</span> to check if the ride falls in the restricted window (before 07:00 or after 19:00). If it does, additional women's safety rules apply.
+                </div>
+              </div>
+            )}
             <GoogleRouteMap
               route={route}
               type={type}
@@ -474,6 +482,44 @@ export default function RoutesPage() {
                 setPickupTimes((prev) => ({ ...prev, [empId]: time }))
               }
             />
+
+            {/* Shift/pickup time picker — here in Step 2 so the escort badge
+                updates in real-time as the supervisor sets the time */}
+            <div className="mt-4 rounded-md border px-3 py-2.5 space-y-2">
+              <div className="flex items-center gap-2 text-sm">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <div className="flex-1">
+                  <div className="font-medium">Shift / pickup time</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Set the scheduled pickup time — women's safety window rules (before 07:00 or after 19:00) are checked based on this.
+                  </div>
+                </div>
+                {plannedPickupTime && (
+                  <button
+                    type="button"
+                    onClick={() => setPlannedPickupTime("")}
+                    className="text-[11px] text-muted-foreground hover:text-destructive underline shrink-0"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <input
+                type="time"
+                value={plannedPickupTime}
+                onChange={(e) => setPlannedPickupTime(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-gold"
+              />
+              {plannedPickupTime && inRestrictedWindow((() => {
+                const [hh, mm] = plannedPickupTime.split(":").map(Number);
+                const d = new Date(); d.setHours(hh, mm, 0, 0); return d;
+              })()) && (
+                <p className="text-xs text-warning flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  This time is in the restricted window (before 07:00 or after 19:00) — women's safety rules are active.
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -623,21 +669,18 @@ export default function RoutesPage() {
                 </div>
                 <Switch checked={isAc} onCheckedChange={setIsAc} />
               </div>
-              {/* Planned departure time */}
-              <div className="rounded-md border px-3 py-2.5 space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <div className="font-medium">Shift start time</div>
-                    <div className="text-[11px] text-muted-foreground">The shift this ride belongs to — used in OTD reports as "Planned Start Time"</div>
-                  </div>
+              {/* Planned departure time — shown as read-only summary; editable back in Step 2 */}
+              <div className="rounded-md border px-3 py-2.5 flex items-center gap-3">
+                <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 text-sm">
+                  <div className="font-medium">Shift / pickup time</div>
+                  <div className="text-[11px] text-muted-foreground">Used for OTD reports and women's safety window check</div>
                 </div>
-                <input
-                  type="time"
-                  value={plannedPickupTime}
-                  onChange={(e) => setPlannedPickupTime(e.target.value)}
-                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-gold"
-                />
+                {plannedPickupTime ? (
+                  <span className="font-mono text-sm font-semibold text-foreground">{plannedPickupTime}</span>
+                ) : (
+                  <span className="text-xs text-muted-foreground italic">Not set (go back to Step 2)</span>
+                )}
               </div>
               <div className="text-xs space-y-1 text-muted-foreground">
                 <div>• Notifies online <b className="text-foreground">{VEHICLE_LABELS[vehicleType]}</b> drivers within <b className="text-foreground">10 km</b> of first pickup</div>
