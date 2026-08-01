@@ -1,29 +1,38 @@
 name: Deploy to Server
 
-# Auto-deploys on every push to main. The whole stack runs in Docker on the
-# server, so the runner just SSHes in, pulls, and rebuilds the compose stack.
+# Auto-deploys on every push to main.
+# The stack runs in Docker on the Azure VM.
+# The runner SSHes in, pulls latest code, runs migrations, and rebuilds.
 #
 # Required GitHub repo secrets (Settings → Secrets and variables → Actions):
-#   SERVER_HOST      server public IP or DNS
-#   SERVER_USER      ssh username
-#   SERVER_PASSWORD  ssh password for that user
-#   SERVER_PORT      ssh port (optional, defaults to 22)
-#   SERVER_APP_DIR   repo path on the server (optional, defaults to $HOME/rideops-platform)
+#   SERVER_HOST      VM public IP or domain name
+#   SERVER_USER      SSH username (e.g. ubuntu)
+#   SERVER_PASSWORD  SSH password  ← OR use SERVER_SSH_KEY (key auth)
+#   SERVER_SSH_KEY   Contents of the VM private key (preferred over password)
+#   SERVER_PORT      SSH port (optional, defaults to 22)
+#   SERVER_APP_DIR   Repo path on the server (optional, defaults to $HOME/wekashi)
+#
+# The .env.prod file must already exist on the server at $APP_DIR/.env.prod
+# It is NEVER committed to git — create it manually once on first deploy.
 
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch: {}   # Manual trigger from GitHub Actions tab
 
 concurrency:
   group: deploy-server
-  cancel-in-progress: true
+  cancel-in-progress: true  # Cancel older in-flight deploys if a new push arrives
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
+      # ── Option A: SSH with password ──────────────────────────────────────────
+      # Set SERVER_PASSWORD secret to use this path.
       - name: Deploy via SSH (password auth)
+        if: ${{ secrets.SERVER_PASSWORD != '' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -33,15 +42,57 @@ jobs:
           script: |
             set -e
             APP_DIR="${{ secrets.SERVER_APP_DIR }}"
-            cd "${APP_DIR:-$HOME/rideops-platform}"
+            cd "${APP_DIR:-$HOME/wekashi}"
 
             echo "==> Pulling latest code..."
             git pull --ff-only origin main
 
-            echo "==> Building & starting the full stack (postgres, redis, api, web)..."
+            echo "==> Applying DB migrations..."
+            docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm api \
+              npx prisma migrate deploy
+
+            echo "==> Rebuilding & restarting containers..."
             docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 
             echo "==> Pruning dangling images..."
             docker image prune -f
+
+            echo "==> Health check..."
+            sleep 10
+            curl -sf http://localhost/health | grep -q '"status":"ok"' && echo "Health OK" || echo "WARNING: health check failed"
+
+            echo "==> Deploy complete at $(date)"
+
+      # ── Option B: SSH with private key ───────────────────────────────────────
+      # Set SERVER_SSH_KEY secret to use this path (preferred for Azure VMs).
+      - name: Deploy via SSH (key auth)
+        if: ${{ secrets.SERVER_SSH_KEY != '' && secrets.SERVER_PASSWORD == '' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -e
+            APP_DIR="${{ secrets.SERVER_APP_DIR }}"
+            cd "${APP_DIR:-$HOME/wekashi}"
+
+            echo "==> Pulling latest code..."
+            git pull --ff-only origin main
+
+            echo "==> Applying DB migrations..."
+            docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm api \
+              npx prisma migrate deploy
+
+            echo "==> Rebuilding & restarting containers..."
+            docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+
+            echo "==> Pruning dangling images..."
+            docker image prune -f
+
+            echo "==> Health check..."
+            sleep 10
+            curl -sf http://localhost/health | grep -q '"status":"ok"' && echo "Health OK" || echo "WARNING: health check failed"
 
             echo "==> Deploy complete at $(date)"
