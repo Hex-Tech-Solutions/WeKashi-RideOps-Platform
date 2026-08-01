@@ -31,6 +31,7 @@
  */
 
 import { Router, Response, NextFunction, Request } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/authenticate';
@@ -180,7 +181,10 @@ router.post(
     try {
       const { razorpayPaymentId, razorpaySignature } = z.object({
         razorpayPaymentId: z.string().min(1),
-        razorpaySignature: z.string().optional(),
+        // Signature is optional only in dev mode — required in production
+        razorpaySignature: process.env.NODE_ENV === 'production'
+          ? z.string().min(1)
+          : z.string().optional(),
       }).parse(req.body);
 
       const ride = await prisma.ride.findUnique({
@@ -255,16 +259,18 @@ router.post(
 
 // ─── Razorpay webhook ─────────────────────────────────────────────────────────
 
-router.post('/webhook', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
     if (secret) {
       const sig      = req.headers['x-razorpay-signature'] as string;
-      const expected = crypto.createHmac('sha256', secret).update(JSON.stringify(req.body)).digest('hex');
+      // Must use raw bytes — JSON.stringify of a parsed body will not match
+      const rawBody  = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+      const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
       if (sig !== expected) { res.status(400).json({ error: 'Invalid signature' }); return; }
     }
 
-    const event = req.body as any;
+    const event = JSON.parse(req.body.toString()) as any;
     if (event.event === 'payment.captured') {
       const payment = event.payload?.payment?.entity;
       const rideId  = payment?.notes?.rideId;

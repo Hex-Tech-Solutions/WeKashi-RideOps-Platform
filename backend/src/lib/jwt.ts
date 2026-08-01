@@ -3,15 +3,24 @@ import { v4 as uuidv4 } from 'uuid';
 import { JwtAccessPayload, JwtRefreshPayload, UnauthorizedError } from '../types';
 
 // ── Fail hard on missing or default secrets in production ─────────────────────
-const KNOWN_DEFAULTS = new Set(['dev-access-secret', 'dev-refresh-secret']);
+const KNOWN_DEFAULTS = new Set([
+  'dev-access-secret',
+  'dev-refresh-secret',
+  'change-me-access-secret',
+  'change-me-refresh-secret',
+  'CHANGE_ME_access_secret',
+  'CHANGE_ME_refresh_secret',
+]);
 
 function requireSecret(envVar: string, fallback: string): string {
   const value = process.env[envVar] ?? fallback;
-  if (process.env.NODE_ENV === 'production' && KNOWN_DEFAULTS.has(value)) {
-    throw new Error(
-      `FATAL: ${envVar} is not set or is using an insecure default. ` +
-      `Set a strong secret in your production environment.`,
-    );
+  if (process.env.NODE_ENV === 'production') {
+    if (KNOWN_DEFAULTS.has(value)) {
+      throw new Error(`FATAL: ${envVar} is using an insecure default. Set a strong secret (openssl rand -hex 32).`);
+    }
+    if (value.length < 32) {
+      throw new Error(`FATAL: ${envVar} must be at least 32 characters in production.`);
+    }
   }
   return value;
 }

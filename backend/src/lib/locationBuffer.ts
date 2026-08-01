@@ -88,20 +88,23 @@ export async function flushLocationBuffer(): Promise<void> {
 
     // ── 2. Bulk-update driver current_location (one raw query) ────────────
     if (positions.length > 0) {
-      // Build a VALUES clause: (id, lng, lat), ...
-      // We use $executeRaw with interpolated values safely via tagged template
-      // For bulk updates we use a CTE approach
-      const cases = positions
-        .map((p) => `WHEN id = '${p.driverId}' THEN ST_SetSRID(ST_MakePoint(${p.lng}, ${p.lat}), 4326)::geography`)
-        .join(' ');
-      const ids = positions.map((p) => `'${p.driverId}'`).join(',');
+      // Validate all driverIds are UUIDs before building dynamic SQL
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const safePositions = positions.filter((p) => UUID_RE.test(p.driverId));
 
-      await prisma.$executeRawUnsafe(`
-        UPDATE drivers
-        SET current_location = CASE ${cases} ELSE current_location END,
-            is_online = true
-        WHERE id IN (${ids})
-      `);
+      if (safePositions.length > 0) {
+        const cases = safePositions
+          .map((p) => `WHEN id = '${p.driverId}' THEN ST_SetSRID(ST_MakePoint(${p.lng}, ${p.lat}), 4326)::geography`)
+          .join(' ');
+        const ids = safePositions.map((p) => `'${p.driverId}'`).join(',');
+
+        await prisma.$executeRawUnsafe(`
+          UPDATE drivers
+          SET current_location = CASE ${cases} ELSE current_location END,
+              is_online = true
+          WHERE id IN (${ids})
+        `);
+      }
     }
 
     // ── 3. Flush ride breadcrumb trails ───────────────────────────────────
