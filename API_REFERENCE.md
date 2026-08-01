@@ -231,9 +231,11 @@ Advance ride through the state machine.
 **Auth:** Driver, Supervisor, or Admin  
 **Valid transitions:**
 - `assigned` → `in_progress` (driver starts trip)
-- `in_progress` → `completed` (driver completes trip)
+- `in_progress` → `completed` (driver taps "Complete trip" — required for `login`/`scheduled` rides)
 
 **Body:** `{ "status": "in_progress" }`
+
+**Note:** `logout` rides auto-complete server-side (via `verifyDrop`) the instant the last passenger's drop OTP is verified — no explicit `PATCH .../status completed` call needed. `login`/`scheduled` rides do **not** auto-complete after drops (everyone is dropped at the same office, and the driver still needs to physically end the shift), so the driver must tap "Complete trip" in the app, which calls this endpoint.
 
 ---
 
@@ -526,50 +528,71 @@ Count completed rides for a vendor in a period (for payout calculation preview).
 
 ---
 
-## Payments (Supervisor → Driver)
+## Payments (Supervisor → Driver Wallet → Driver Bank Account)
+
+Two separate Razorpay products, two separate credential pairs:
+- **Collection** — Razorpay Payments (Standard Checkout). Supervisor pays the full ride amount; it lands in the platform's account. `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`.
+- **Disbursement** — Razorpay X Payouts (Composite Payout API). Driver withdraws from their in-app wallet straight to their bank/UPI. `RAZORPAY_X_KEY_ID` / `RAZORPAY_X_KEY_SECRET` / `RAZORPAY_X_ACCOUNT_NUMBER`.
+
+Razorpay Route is **not used** anywhere in this codebase.
+
+Money flow:
+```
+Supervisor pays  = driverFare + escortCharge (if any) + platformFee (+ cancellationFee if pending)
+On confirm       → driver wallet credited: driverFare + escortCharge
+Platform retains = platformFee only
+Driver withdraws → wallet debited (amount + ₹5.90 payout fee) → bank/UPI receives exactly `amount`
+```
+
+If `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` are unset, `/initiate` and `/confirm` run in **mock mode** (`isMock: true`, no real Razorpay call). If `RAZORPAY_X_KEY_ID`/`RAZORPAY_X_KEY_SECRET` are unset, `/driver/withdraw` runs in mock mode too. Both mock modes are for local dev only — real (but *invalid*) keys will attempt the live Razorpay API and surface `Authentication failed` if the credentials don't work, they will **not** silently fall back to mock mode.
 
 ### GET /payments/pending
-Completed rides awaiting payment by this supervisor.
+Completed, unpaid rides for this supervisor. Includes driver wallet balance and bank detail per row.  
+**Auth:** Supervisor
 
 ### POST /payments/rides/:id/initiate
-Create a Razorpay order for the ride fare. Returns checkout data.  
+Create a Razorpay order for the ride fare (driverFare + escortCharge + platformFee + cancellationFee). Requires the ride to be `completed`, unpaid, and have a `price` set.  
 **Auth:** Supervisor  
-**Response:** `{ "orderId": "order_xxx", "amount": 77000, "currency": "INR", "keyId": "rzp_...", "driverFare": 750, "platformFee": 20, "totalAmount": 770 }`
+**Response:** `{ "orderId": "order_xxx", "amount": 77000, "currency": "INR", "keyId": "rzp_...", "driverFare": 750, "escortFee": 375, "platformFee": 20, "cancellationFee": 0, "totalAmount": 1145, "fineDeduction": 0, "driverReceives": 1125, "driverName": "...", "isMock": false }`
 
 ### POST /payments/rides/:id/confirm
-Confirm payment after Razorpay checkout. Verifies signature, triggers Route transfer, credits driver wallet.  
+Confirm payment after Razorpay checkout. Verifies HMAC-SHA256 signature (`orderId|paymentId`, keyed by `RAZORPAY_KEY_SECRET`), then atomically marks the ride paid and credits the driver's wallet with `driverFare + escortCharge`. Idempotent — a second call for an already-paid ride returns `{ alreadyPaid: true }` without double-crediting.  
 **Auth:** Supervisor  
-**Body:** `{ "razorpayPaymentId": "pay_xxx", "razorpaySignature": "..." }`
+**Body:** `{ "razorpayPaymentId": "pay_xxx", "razorpaySignature": "..." }` (`razorpaySignature` required in production, optional in dev)  
+**Response:** `{ "ok": true, "driverFare": 750, "escortFee": 375, "fineDeduction": 0, "driverReceives": 1125 }`
 
 ### POST /payments/webhook
-Razorpay webhook receiver. Verifies `x-razorpay-signature` header. Handles `payment.captured` event.  
-**Auth:** Public (signature-verified)
+Razorpay Payments webhook receiver (backup path for missed `/confirm` calls). Verifies `x-razorpay-signature` against `RAZORPAY_WEBHOOK_SECRET` using the raw request body. Handles `payment.captured`.  
+**Auth:** Public (signature-verified). Mounted with `express.raw()` — excluded from the global JSON body parser.
 
-### POST /payments/driver/onboard
-Step 1: Create a Razorpay Route linked account for this driver.  
-**Auth:** Driver
-
-### POST /payments/driver/onboard/bank
-Step 2: Submit UPI ID or bank account for Razorpay verification.  
-**Auth:** Driver  
-**Body:** `{ "upiId": "name@ybl" }` or `{ "accountNo": "...", "ifsc": "HDFC0001234", "accountName": "..." }`
-
-### GET /payments/driver/onboard/status
-Check Razorpay account verification status.  
-**Auth:** Driver  
-**Response:** `{ "step": "complete", "verified": true }`
+### POST /payments/payout-webhook
+Razorpay X payout status webhook. Verifies signature against `RAZORPAY_X_WEBHOOK_SECRET`. Handles `payout.processed` (marks transaction processed) and `payout.failed` / `payout.reversed` (refunds the driver's wallet for the full `totalDeducted` amount).  
+**Auth:** Public (signature-verified). Mounted with `express.raw()`.
 
 ### GET /payments/bank-detail
 Driver's saved bank/UPI details.  
 **Auth:** Driver
 
 ### POST /payments/bank-detail
-Save/update driver bank/UPI details.  
-**Auth:** Driver
+Save/update driver bank/UPI details (UPI ID or account number + IFSC). Re-saving resets `verified` to `false`.  
+**Auth:** Driver  
+**Body:** `{ "upiId": "name@ybl" }` or `{ "accountNo": "1234567890", "ifsc": "SBIN0001234", "accountName": "Ramesh Kumar" }`
+
+### POST /payments/driver/withdraw
+Driver requests a payout from their wallet to their saved bank/UPI. Debits `amount + ₹5.90` from the wallet atomically (fails cleanly if balance is insufficient), then calls the Razorpay X Composite Payout API. If the Razorpay call fails, the wallet debit is rolled back and no money moves. Payout mode is `UPI` if a UPI ID is on file, else `IMPS`.  
+**Auth:** Driver  
+**Body:** `{ "amount": 500 }` (minimum ₹1; driver must have a bank/UPI detail saved first)  
+**Response:** `{ "ok": true, "amount": 500, "fee": 5.9, "totalDeducted": 505.9, "mode": "IMPS", "payoutId": "pout_...", "status": "processed", "isMock": false, "newWalletBalance": 119.1 }`
+
+### GET /payments/driver/payouts
+Driver's last 20 payout transactions (amount, fee, mode, status, timestamps).  
+**Auth:** Driver  
+**Response:** `{ "payouts": [...], "payoutFee": 5.9 }`
 
 ### GET /payments/wallet
-Driver wallet balance and last 20 payments.  
-**Auth:** Driver
+Driver wallet balance, max withdrawable amount (balance minus the ₹5.90 fee), and last 20 paid rides.  
+**Auth:** Driver  
+**Response:** `{ "walletBalance": 625, "maxWithdrawable": 619.1, "payoutFee": 5.9, "payments": [...] }`
 
 ---
 

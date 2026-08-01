@@ -3,6 +3,12 @@ import { redis } from './redis';
 import { logger } from './logger';
 import type { Server as IoServer } from 'socket.io';
 
+// Lazy import to avoid circular dependency (ride.service.ts doesn't import broadcastSweeper directly at module scope)
+async function sweepStaleScheduledRides(): Promise<void> {
+  const { sweepStaleScheduledRides: sweep } = await import('../services/ride.service');
+  await sweep();
+}
+
 let sweeperInterval: NodeJS.Timeout | null = null;
 let ioInstance: IoServer | null = null;
 
@@ -15,6 +21,7 @@ export function initBroadcastSweeper(io: IoServer): void {
 
   sweeperInterval = setInterval(async () => {
     await sweepExpiredBroadcasts();
+    await sweepStaleScheduledRides();
   }, 30_000);
 
   logger.info('Broadcast sweeper started (interval: 30s)');
