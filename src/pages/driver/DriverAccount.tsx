@@ -9,15 +9,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   useDriverMe, useSetDriverVehicle, useDriverWallet,
   useDriverBankDetail, useSaveDriverBankDetail,
-  useOnboardingStatus, useStartOnboarding, useSubmitBankForOnboarding,
+  useWithdraw, useDriverPayouts,
   useUpdateDriverProfile,
+  type PayoutTransaction,
 } from "@/lib/queries";
 import { VEHICLE_LABELS, type VehicleType } from "@/lib/pricing";
 import { useDriverAuth } from "./useDriverAuth";
 import {
   LogOut, Star, Building2, BadgeCheck, Phone, Car, Wallet,
-  AlertTriangle, IndianRupee, CheckCircle2, Pencil, X, Check, Loader2,
-  CreditCard, FileText, Save,
+  AlertTriangle, IndianRupee, CheckCircle2, Check, Loader2,
+  CreditCard, FileText, Save, ArrowDownToLine, Clock, XCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -89,6 +90,8 @@ export default function DriverAccount() {
       {/* Wallet */}
       <WalletCard
         balance={walletData?.walletBalance ?? me?.walletBalance ?? 0}
+        maxWithdrawable={walletData?.maxWithdrawable ?? 0}
+        payoutFee={walletData?.payoutFee ?? 5.90}
         payments={walletData?.payments ?? []}
       />
 
@@ -198,18 +201,19 @@ function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>["data"]
 
 function WalletCard({
   balance,
+  maxWithdrawable,
+  payoutFee,
   payments,
 }: {
   balance: number;
+  maxWithdrawable: number;
+  payoutFee: number;
   payments: Array<{
-    id: string; price: number | null; platformFee?: number | null;
+    id: string; price: number | null; escortCharge?: number | null; platformFee?: number | null;
     paidAt: string | null; pickupAddress: string; dropAddress: string;
     supervisor: { fullName: string; org: string | null } | null;
   }>;
 }) {
-  const { data: bankData } = useDriverBankDetail();
-  const bankDetail = bankData?.bankDetail;
-
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -224,29 +228,36 @@ function WalletCard({
           <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Available balance</div>
           <div className="text-4xl font-bold flex items-center gap-1">
             <IndianRupee className="h-7 w-7" />
-            {balance.toLocaleString()}
+            {balance.toFixed(2)}
           </div>
-          <div className="text-[11px] text-muted-foreground mt-2">
-            This is your total earnings from completed rides.
-          </div>
+          {maxWithdrawable > 0 && (
+            <div className="text-[11px] text-muted-foreground mt-1">
+              Max withdrawable: ₹{maxWithdrawable.toFixed(2)} (after ₹{payoutFee} fee)
+            </div>
+          )}
         </div>
 
-        {/* Bank/UPI setup */}
-        <RouteOnboardingSection />
+        {/* Withdraw section */}
+        <WithdrawSection balance={balance} maxWithdrawable={maxWithdrawable} payoutFee={payoutFee} />
 
         <Separator />
 
-        {/* Payment history */}
+        {/* Payout history */}
+        <PayoutHistory />
+
+        <Separator />
+
+        {/* Ride earnings history */}
         <div>
           <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-2">
-            Payment history ({payments.length})
+            Ride earnings ({payments.length})
           </div>
           {payments.length === 0 ? (
             <div className="text-xs text-muted-foreground text-center py-6 border-2 border-dashed rounded-lg">
               No payments received yet. Complete rides to start earning.
             </div>
           ) : (
-            <ScrollArea className="max-h-72">
+            <ScrollArea className="max-h-56">
               <div className="space-y-2">
                 {payments.map((p) => (
                   <div key={p.id} className="flex items-start gap-3 p-3 rounded-lg border bg-card text-xs">
@@ -263,9 +274,11 @@ function WalletCard({
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-bold text-success text-sm flex items-center gap-0.5">
-                        +<IndianRupee className="h-3 w-3" />{p.price?.toLocaleString() ?? "—"}
+                        +<IndianRupee className="h-3 w-3" />{((p.price ?? 0) + (p.escortCharge ?? 0)).toLocaleString()}
                       </div>
-                      <div className="text-[10px] text-muted-foreground">Your earnings</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {p.escortCharge ? `Fare ₹${p.price} + escort ₹${p.escortCharge}` : "Credited to wallet"}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -278,90 +291,67 @@ function WalletCard({
   );
 }
 
-// ─── Razorpay Route onboarding wizard ────────────────────────────────────────
+// ─── Withdraw section ─────────────────────────────────────────────────────────
 
-function RouteOnboardingSection() {
-  const { data: statusData, isLoading } = useOnboardingStatus();
-  const startOnboarding  = useStartOnboarding();
-  const submitBank       = useSubmitBankForOnboarding();
-
-  const [tab, setTab]             = useState<"upi" | "bank">("upi");
-  const [upiId, setUpiId]         = useState("");
+function WithdrawSection({
+  balance,
+  maxWithdrawable,
+  payoutFee,
+}: {
+  balance: number;
+  maxWithdrawable: number;
+  payoutFee: number;
+}) {
+  const { data: bankData }    = useDriverBankDetail();
+  const saveBankDetail        = useSaveDriverBankDetail();
+  const withdraw              = useWithdraw();
+  const [amount, setAmount]   = useState("");
+  const [tab, setTab]         = useState<"upi" | "bank">("upi");
+  const [upiId, setUpiId]     = useState("");
   const [accountNo, setAccountNo] = useState("");
-  const [ifsc, setIfsc]           = useState("");
+  const [ifsc, setIfsc]       = useState("");
   const [accountName, setAccountName] = useState("");
+  const [editingBank, setEditingBank] = useState(false);
 
-  const step = statusData?.step ?? "not_started";
-  const verified = statusData?.verified ?? false;
+  const bankDetail = bankData?.bankDetail;
+  const hasBankDetail = bankDetail && (bankDetail.upiId || bankDetail.accountNo);
 
-  const handleStart = () => {
-    startOnboarding.mutate(undefined, {
-      onError: (e: any) => toast.error(e?.message ?? "Failed to start onboarding"),
-    });
-  };
-
-  const handleSubmitBank = () => {
+  const handleSaveBank = () => {
     const payload = tab === "upi"
       ? { upiId: upiId.trim() }
       : { accountNo: accountNo.trim(), ifsc: ifsc.trim().toUpperCase(), accountName: accountName.trim() };
-    submitBank.mutate(payload as any, {
-      onSuccess: () => toast.success("Details submitted — verification in progress"),
+    saveBankDetail.mutate(payload as any, {
+      onSuccess: () => { toast.success("Bank details saved"); setEditingBank(false); },
       onError: (e: any) => toast.error(e?.message ?? "Failed"),
+    });
+  };
+
+  const handleWithdraw = () => {
+    const amt = parseFloat(amount);
+    if (!amt || amt < 1) { toast.error("Enter a valid amount (minimum ₹1)"); return; }
+    if (amt > maxWithdrawable) {
+      toast.error(`Max withdrawable is ₹${maxWithdrawable.toFixed(2)} (including ₹${payoutFee} fee)`);
+      return;
+    }
+    withdraw.mutate(amt, {
+      onSuccess: (data) => {
+        toast.success(`₹${data.amount} sent to your ${data.mode === "UPI" ? "UPI" : "bank account"}`);
+        setAmount("");
+      },
+      onError: (e: any) => toast.error(e?.message ?? "Withdrawal failed"),
     });
   };
 
   return (
     <div className="rounded-lg border p-3 space-y-3">
-      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        Payout setup
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+        <ArrowDownToLine className="h-3.5 w-3.5" /> Withdraw to bank / UPI
       </div>
 
-      {/* Step indicator */}
-      <div className="flex items-center gap-2">
-        {[
-          { label: "Create account", done: step !== "not_started" },
-          { label: "Add bank/UPI",   done: step === "pending_verification" || verified },
-          { label: "Verified",        done: verified },
-        ].map((s, i) => (
-          <div key={i} className="flex items-center gap-1.5 flex-1">
-            <div className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
-              s.done ? "bg-success text-white" : "bg-muted text-muted-foreground"
-            }`}>
-              {s.done ? <Check className="h-3 w-3" /> : i + 1}
-            </div>
-            <span className={`text-[10px] ${s.done ? "text-success font-medium" : "text-muted-foreground"}`}>
-              {s.label}
-            </span>
-            {i < 2 && <div className="flex-1 h-px bg-border" />}
-          </div>
-        ))}
-      </div>
-
-      {isLoading && <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>}
-
-      {/* Step 1: not started */}
-      {!isLoading && step === "not_started" && (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Set up your Razorpay payout account to receive payments directly when supervisors pay for rides.
-          </p>
-          <Button
-            className="w-full bg-foreground text-background hover:bg-foreground/90"
-            onClick={handleStart}
-            disabled={startOnboarding.isPending}
-          >
-            {startOnboarding.isPending
-              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Setting up…</>
-              : "Set up payout account"
-            }
-          </Button>
-        </div>
-      )}
-
-      {/* Step 2: account created, need bank/UPI */}
-      {!isLoading && step === "not_started" === false && !verified && step !== "pending_verification" && (
+      {/* Bank detail section */}
+      {!hasBankDetail || editingBank ? (
         <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">Add your UPI ID or bank account to receive payments.</p>
+          <p className="text-xs text-muted-foreground">Add your UPI ID or bank account to withdraw earnings.</p>
           <div className="flex rounded-lg border p-1 bg-muted/40 gap-1">
             {(["upi", "bank"] as const).map((t) => (
               <button key={t} type="button" onClick={() => setTab(t)}
@@ -373,7 +363,7 @@ function RouteOnboardingSection() {
             ))}
           </div>
           {tab === "upi" ? (
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label className="text-xs">UPI ID</Label>
               <Input value={upiId} onChange={(e) => setUpiId(e.target.value)} placeholder="name@upi or 9876543210@ybl" className="h-9 font-mono text-sm" />
             </div>
@@ -384,33 +374,136 @@ function RouteOnboardingSection() {
               <div className="space-y-1"><Label className="text-xs">IFSC code</Label><Input value={ifsc} onChange={(e) => setIfsc(e.target.value.toUpperCase())} className="h-9 font-mono" maxLength={11} /></div>
             </div>
           )}
-          <Button className="w-full bg-foreground text-background hover:bg-foreground/90" onClick={handleSubmitBank} disabled={submitBank.isPending}>
-            {submitBank.isPending ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Submitting…</> : <><Check className="h-3.5 w-3.5" /> Submit for verification</>}
-          </Button>
-        </div>
-      )}
-
-      {/* Step 2b: pending verification */}
-      {!isLoading && step === "pending_verification" && (
-        <div className="rounded-md border bg-warning/5 border-warning/30 p-3 text-xs text-warning flex items-start gap-2">
-          <Loader2 className="h-3.5 w-3.5 shrink-0 mt-0.5 animate-spin" />
-          <div>
-            <div className="font-semibold">Verification in progress</div>
-            <div className="text-muted-foreground mt-0.5">Razorpay is verifying your bank/UPI details. This usually takes a few minutes.</div>
+          <div className="flex gap-2">
+            {editingBank && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditingBank(false)}>Cancel</Button>
+            )}
+            <Button className="flex-1 bg-foreground text-background hover:bg-foreground/90" onClick={handleSaveBank} disabled={saveBankDetail.isPending}>
+              {saveBankDetail.isPending ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</> : <><Check className="h-3.5 w-3.5" /> Save</>}
+            </Button>
           </div>
         </div>
-      )}
-
-      {/* Complete */}
-      {!isLoading && verified && (
-        <div className="rounded-md border bg-success/5 border-success/30 p-3 text-xs text-success flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <div>
-            <div className="font-semibold">Payout account verified</div>
-            <div className="text-muted-foreground mt-0.5">Payments from supervisors will be automatically transferred to your account.</div>
+      ) : (
+        <div className="space-y-3">
+          {/* Saved bank detail */}
+          <div className="rounded-md bg-muted/40 border px-3 py-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <CreditCard className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs font-medium truncate font-mono">
+                  {bankDetail.upiId ?? `${bankDetail.accountNo?.slice(-4).padStart(bankDetail.accountNo.length, '•')}`}
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {bankDetail.upiId ? "UPI" : `Bank · ${bankDetail.ifsc}`}
+                </div>
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" className="shrink-0 text-xs h-7 px-2" onClick={() => setEditingBank(true)}>
+              Change
+            </Button>
           </div>
+
+          {/* Withdraw amount */}
+          {balance > payoutFee ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="Amount to withdraw"
+                    className="h-9 pl-8"
+                    min={1}
+                    max={maxWithdrawable}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 h-9 text-xs"
+                  onClick={() => setAmount(maxWithdrawable.toFixed(2))}
+                >
+                  Max
+                </Button>
+              </div>
+              {amount && parseFloat(amount) > 0 && (
+                <div className="text-[11px] text-muted-foreground bg-muted/40 rounded p-2 space-y-0.5">
+                  <div className="flex justify-between"><span>You receive</span><span className="font-medium">₹{parseFloat(amount).toFixed(2)}</span></div>
+                  <div className="flex justify-between text-warning"><span>Fee (₹5 + ₹0.90 GST)</span><span>₹{payoutFee.toFixed(2)}</span></div>
+                  <div className="flex justify-between font-medium border-t pt-0.5 mt-0.5"><span>Wallet deducted</span><span>₹{(parseFloat(amount) + payoutFee).toFixed(2)}</span></div>
+                </div>
+              )}
+              <Button
+                className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
+                onClick={handleWithdraw}
+                disabled={withdraw.isPending || !amount || parseFloat(amount) < 1}
+              >
+                {withdraw.isPending
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing…</>
+                  : <><ArrowDownToLine className="h-3.5 w-3.5" /> Withdraw to {bankDetail.upiId ? "UPI" : "bank"}</>}
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center py-2">
+              Minimum balance to withdraw: ₹{(payoutFee + 1).toFixed(2)}
+            </p>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Payout history ───────────────────────────────────────────────────────────
+
+function PayoutHistory() {
+  const { data } = useDriverPayouts();
+  const payouts  = data?.payouts ?? [];
+
+  if (payouts.length === 0) return null;
+
+  const statusIcon = (s: PayoutTransaction["status"]) => {
+    if (s === "processed")  return <CheckCircle2 className="h-3.5 w-3.5 text-success" />;
+    if (s === "failed")     return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+    if (s === "reversed")   return <XCircle className="h-3.5 w-3.5 text-warning" />;
+    return <Clock className="h-3.5 w-3.5 text-muted-foreground animate-pulse" />;
+  };
+
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-2">
+        Withdrawal history ({payouts.length})
+      </div>
+      <div className="space-y-2">
+        {payouts.map((p) => (
+          <div key={p.id} className="flex items-center gap-3 p-2.5 rounded-lg border text-xs">
+            <div className="shrink-0">{statusIcon(p.status)}</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium">₹{p.amount.toFixed(2)}</span>
+                <span className="text-muted-foreground">→ {p.mode}</span>
+                {p.utr && <span className="text-[10px] font-mono text-muted-foreground truncate">UTR: {p.utr}</span>}
+              </div>
+              <div className="text-muted-foreground mt-0.5">
+                {format(new Date(p.createdAt), "dd MMM, HH:mm")}
+                {" · "}fee ₹{p.fee.toFixed(2)}
+              </div>
+            </div>
+            <Badge
+              variant="outline"
+              className={`text-[10px] shrink-0 capitalize ${
+                p.status === "processed" ? "border-success/40 text-success"
+                : p.status === "failed" || p.status === "reversed" ? "border-destructive/40 text-destructive"
+                : "border-warning/40 text-warning"
+              }`}
+            >
+              {p.status}
+            </Badge>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

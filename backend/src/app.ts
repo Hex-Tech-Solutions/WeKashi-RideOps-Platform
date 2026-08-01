@@ -47,8 +47,20 @@ export function createApp(io: IoServer): express.Application {
   // X-Powered-By is disabled by helmet automatically
 
   // Body parsing — size limits prevent DoS
-  app.use(express.json({ limit: '1mb' }));          // was 5mb — reduce attack surface
-  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+  // IMPORTANT: Razorpay webhook routes need the RAW request body to verify
+  // HMAC signatures — re-serializing a parsed JSON object with JSON.stringify
+  // does not reliably reproduce the exact bytes Razorpay signed. These two
+  // paths are excluded from the global JSON parser; the payments router
+  // applies express.raw() itself for those routes only.
+  const WEBHOOK_PATHS = new Set(['/api/payments/webhook', '/api/payments/payout-webhook']);
+  app.use((req, res, next) => {
+    if (WEBHOOK_PATHS.has(req.path)) { next(); return; }
+    express.json({ limit: '1mb' })(req, res, next);
+  });
+  app.use((req, res, next) => {
+    if (WEBHOOK_PATHS.has(req.path)) { next(); return; }
+    express.urlencoded({ extended: true, limit: '1mb' })(req, res, next);
+  });
 
   // Structured HTTP logging
   app.use(

@@ -1412,6 +1412,7 @@ export interface PendingPaymentRide {
   type: string;
   price: number | null;
   platformFee: number | null;
+  escortCharge: number | null;
   totalAmount: number | null;
   distanceKm: number | null;
   pickupAddress: string;
@@ -1423,7 +1424,6 @@ export interface PendingPaymentRide {
     fullName: string;
     phone: string;
     walletBalance: number;
-    razorpayAccountVerified: boolean;
     bankDetail: { upiId: string | null; accountNo: string | null; ifsc: string | null; accountName: string | null; verified: boolean } | null;
   } | null;
 }
@@ -1443,7 +1443,9 @@ export interface PaymentInitResult {
   keyId: string;
   rideId: string;
   driverFare: number;
+  escortFee: number;
   platformFee: number;
+  cancellationFee: number;
   totalAmount: number;
   fineDeduction: number;
   driverReceives: number;
@@ -1483,6 +1485,7 @@ export function useConfirmPayment() {
 export interface WalletPayment {
   id: string;
   price: number | null;
+  escortCharge: number | null;
   platformFee: number | null;
   paidAt: string | null;
   type: string;
@@ -1494,7 +1497,7 @@ export interface WalletPayment {
 export function useDriverWallet() {
   return useQuery({
     queryKey: ["driverWallet"],
-    queryFn: () => api<{ walletBalance: number; payments: WalletPayment[] }>("/payments/wallet"),
+    queryFn: () => api<{ walletBalance: number; maxWithdrawable: number; payoutFee: number; payments: WalletPayment[] }>("/payments/wallet"),
     refetchInterval: 30_000,
   });
 }
@@ -1523,40 +1526,50 @@ export function useSaveDriverBankDetail() {
   });
 }
 
-// ─── Driver Route Onboarding ──────────────────────────────────────────────────
+// ─── Driver Payouts (Razorpay X) ──────────────────────────────────────────────
 
-export interface OnboardingStatus {
-  step: 'not_started' | 'pending_verification' | 'complete';
-  verified: boolean;
-  razorpayAccountId?: string;
-  isMock?: boolean;
+export interface PayoutTransaction {
+  id:               string;
+  amount:           number;
+  fee:              number;
+  totalDeducted:    number;
+  mode:             string;
+  status:           'processing' | 'processed' | 'failed' | 'reversed';
+  razorpayPayoutId: string | null;
+  utr:              string | null;
+  createdAt:        string;
 }
 
-export function useOnboardingStatus() {
-  return useQuery({
-    queryKey: ["driverOnboardingStatus"],
-    queryFn: () => api<OnboardingStatus>("/payments/driver/onboard/status"),
-    refetchInterval: 15_000,
-  });
+export interface WithdrawResult {
+  ok:               boolean;
+  amount:           number;
+  fee:              number;
+  totalDeducted:    number;
+  mode:             string;
+  payoutId:         string;
+  status:           string;
+  newWalletBalance: number;
+  isMock?:          boolean;
 }
 
-export function useStartOnboarding() {
+export function useWithdraw() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api<{ razorpayAccountId: string; isMock?: boolean }>("/payments/driver/onboard", { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driverOnboardingStatus"] }),
-  });
-}
-
-export function useSubmitBankForOnboarding() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (p: { upiId?: string; accountNo?: string; ifsc?: string; accountName?: string }) =>
-      api<{ ok: boolean; verified: boolean }>("/payments/driver/onboard/bank", { method: "POST", body: JSON.stringify(p) }),
+    mutationFn: (amount: number) =>
+      api<WithdrawResult>("/payments/driver/withdraw", { method: "POST", body: JSON.stringify({ amount }) }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["driverOnboardingStatus"] });
-      qc.invalidateQueries({ queryKey: ["driverBankDetail"] });
+      qc.invalidateQueries({ queryKey: ["driverWallet"] });
+      qc.invalidateQueries({ queryKey: ["driverPayouts"] });
+      qc.invalidateQueries({ queryKey: ["driver"] });
     },
+  });
+}
+
+export function useDriverPayouts() {
+  return useQuery({
+    queryKey: ["driverPayouts"],
+    queryFn: () => api<{ payouts: PayoutTransaction[]; payoutFee: number }>("/payments/driver/payouts"),
+    refetchInterval: 30_000,
   });
 }
 

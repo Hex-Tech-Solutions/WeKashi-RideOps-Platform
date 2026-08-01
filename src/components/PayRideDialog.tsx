@@ -39,11 +39,13 @@ export function PayRideDialog({ ride, onClose }: Props) {
   const [initData, setInitData] = useState<PaymentInitResult | null>(null);
 
   // Use values from initiate response once available (includes fine deduction calc)
-  const driverFare     = initData?.driverFare     ?? ride?.price       ?? 0;
-  const platformFee    = initData?.platformFee    ?? ride?.platformFee  ?? 20;
-  const totalAmount    = initData?.totalAmount    ?? ride?.totalAmount  ?? (driverFare + platformFee);
-  const fineDeduction  = initData?.fineDeduction  ?? 0;
-  const driverReceives = initData?.driverReceives ?? driverFare;
+  const driverFare      = initData?.driverFare      ?? ride?.price         ?? 0;
+  const escortFee        = initData?.escortFee       ?? ride?.escortCharge  ?? 0;
+  const platformFee      = initData?.platformFee     ?? ride?.platformFee   ?? 20;
+  const cancellationFee  = initData?.cancellationFee  ?? 0;
+  const totalAmount      = initData?.totalAmount      ?? ride?.totalAmount  ?? (driverFare + escortFee + platformFee + cancellationFee);
+  const fineDeduction    = initData?.fineDeduction    ?? 0;
+  const driverReceives   = initData?.driverReceives   ?? (driverFare + escortFee);
 
   const handlePay = async () => {
     if (!ride) return;
@@ -143,9 +145,9 @@ export function PayRideDialog({ ride, onClose }: Props) {
                       <div className="font-medium text-sm truncate">{ride.driver.fullName}</div>
                       <div className="text-[11px] text-muted-foreground flex items-center gap-1">
                         <Car className="h-3 w-3 shrink-0" />
-                        {ride.driver.razorpayAccountVerified
-                          ? <span className="text-success">Payout account verified</span>
-                          : <span className="text-warning">Payout account not set up</span>
+                        {ride.driver.bankDetail?.upiId || ride.driver.bankDetail?.accountNo
+                          ? <span className="text-success">Bank details on file</span>
+                          : <span className="text-warning">No bank details — driver needs to add UPI/bank</span>
                         }
                       </div>
                     </div>
@@ -162,6 +164,12 @@ export function PayRideDialog({ ride, onClose }: Props) {
                       <span className="text-muted-foreground shrink-0">Driver fare</span>
                       <span className="font-semibold">₹{driverFare.toLocaleString()}</span>
                     </div>
+                    {escortFee > 0 && (
+                      <div className="flex items-center justify-between gap-4 rounded bg-amber-50 border border-amber-200 px-2 py-1 text-amber-700 text-xs w-full">
+                        <span className="shrink-0">Escort charge (50%)</span>
+                        <span className="font-semibold">+₹{escortFee.toLocaleString()}</span>
+                      </div>
+                    )}
                     {fineDeduction > 0 && (
                       <div className="flex items-center justify-between gap-4 rounded bg-warning/10 border border-warning/20 px-2 py-1 text-warning text-xs w-full">
                         <span className="shrink-0">Fine recovery</span>
@@ -172,6 +180,12 @@ export function PayRideDialog({ ride, onClose }: Props) {
                       <span className="shrink-0">Platform fee</span>
                       <span>₹{platformFee.toLocaleString()}</span>
                     </div>
+                    {cancellationFee > 0 && (
+                      <div className="flex items-center justify-between gap-4 rounded bg-warning/10 border border-warning/20 px-2 py-1 text-warning text-xs w-full">
+                        <span className="shrink-0">Cancellation penalty (previous ride)</span>
+                        <span className="font-semibold">+₹{cancellationFee.toLocaleString()}</span>
+                      </div>
+                    )}
                   </div>
                   <Separator />
                   <div className="flex items-center justify-between gap-4 w-full">

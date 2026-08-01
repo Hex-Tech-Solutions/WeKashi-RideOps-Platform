@@ -1,9 +1,12 @@
 import { prisma } from '../lib/prisma';
-import { NotFoundError, ForbiddenError, ValidationError } from '../types';
+import { redis } from '../lib/redis';
+import { NotFoundError, ForbiddenError, ValidationError, TooManyRequestsError } from '../types';
 import { smsSender } from '../lib/sms';
 import { logger } from '../lib/logger';
+import { randomInt } from 'crypto';
 
-const gen4 = () => String(Math.floor(1000 + Math.random() * 9000));
+// Use crypto.randomInt for cryptographically secure OTPs
+const gen4 = () => String(randomInt(1000, 10000));
 
 // Generate per-passenger legs (ordered by the route) with pickup + drop OTPs.
 export async function createRidePax(
@@ -119,25 +122,45 @@ async function loadPax(rideId: string, paxId: string) {
   return pax;
 }
 
+/** Rate-limit OTP verification per passenger — max 5 attempts */
+async function checkPaxOtpRateLimit(paxId: string): Promise<void> {
+  const key = `pax:otp:attempts:${paxId}`;
+  const attempts = await redis.incr(key);
+  if (attempts === 1) await redis.expire(key, 3600); // 1 hour window
+  if (attempts > 5) {
+    throw new TooManyRequestsError('Too many OTP attempts for this passenger. Try again later.');
+  }
+}
+
 // Auto-complete the ride once every passenger is dropped (logout only).
-// Login rides still have to reach the office after the last pickup, so those are
-// completed manually by the driver — never auto-completed on the final pickup.
+// Uses a conditional UPDATE to prevent race condition where two concurrent
+// verifyDrop calls both read allDone=false before either commits.
 async function maybeComplete(rideId: string): Promise<void> {
   const ride = await prisma.ride.findUnique({ where: { id: rideId }, select: { type: true, status: true } });
   if (!ride || ride.type !== 'logout') return;
   if (!['assigned', 'in_progress'].includes(ride.status)) return;
-  const pax = await prisma.ridePax.findMany({ where: { rideId } });
-  if (!pax.length) return;
-  const allDone = pax.every((p) => p.noShow || p.droppedAt);
-  if (allDone) {
-    await prisma.ride.update({ where: { id: rideId }, data: { status: 'completed', completedAt: new Date() } });
-  }
+
+  // Atomic: only complete if NO undropped, non-noshow passengers remain
+  await prisma.$executeRaw`
+    UPDATE rides SET status = 'completed', completed_at = NOW()
+    WHERE id = ${rideId}
+      AND status IN ('assigned', 'in_progress')
+      AND NOT EXISTS (
+        SELECT 1 FROM ride_pax
+        WHERE ride_id = ${rideId}
+          AND no_show = false
+          AND dropped_at IS NULL
+      )
+  `;
 }
 
 export async function verifyPickup(rideId: string, paxId: string, otp: string, driverId: string) {
   await assertDriverRide(rideId, driverId);
   const pax = await loadPax(rideId, paxId);
+  await checkPaxOtpRateLimit(paxId);
   if (pax.pickupOtp !== otp) throw new ValidationError('Incorrect pickup OTP');
+  // Clear rate limit on success
+  await redis.del(`pax:otp:attempts:${paxId}`);
   await prisma.ridePax.update({ where: { id: paxId }, data: { pickedAt: new Date(), noShow: false } });
   await maybeComplete(rideId);
   return { ok: true };
@@ -146,7 +169,9 @@ export async function verifyPickup(rideId: string, paxId: string, otp: string, d
 export async function verifyDrop(rideId: string, paxId: string, otp: string, driverId: string) {
   await assertDriverRide(rideId, driverId);
   const pax = await loadPax(rideId, paxId);
+  await checkPaxOtpRateLimit(paxId);
   if (pax.dropOtp !== otp) throw new ValidationError('Incorrect drop OTP');
+  await redis.del(`pax:otp:attempts:${paxId}`);
   await prisma.ridePax.update({ where: { id: paxId }, data: { droppedAt: new Date() } });
   await maybeComplete(rideId);
   return { ok: true };

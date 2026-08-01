@@ -1,38 +1,43 @@
 /**
- * Payment routes — Razorpay Route split + driver onboarding + wallet fines.
+ * Payment routes
  *
- * Money flow:
- *   Supervisor pays totalAmount = driverFare + escortCharge + platformFee + pendingCancellationFee
- *   → Razorpay order captures the full amount into your account
- *   → Route transfer to driver: (driverFare + escortCharge) - |walletFineDeficit|
- *     (escort charge belongs to the driver — it compensates for the extra passenger/risk)
- *   → Your account retains: platformFee + cancellationFee + any fine recovered
+ * ── Collection (Razorpay Payments) ────────────────────────────────────────────
+ * Supervisor pays via Standard Checkout → full amount captured in your account.
+ * Driver's in-app wallet is credited. Driver withdraws via Razorpay X Payouts.
  *
- * Example: ₹500 fare, escort required (₹250 escort), no fine
- *   Supervisor pays:  ₹500 + ₹250 + ₹20 = ₹770
- *   Driver receives:  ₹500 + ₹250        = ₹750
- *   Platform retains: ₹20 (platform fee only)
+ * Money flow (collection):
+ *   Supervisor pays = driverFare + escortCharge + platformFee + cancellationFee
+ *   → Razorpay order created, checkout opened
+ *   → On payment captured: signature verified, driver wallet credited
+ *   → Platform retains: platformFee (₹20) + cancellationFee
+ *   → Driver receives: driverFare + escortCharge (via wallet, then withdrawal)
  *
- * Driver Route onboarding:
- *   POST /payments/driver/onboard        — create Razorpay linked account
- *   POST /payments/driver/onboard/bank   — add bank/UPI, triggers verification
- *   GET  /payments/driver/onboard/status — check Razorpay verification status
+ * ── Disbursement (Razorpay X Payouts) ─────────────────────────────────────────
+ * Driver sees wallet balance → taps Withdraw → backend calls Razorpay X Payouts.
+ * Uses Composite Payout API (single call, no pre-registration needed).
  *
- * Supervisor:
- *   GET  /payments/pending               — list unpaid completed rides
- *   POST /payments/rides/:id/initiate    — create Razorpay order
- *   POST /payments/rides/:id/confirm     — verify + Route transfer + clear fine
- *   POST /payments/webhook               — Razorpay webhook backup
+ * Fee structure (charged to driver):
+ *   ₹5 flat fee + 18% GST = ₹5.90 per payout (deducted from wallet)
+ *   Driver requests ₹X → wallet debited ₹(X + 5.90) → bank receives ₹X
+ *   Minimum withdrawal: ₹1 (so min wallet needed = ₹6.90)
  *
- * Driver:
- *   GET  /payments/bank-detail           — fetch saved UPI/bank
- *   POST /payments/bank-detail           — save UPI/bank
- *   GET  /payments/wallet                — balance + payment history
+ * Endpoints:
+ *   GET  /payments/pending               — supervisor: unpaid completed rides
+ *   POST /payments/rides/:id/initiate    — supervisor: create Razorpay order
+ *   POST /payments/rides/:id/confirm     — supervisor: verify + credit wallet
+ *   POST /payments/webhook               — Razorpay Payments webhook (backup)
+ *   POST /payments/payout-webhook        — Razorpay X payout status webhook
+ *   GET  /payments/bank-detail           — driver: fetch saved UPI/bank
+ *   POST /payments/bank-detail           — driver: save UPI/bank
+ *   POST /payments/driver/withdraw       — driver: request payout
+ *   GET  /payments/driver/payouts        — driver: payout history
+ *   GET  /payments/wallet                — driver: wallet balance + ride earnings
  */
 
 import { Router, Response, NextFunction, Request } from 'express';
 import express from 'express';
 import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -43,18 +48,33 @@ import crypto from 'crypto';
 
 const router = Router();
 
+// ─── Payout fee constants ──────────────────────────────────────────────────────
+const PAYOUT_FEE     = 5.00;  // Razorpay flat fee per payout
+const PAYOUT_GST     = 0.90;  // 18% GST on ₹5
+export const PAYOUT_TOTAL_FEE = Math.round((PAYOUT_FEE + PAYOUT_GST) * 100) / 100; // ₹5.90
+const PAYOUT_MIN_AMOUNT = 1;   // Minimum payout amount in ₹
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function rzpAuth() {
+/** Auth header for Razorpay Payments API */
+function rzpPaymentsAuth() {
   return Buffer.from(
     `${process.env.RAZORPAY_KEY_ID ?? ''}:${process.env.RAZORPAY_KEY_SECRET ?? ''}`,
   ).toString('base64');
 }
 
-async function rzpPost(path: string, body: object) {
+/** Auth header for Razorpay X Payouts API (separate credentials) */
+function rzpXAuth() {
+  return Buffer.from(
+    `${process.env.RAZORPAY_X_KEY_ID ?? ''}:${process.env.RAZORPAY_X_KEY_SECRET ?? ''}`,
+  ).toString('base64');
+}
+
+async function rzpPost(path: string, body: object, useX = false) {
+  const auth = useX ? rzpXAuth() : rzpPaymentsAuth();
   const res = await fetch(`https://api.razorpay.com${path}`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${rzpAuth()}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
     body:    JSON.stringify(body),
   });
   const data = await res.json() as any;
@@ -62,16 +82,8 @@ async function rzpPost(path: string, body: object) {
   return data;
 }
 
-async function rzpGet(path: string) {
-  const res = await fetch(`https://api.razorpay.com${path}`, {
-    headers: { 'Authorization': `Basic ${rzpAuth()}` },
-  });
-  const data = await res.json() as any;
-  if (!res.ok) throw new ValidationError(data?.error?.description ?? 'Razorpay API error');
-  return data;
-}
-
-const isDev = !process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET;
+const isDevPayments = !process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET;
+const isDevPayouts  = !process.env.RAZORPAY_X_KEY_ID || !process.env.RAZORPAY_X_KEY_SECRET;
 
 // ─── Supervisor: pending payments ─────────────────────────────────────────────
 
@@ -88,11 +100,13 @@ router.get(
           driverId:      { not: null },
           price:         { not: null },
         },
-        include: {
+        select: {
+          id: true, type: true, price: true, platformFee: true, escortCharge: true,
+          totalAmount: true, distanceKm: true, pickupAddress: true, dropAddress: true,
+          completedAt: true, paymentStatus: true,
           driver: {
             select: {
-              id: true, fullName: true, phone: true,
-              razorpayAccountId: true, razorpayAccountVerified: true,
+              id: true, fullName: true, phone: true, walletBalance: true,
               bankDetail: { select: { upiId: true, accountNo: true, ifsc: true, accountName: true, verified: true } },
             },
           },
@@ -113,14 +127,7 @@ router.post(
     try {
       const ride = await prisma.ride.findUnique({
         where: { id: req.params.id },
-        include: {
-          driver: {
-            select: {
-              id: true, fullName: true, walletBalance: true,
-              razorpayAccountId: true, razorpayAccountVerified: true,
-            },
-          },
-        },
+        include: { driver: { select: { id: true, fullName: true, walletBalance: true } } },
       });
 
       if (!ride)                               throw new NotFoundError('Ride not found');
@@ -131,24 +138,24 @@ router.post(
       if (!ride.price || ride.price <= 0)      throw new ValidationError('No fare set');
 
       const driverFare     = ride.price;
-      const platformFee    = ride.platformFee  ?? 20;
-      const escortFee      = (ride as any).escortCharge ?? 0;
-      // totalAmount stored at ride creation already includes escortFee; fall back to recompute
-      const totalAmount    = ride.totalAmount  ?? (driverFare + escortFee + platformFee);
-      const amountPaise    = Math.round(totalAmount * 100);
+      const platformFee    = ride.platformFee ?? 20;
+      const escortFee      = ride.escortCharge ?? 0;
+      const cancellationFee = ride.cancellationFee ?? 0;
+      // totalAmount stored at creation already includes escort + cancellation fee.
+      // Fallback recompute includes ALL components so nothing is silently dropped.
+      const totalAmount = ride.totalAmount ?? (driverFare + escortFee + platformFee + cancellationFee);
+      const amountPaise = Math.round(totalAmount * 100);
 
-      // Driver fine deficit
       const walletBalance  = ride.driver?.walletBalance ?? 0;
       const fineDeduction  = walletBalance < 0 ? Math.abs(walletBalance) : 0;
-      // Driver receives: fare + escort charge (escort belongs to driver, not platform)
       const driverReceives = Math.max(0, driverFare + escortFee - fineDeduction);
 
-      if (isDev) {
+      if (isDevPayments) {
         const mockOrderId = `order_mock_${Date.now()}`;
         await prisma.ride.update({ where: { id: ride.id }, data: { razorpayOrderId: mockOrderId } });
         res.json({
           orderId: mockOrderId, amount: amountPaise, currency: 'INR', keyId: 'rzp_test_mock',
-          rideId: ride.id, driverFare, escortFee, platformFee, totalAmount, fineDeduction, driverReceives,
+          rideId: ride.id, driverFare, escortFee, platformFee, cancellationFee, totalAmount, fineDeduction, driverReceives,
           driverName: ride.driver?.fullName ?? 'Driver', isMock: true,
         });
         return;
@@ -165,14 +172,14 @@ router.post(
       res.json({
         orderId: order.id, amount: order.amount, currency: order.currency,
         keyId: process.env.RAZORPAY_KEY_ID,
-        rideId: ride.id, driverFare, escortFee, platformFee, totalAmount, fineDeduction, driverReceives,
+        rideId: ride.id, driverFare, escortFee, platformFee, cancellationFee, totalAmount, fineDeduction, driverReceives,
         driverName: ride.driver?.fullName ?? 'Driver', isMock: false,
       });
     } catch (err) { next(err); }
   },
 );
 
-// ─── Supervisor: confirm payment + Route transfer + fine recovery ─────────────
+// ─── Supervisor: confirm payment + credit driver wallet ───────────────────────
 
 router.post(
   '/rides/:id/confirm',
@@ -181,7 +188,6 @@ router.post(
     try {
       const { razorpayPaymentId, razorpaySignature } = z.object({
         razorpayPaymentId: z.string().min(1),
-        // Signature is optional only in dev mode — required in production
         razorpaySignature: process.env.NODE_ENV === 'production'
           ? z.string().min(1)
           : z.string().optional(),
@@ -189,16 +195,15 @@ router.post(
 
       const ride = await prisma.ride.findUnique({
         where: { id: req.params.id },
-        include: { driver: { select: { id: true, walletBalance: true, razorpayAccountId: true, razorpayAccountVerified: true } } },
+        include: { driver: { select: { id: true, walletBalance: true } } },
       });
 
       if (!ride)                              throw new NotFoundError('Ride not found');
       if (ride.supervisorId !== req.user!.id) throw new ForbiddenError('Not your ride');
       if (ride.paymentStatus === 'paid')      throw new ValidationError('Already paid');
 
+      // Verify Razorpay signature
       const keySecret = process.env.RAZORPAY_KEY_SECRET;
-
-      // Verify signature
       if (keySecret && razorpaySignature && ride.razorpayOrderId) {
         const expected = crypto
           .createHmac('sha256', keySecret)
@@ -207,64 +212,50 @@ router.post(
         if (expected !== razorpaySignature) throw new ValidationError('Payment signature invalid');
       }
 
-      const driverFare    = ride.price!;
-      const escortFee     = (ride as any).escortCharge ?? 0;
-      const walletBalance = ride.driver?.walletBalance ?? 0;
-      const fineDeduction = walletBalance < 0 ? Math.abs(walletBalance) : 0;
-      // Driver receives fare + escort charge
+      // Compute earnings figures up front so they're available in both branches below
+      const driverFare     = ride.price!;
+      const escortFee      = ride.escortCharge ?? 0;
+      const walletBalance  = ride.driver?.walletBalance ?? 0;
+      const fineDeduction  = walletBalance < 0 ? Math.abs(walletBalance) : 0;
       const driverReceives = Math.max(0, driverFare + escortFee - fineDeduction);
 
-      // ── Razorpay Route transfer ─────────────────────────────────────────────
-      let routeTransferred = false;
-      const rzpAccountId  = ride.driver?.razorpayAccountId;
-
-      if (!isDev && rzpAccountId && ride.driver?.razorpayAccountVerified && driverReceives > 0) {
-        try {
-          await rzpPost(`/v1/payments/${razorpayPaymentId}/transfers`, {
-            transfers: [{
-              account:  rzpAccountId,
-              amount:   Math.round(driverReceives * 100), // paise
-              currency: 'INR',
-              notes:    { rideId: ride.id, escortFee, fineDeduction },
-              on_hold:  0,
-            }],
-          });
-          routeTransferred = true;
-          logger.info({ rideId: ride.id, driverFare, escortFee, driverReceives, fineDeduction }, 'Razorpay Route transfer succeeded');
-        } catch (e: any) {
-          logger.warn({ rideId: ride.id, err: e.message }, 'Route transfer failed — wallet fallback');
-        }
+      // ── Atomic payment confirmation — prevents double-credit ─────────────
+      // Use an UPDATE with a WHERE guard so only one concurrent request wins.
+      const updated = await prisma.$executeRaw`
+        UPDATE rides
+        SET payment_status = 'paid',
+            razorpay_payment_id = ${razorpayPaymentId},
+            paid_at = NOW()
+        WHERE id = ${ride.id}
+          AND payment_status = 'unpaid'
+      `;
+      if (updated === 0) {
+        // Another request already marked this ride paid — do not credit wallet again
+        res.json({ ok: true, alreadyPaid: true, driverFare, escortFee, fineDeduction, driverReceives });
+        return;
       }
 
-      // ── DB: mark paid + adjust driver walletBalance ────────────────────────
-      // walletBalance += driverFare + escortFee (fine deficit was already negative)
+      // Safe to credit wallet — only one request gets past the gate above
       const newWalletBalance = walletBalance + driverFare + escortFee;
 
-      await prisma.$transaction([
-        prisma.ride.update({
-          where: { id: ride.id },
-          data:  { paymentStatus: 'paid', razorpayPaymentId, paidAt: new Date() },
-        }),
-        prisma.driver.update({
-          where: { id: ride.driverId! },
-          data:  { walletBalance: newWalletBalance },
-        }),
-      ]);
+      await prisma.driver.update({
+        where: { id: ride.driverId! },
+        data:  { walletBalance: newWalletBalance },
+      });
 
-      logger.info({ rideId: ride.id, driverFare, escortFee, fineDeduction, driverReceives, routeTransferred }, 'Payment confirmed');
-      res.json({ ok: true, routeTransferred, driverFare, escortFee, fineDeduction, driverReceives });
+      logger.info({ rideId: ride.id, driverFare, escortFee, fineDeduction, driverReceives }, 'Payment confirmed — wallet credited');
+      res.json({ ok: true, driverFare, escortFee, fineDeduction, driverReceives });
     } catch (err) { next(err); }
   },
 );
 
-// ─── Razorpay webhook ─────────────────────────────────────────────────────────
+// ─── Razorpay Payments webhook (backup for missed confirms) ───────────────────
 
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
     if (secret) {
       const sig      = req.headers['x-razorpay-signature'] as string;
-      // Must use raw bytes — JSON.stringify of a parsed body will not match
       const rawBody  = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
       const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
       if (sig !== expected) { res.status(400).json({ error: 'Invalid signature' }); return; }
@@ -280,14 +271,19 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
           include: { driver: { select: { walletBalance: true } } },
         });
         if (ride && ride.paymentStatus !== 'paid' && ride.driverId && ride.price) {
-          const walletBalance  = ride.driver?.walletBalance ?? 0;
-          const escortFee      = (ride as any).escortCharge ?? 0;
-          const newBalance     = walletBalance + ride.price + escortFee;
-          await prisma.$transaction([
-            prisma.ride.update({ where: { id: rideId }, data: { paymentStatus: 'paid', razorpayPaymentId: payment.id, paidAt: new Date() } }),
-            prisma.driver.update({ where: { id: ride.driverId }, data: { walletBalance: newBalance } }),
-          ]);
-          logger.info({ rideId }, 'Webhook: payment captured');
+          // Atomic guard — prevents double-credit if confirm endpoint already processed this
+          const updated = await prisma.$executeRaw`
+            UPDATE rides
+            SET payment_status = 'paid', razorpay_payment_id = ${payment.id}, paid_at = NOW()
+            WHERE id = ${rideId} AND payment_status = 'unpaid'
+          `;
+          if (updated > 0) {
+            const walletBalance = ride.driver?.walletBalance ?? 0;
+            const escortFee     = ride.escortCharge ?? 0;
+            const newBalance    = walletBalance + ride.price + escortFee;
+            await prisma.driver.update({ where: { id: ride.driverId }, data: { walletBalance: newBalance } });
+            logger.info({ rideId }, 'Webhook: payment captured — wallet credited');
+          }
         }
       }
     }
@@ -295,175 +291,62 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
   } catch (err) { next(err); }
 });
 
-// ─── Driver: Razorpay Route onboarding ───────────────────────────────────────
-//
-// Step 1: POST /payments/driver/onboard
-//   Creates a Razorpay Route linked account for this driver.
-//   Stores acc_xxx as razorpayAccountId on the driver record.
-//
-// Step 2: POST /payments/driver/onboard/bank
-//   Adds the driver's bank/UPI to their linked account.
-//   Razorpay runs a penny-drop verification.
-//
-// Step 3: GET /payments/driver/onboard/status
-//   Checks if Razorpay has verified the bank account.
-//   Sets razorpayAccountVerified = true when done.
+// ─── Razorpay X Payout webhook ────────────────────────────────────────────────
+// Handles: payout.processed, payout.failed, payout.reversed
 
-router.post(
-  '/driver/onboard',
-  authenticate, requireRole('driver'),
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      const driver = await prisma.driver.findUnique({
-        where: { id: req.driver!.id },
-        select: { id: true, fullName: true, phone: true, razorpayAccountId: true },
+router.post('/payout-webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const secret = process.env.RAZORPAY_X_WEBHOOK_SECRET;
+    if (secret) {
+      const sig      = req.headers['x-razorpay-signature'] as string;
+      const rawBody  = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+      const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+      if (sig !== expected) { res.status(400).json({ error: 'Invalid signature' }); return; }
+    }
+
+    const event   = JSON.parse(req.body.toString()) as any;
+    const payout  = event.payload?.payout?.entity;
+    const payoutId = payout?.id;
+
+    if (!payoutId) { res.json({ ok: true }); return; }
+
+    const txn = await prisma.payoutTransaction.findFirst({
+      where: { razorpayPayoutId: payoutId },
+    });
+
+    if (!txn) {
+      // Try idempotency key match (payout created in dev mock)
+      logger.warn({ payoutId }, 'Payout webhook: no matching transaction found');
+      res.json({ ok: true });
+      return;
+    }
+
+    if (event.event === 'payout.processed') {
+      await prisma.payoutTransaction.update({
+        where: { id: txn.id },
+        data:  { status: 'processed', utr: payout.utr ?? null },
       });
-      if (!driver) throw new NotFoundError('Driver not found');
+      logger.info({ payoutId, driverId: txn.driverId, amount: txn.amount }, 'Payout processed');
+    } else if (event.event === 'payout.failed' || event.event === 'payout.reversed') {
+      // Refund wallet — payout failed, money never left
+      await prisma.$transaction([
+        prisma.payoutTransaction.update({
+          where: { id: txn.id },
+          data:  { status: event.event === 'payout.failed' ? 'failed' : 'reversed' },
+        }),
+        prisma.driver.update({
+          where: { id: txn.driverId },
+          data:  { walletBalance: { increment: txn.totalDeducted } },
+        }),
+      ]);
+      logger.warn({ payoutId, driverId: txn.driverId, amount: txn.amount }, `Payout ${event.event} — wallet refunded`);
+    }
 
-      // Already onboarded
-      if (driver.razorpayAccountId) {
-        res.json({ razorpayAccountId: driver.razorpayAccountId, alreadyExists: true });
-        return;
-      }
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
 
-      if (isDev) {
-        const mockId = `acc_mock_${driver.id.slice(-8)}`;
-        await prisma.driver.update({ where: { id: driver.id }, data: { razorpayAccountId: mockId } });
-        res.json({ razorpayAccountId: mockId, isMock: true });
-        return;
-      }
-
-      // Create Razorpay Route linked account
-      const account = await rzpPost('/v2/accounts', {
-        email:                `driver_${driver.id.slice(-8)}@rideops.app`, // placeholder
-        profile:              { category: 'transportation', subcategory: 'taxi_cab', addresses: { registered: { street1: 'India', city: 'Bengaluru', state: 'Karnataka', postal_code: '560001', country: 'IN' } } },
-        type:                 'route',
-        legal_business_name:  driver.fullName,
-        business_type:        'individual',
-        contact_name:         driver.fullName,
-        contact_info:         { phone: driver.phone },
-      });
-
-      await prisma.driver.update({
-        where: { id: driver.id },
-        data:  { razorpayAccountId: account.id },
-      });
-
-      logger.info({ driverId: driver.id, razorpayAccountId: account.id }, 'Razorpay linked account created');
-      res.json({ razorpayAccountId: account.id });
-    } catch (err) { next(err); }
-  },
-);
-
-router.post(
-  '/driver/onboard/bank',
-  authenticate, requireRole('driver'),
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      const { upiId, accountNo, ifsc, accountName } = z.object({
-        upiId:       z.string().max(50).optional(),
-        accountNo:   z.string().max(30).optional(),
-        ifsc:        z.string().length(11).optional(),
-        accountName: z.string().max(100).optional(),
-      }).refine((d) => d.upiId || d.accountNo, { message: 'Provide UPI ID or bank account' })
-        .parse(req.body);
-
-      const driver = await prisma.driver.findUnique({
-        where: { id: req.driver!.id },
-        select: { id: true, razorpayAccountId: true },
-      });
-      if (!driver) throw new NotFoundError('Driver not found');
-      if (!driver.razorpayAccountId) throw new ValidationError('Complete onboarding step 1 first');
-
-      // Save locally
-      await prisma.driverBankDetail.upsert({
-        where:  { driverId: driver.id },
-        create: { driverId: driver.id, upiId: upiId ?? null, accountNo: accountNo ?? null, ifsc: ifsc ?? null, accountName: accountName ?? null, verified: false },
-        update: { upiId: upiId ?? null, accountNo: accountNo ?? null, ifsc: ifsc ?? null, accountName: accountName ?? null, verified: false },
-      });
-
-      if (isDev) {
-        // Dev: auto-verify
-        await prisma.$transaction([
-          prisma.driverBankDetail.update({ where: { driverId: driver.id }, data: { verified: true } }),
-          prisma.driver.update({ where: { id: driver.id }, data: { razorpayAccountVerified: true } }),
-        ]);
-        res.json({ ok: true, isMock: true, verified: true });
-        return;
-      }
-
-      // Add stakeholder + bank to Razorpay account
-      if (accountNo && ifsc) {
-        await rzpPost(`/v2/accounts/${driver.razorpayAccountId}/stakeholders`, {
-          name:              accountName ?? 'Driver',
-          bank_account:      { ifsc_code: ifsc, beneficiary_name: accountName ?? 'Driver', account_number: accountNo },
-          relationship:      { director: true },
-        });
-      } else if (upiId) {
-        await rzpPost(`/v2/accounts/${driver.razorpayAccountId}/stakeholders`, {
-          name:              accountName ?? 'Driver',
-          relationship:      { director: true },
-          vpa:               upiId,
-        });
-      }
-
-      res.json({ ok: true, isMock: false, verified: false, message: 'Verification in progress — check status shortly' });
-    } catch (err) { next(err); }
-  },
-);
-
-router.get(
-  '/driver/onboard/status',
-  authenticate, requireRole('driver'),
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      const driver = await prisma.driver.findUnique({
-        where: { id: req.driver!.id },
-        select: {
-          razorpayAccountId: true,
-          razorpayAccountVerified: true,
-          bankDetail: { select: { upiId: true, accountNo: true, ifsc: true, verified: true } },
-        },
-      });
-      if (!driver) throw new NotFoundError('Driver not found');
-
-      if (!driver.razorpayAccountId) {
-        res.json({ step: 'not_started', verified: false });
-        return;
-      }
-      if (driver.razorpayAccountVerified) {
-        res.json({ step: 'complete', verified: true, razorpayAccountId: driver.razorpayAccountId });
-        return;
-      }
-
-      if (isDev) {
-        res.json({ step: 'complete', verified: true, isMock: true });
-        return;
-      }
-
-      // Check Razorpay account status
-      const account = await rzpGet(`/v2/accounts/${driver.razorpayAccountId}`);
-      const verified = account.profile?.verification?.bank_account?.status === 'verified'
-                    || account.profile?.verification?.vpa?.status === 'verified';
-
-      if (verified && !driver.razorpayAccountVerified) {
-        await prisma.$transaction([
-          prisma.driver.update({ where: { id: req.driver!.id }, data: { razorpayAccountVerified: true } }),
-          prisma.driverBankDetail.updateMany({ where: { driverId: req.driver!.id }, data: { verified: true } }),
-        ]);
-      }
-
-      res.json({
-        step:               verified ? 'complete' : 'pending_verification',
-        verified,
-        razorpayAccountId:  driver.razorpayAccountId,
-        razorpayStatus:     account.profile?.verification,
-      });
-    } catch (err) { next(err); }
-  },
-);
-
-// ─── Driver: bank detail (simple CRUD, used alongside onboarding) ─────────────
+// ─── Driver: bank detail ──────────────────────────────────────────────────────
 
 const BankDetailSchema = z.object({
   upiId:       z.string().max(50).optional(),
@@ -475,8 +358,7 @@ const BankDetailSchema = z.object({
 router.get('/bank-detail', authenticate, requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const detail = await prisma.driverBankDetail.findUnique({ where: { driverId: req.driver!.id } });
-    const driver = await prisma.driver.findUnique({ where: { id: req.driver!.id }, select: { razorpayAccountId: true, razorpayAccountVerified: true } });
-    res.json({ bankDetail: detail, razorpayAccountId: driver?.razorpayAccountId, razorpayAccountVerified: driver?.razorpayAccountVerified ?? false });
+    res.json({ bankDetail: detail });
   } catch (err) { next(err); }
 });
 
@@ -492,6 +374,174 @@ router.post('/bank-detail', authenticate, requireRole('driver'), async (req: Aut
   } catch (err) { next(err); }
 });
 
+// ─── Driver: request withdrawal (Razorpay X Composite Payout API) ─────────────
+//
+// Flow:
+//   1. Validate amount + fee fits in wallet balance
+//   2. Debit wallet immediately (prevents double-spend)
+//   3. Create idempotency key, call Razorpay X Composite Payout API
+//   4. Store PayoutTransaction with razorpayPayoutId
+//   5. Webhook (payout.failed/reversed) refunds wallet if payout fails
+
+router.post(
+  '/driver/withdraw',
+  authenticate, requireRole('driver'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { amount } = z.object({
+        amount: z.number().min(PAYOUT_MIN_AMOUNT, `Minimum withdrawal is ₹${PAYOUT_MIN_AMOUNT}`),
+      }).parse(req.body);
+
+      const driver = await prisma.driver.findUnique({
+        where: { id: req.driver!.id },
+        select: { id: true, fullName: true, phone: true, walletBalance: true, bankDetail: true },
+      });
+      if (!driver) throw new NotFoundError('Driver not found');
+
+      const bankDetail = driver.bankDetail;
+      if (!bankDetail || (!bankDetail.upiId && !bankDetail.accountNo)) {
+        throw new ValidationError('Add a UPI ID or bank account before withdrawing');
+      }
+
+      const totalDeducted = Math.round((amount + PAYOUT_TOTAL_FEE) * 100) / 100;
+      if (driver.walletBalance < totalDeducted) {
+        throw new ValidationError(
+          `Insufficient balance. You need ₹${totalDeducted} (₹${amount} + ₹${PAYOUT_TOTAL_FEE} fee). Available: ₹${driver.walletBalance.toFixed(2)}`,
+        );
+      }
+
+      const mode            = bankDetail.upiId ? 'UPI' : 'IMPS';
+      const idempotencyKey  = uuidv4();
+      const narration       = 'WeKashi RideOps';
+
+      // ── Atomic wallet debit — prevents race condition double-spend ─────────
+      // UPDATE with WHERE guard: only one concurrent request deducts.
+      const deducted = await prisma.$executeRaw`
+        UPDATE drivers
+        SET wallet_balance = wallet_balance - ${totalDeducted}
+        WHERE id = ${driver.id}
+          AND wallet_balance >= ${totalDeducted}
+      `;
+      if (deducted === 0) {
+        throw new ValidationError(
+          `Insufficient balance. You need ₹${totalDeducted} (₹${amount} + ₹${PAYOUT_TOTAL_FEE} fee).`,
+        );
+      }
+
+      const newBalance = Math.round((driver.walletBalance - totalDeducted) * 100) / 100;
+
+      // ── Create payout transaction record ──────────────────────────────────
+      const txn = await prisma.payoutTransaction.create({
+        data: {
+          driverId:       driver.id,
+          amount,
+          fee:            PAYOUT_TOTAL_FEE,
+          totalDeducted,
+          mode,
+          status:         'processing',
+          idempotencyKey,
+          narration,
+        },
+      });
+
+      // ── Dev mode: mock payout ──────────────────────────────────────────────
+      if (isDevPayouts) {
+        const mockPayoutId = `pout_mock_${Date.now()}`;
+        await prisma.payoutTransaction.update({
+          where: { id: txn.id },
+          data:  { razorpayPayoutId: mockPayoutId, status: 'processed' },
+        });
+        logger.info({ driverId: driver.id, amount, mode }, 'DEV: mock payout processed');
+        res.json({
+          ok: true, amount, fee: PAYOUT_TOTAL_FEE, totalDeducted, mode,
+          payoutId: mockPayoutId, status: 'processed', isMock: true,
+          newWalletBalance: newBalance,
+        });
+        return;
+      }
+
+      // ── Razorpay X Composite Payout API ───────────────────────────────────
+      try {
+        const payoutBody: any = {
+          account_number:       process.env.RAZORPAY_X_ACCOUNT_NUMBER,
+          amount:               Math.round(amount * 100), // paise — driver receives exact amount
+          currency:             'INR',
+          mode,
+          purpose:              'payout',
+          queue_if_low_balance: true,
+          reference_id:         txn.id.slice(-20), // max 40 chars
+          narration,
+          fund_account: {
+            contact: {
+              name:         driver.fullName,
+              contact:      driver.phone,
+              type:         'employee',
+              reference_id: driver.id.slice(-20),
+            },
+          },
+        };
+
+        if (bankDetail.upiId) {
+          payoutBody.fund_account.account_type = 'vpa';
+          payoutBody.fund_account.vpa          = { address: bankDetail.upiId };
+        } else {
+          payoutBody.fund_account.account_type  = 'bank_account';
+          payoutBody.fund_account.bank_account  = {
+            name:           bankDetail.accountName ?? driver.fullName,
+            ifsc:           bankDetail.ifsc!,
+            account_number: bankDetail.accountNo!,
+          };
+        }
+
+        const payout = await rzpPost('/v1/payouts', payoutBody, true);
+
+        await prisma.payoutTransaction.update({
+          where: { id: txn.id },
+          data:  { razorpayPayoutId: payout.id, status: payout.status ?? 'processing' },
+        });
+
+        logger.info({ driverId: driver.id, amount, mode, payoutId: payout.id }, 'Payout initiated');
+        res.json({
+          ok: true, amount, fee: PAYOUT_TOTAL_FEE, totalDeducted, mode,
+          payoutId: payout.id, status: payout.status,
+          newWalletBalance: newBalance,
+        });
+      } catch (payoutErr: any) {
+        // Payout API failed — refund the wallet deduction
+        await prisma.$transaction([
+          prisma.driver.update({
+            where: { id: driver.id },
+            data:  { walletBalance: { increment: totalDeducted } },
+          }),
+          prisma.payoutTransaction.update({
+            where: { id: txn.id },
+            data:  { status: 'failed' },
+          }),
+        ]);
+        logger.error({ driverId: driver.id, err: payoutErr.message }, 'Payout API failed — wallet refunded');
+        throw new ValidationError(payoutErr.message ?? 'Payout failed — no amount was deducted');
+      }
+    } catch (err) { next(err); }
+  },
+);
+
+// ─── Driver: payout history ───────────────────────────────────────────────────
+
+router.get(
+  '/driver/payouts',
+  authenticate, requireRole('driver'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const payouts = await prisma.payoutTransaction.findMany({
+        where:   { driverId: req.driver!.id },
+        orderBy: { createdAt: 'desc' },
+        take:    20,
+      });
+      res.json({ payouts, payoutFee: PAYOUT_TOTAL_FEE });
+    } catch (err) { next(err); }
+  },
+);
+
 // ─── Driver: wallet ───────────────────────────────────────────────────────────
 
 router.get('/wallet', authenticate, requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -503,14 +553,16 @@ router.get('/wallet', authenticate, requireRole('driver'), async (req: AuthReque
     const payments = await prisma.ride.findMany({
       where: { driverId: req.driver!.id, paymentStatus: 'paid' },
       select: {
-        id: true, price: true, platformFee: true, totalAmount: true, paidAt: true,
+        id: true, price: true, escortCharge: true, platformFee: true, totalAmount: true, paidAt: true,
         type: true, pickupAddress: true, dropAddress: true,
         supervisor: { select: { fullName: true, org: true } },
       },
       orderBy: { paidAt: 'desc' },
       take: 20,
     });
-    res.json({ walletBalance: driver?.walletBalance ?? 0, payments });
+    const balance = driver?.walletBalance ?? 0;
+    const maxWithdrawable = Math.max(0, Math.round((balance - PAYOUT_TOTAL_FEE) * 100) / 100);
+    res.json({ walletBalance: balance, maxWithdrawable, payoutFee: PAYOUT_TOTAL_FEE, payments });
   } catch (err) { next(err); }
 });
 

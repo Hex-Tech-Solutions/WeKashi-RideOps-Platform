@@ -1,13 +1,13 @@
 # WeKashi RideOps Platform — Setup & Deployment Guide
 
-> **Production status:** Feature-complete, security-hardened, and tested locally.
+> **Production status:** Feature-complete, security-hardened, and verified end-to-end locally (auth for all 4 roles, ride booking → accept → OTP pickup/drop → completion → payment → wallet → withdrawal, escort policy, cancellation, SOS — all exercised against a live Docker stack).
 >
 > **Two hard blockers before going live:**
 > - **HTTPS/SSL** — configure nginx with Let's Encrypt or put Cloudflare in front
 > - **SMS OTP (Twilio)** — drivers cannot log in without it
 >
 > **Action required from you before payments work:**
-> - Enable the **Razorpay Route** product on your Razorpay account (contact their support)
+> - Activate a **Razorpay X** account at [x.razorpay.com](https://x.razorpay.com) for driver payouts (separate product from standard Razorpay Payments, separate KYC/approval). Razorpay Route is **not used** — see Payments Architecture below.
 
 ---
 
@@ -21,7 +21,7 @@
 | OTP pickup/drop verification | ✅ Complete |
 | SOS system with rebooking | ✅ Complete |
 | Women's safety escort policy | ✅ Complete |
-| Razorpay payment split (supervisor → driver via Route) | ✅ Complete (needs Route product enabled) |
+| Razorpay Payments (collection) + Razorpay X Payouts (disbursement) | ✅ Complete (needs Razorpay X account activated) |
 | Escort charge (50% of fare, goes to driver) | ✅ Complete |
 | Driver KYC — DL, Gov ID, alt phone, document upload | ✅ Complete |
 | Document approval flow (vendor/admin) | ✅ Complete |
@@ -109,6 +109,31 @@ Driver receives = ₹1,093.5
 
 ---
 
+## Payments Architecture (Razorpay Payments + Razorpay X Payouts)
+
+Two separate Razorpay products, two separate credential pairs. **Razorpay Route is not used anywhere.**
+
+| Product | Purpose | Credentials |
+|---------|---------|-------------|
+| Razorpay Payments (Standard Checkout) | Collect the ride fare from the supervisor | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` |
+| Razorpay X Payouts (Composite Payout API) | Driver withdraws their wallet balance to their own bank/UPI | `RAZORPAY_X_KEY_ID`, `RAZORPAY_X_KEY_SECRET`, `RAZORPAY_X_ACCOUNT_NUMBER`, `RAZORPAY_X_WEBHOOK_SECRET` |
+
+**Flow:**
+1. Supervisor pays the full ride amount via Standard Checkout → money lands in the platform's Razorpay account.
+2. On confirmed payment, the driver's **in-app wallet** is credited with `driverFare + escortCharge`. The platform keeps only the `platformFee` (₹20).
+3. Driver taps **Withdraw** in the app → backend calls the Razorpay X Composite Payout API directly (no fund-account pre-registration step — the API accepts bank/UPI details inline per payout call).
+4. Razorpay X charges a payout fee, which is **passed on to the driver**, not absorbed by the platform:
+   - ₹5 flat fee + 18% GST = **₹5.90 per payout**
+   - Driver requests to withdraw ₹X → wallet is debited ₹(X + 5.90) → driver's bank/UPI receives exactly ₹X
+   - Example: wallet has ₹750, driver withdraws ₹744.10 → wallet debited ₹750.00 (744.10 + 5.90) → bank receives ₹744.10
+   - Minimum withdrawal: ₹1 (so minimum wallet balance needed is ₹6.90)
+5. If the Razorpay X API call fails, the wallet debit is rolled back atomically — no money is lost in transit.
+6. The `payout-webhook` endpoint listens for `payout.failed` / `payout.reversed` and refunds the wallet if a payout fails asynchronously after being queued.
+
+**Local dev / mock mode:** If `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` are blank, `/payments/rides/:id/initiate` and `/confirm` run in mock mode (no real Razorpay call, `isMock: true` in the response). If `RAZORPAY_X_KEY_ID`/`RAZORPAY_X_KEY_SECRET` are blank, `/payments/driver/withdraw` runs in mock mode the same way. This is the default in `backend/.env` for local development. **Note:** if you set *real but invalid* keys, the code will attempt the live Razorpay API and surface whatever error Razorpay returns (e.g. `Authentication failed`) — it does not silently fall back to mock mode just because a call fails.
+
+---
+
 ## Women's Safety Escort Policy
 
 Escort is required **only** when the ride time is in the restricted window (**19:00–07:00**) AND a female passenger is in a dangerous position in the final route:
@@ -146,6 +171,8 @@ cd backend && npm install && cd ..
 ```cmd
 docker compose up -d
 ```
+
+> **Port conflict note:** If you already have a native PostgreSQL or Redis install running on your machine (common on Windows dev boxes), it will bind ports 5432/6379 first and the Docker containers' port mappings will silently fail to publish (the container still runs, but `localhost:5432`/`6379` reaches your native install, not the container). Check with `docker inspect <container> --format "{{json .NetworkSettings.Ports}}"` — if the host port list is empty, something else already owns that port. Either stop the native service or point `DATABASE_URL`/`REDIS_URL` at a different port.
 
 ### 3. Configure backend environment
 `backend/.env` is already committed for local dev. Verify it contains:
@@ -324,16 +351,25 @@ Manual trigger: **Actions → Deploy to Server → Run workflow**
 | `AZURE_STORAGE_CONNECTION_STRING` | Azure Portal → Storage Account → Access keys → Connection string |
 | `AZURE_STORAGE_CONTAINER` | `rideops-uploads` (auto-created on first upload) |
 
-### Required for payments (Razorpay)
+### Required for payments — collection (Razorpay Payments)
 
 | Variable | How to get it |
 |----------|--------------|
 | `RAZORPAY_KEY_ID` | Razorpay Dashboard → Settings → API Keys |
 | `RAZORPAY_KEY_SECRET` | Same place |
-| `RAZORPAY_WEBHOOK_SECRET` | Razorpay → Settings → Webhooks → create webhook → copy secret |
+| `RAZORPAY_WEBHOOK_SECRET` | Razorpay → Settings → Webhooks → create webhook (event: `payment.captured`) → copy secret |
 | `VITE_RAZORPAY_KEY_ID` | Same value as `RAZORPAY_KEY_ID` (used in frontend checkout) |
 
-> ⚠️ Razorpay **Route** product must be enabled on your account for driver payouts to work. Contact Razorpay support to enable it.
+### Required for payouts — driver withdrawals (Razorpay X)
+
+| Variable | How to get it |
+|----------|--------------|
+| `RAZORPAY_X_KEY_ID` | [x.razorpay.com](https://x.razorpay.com) → API Keys (separate from standard Payments keys) |
+| `RAZORPAY_X_KEY_SECRET` | Same place |
+| `RAZORPAY_X_ACCOUNT_NUMBER` | Your RazorpayX current account number (the source account payouts are debited from) |
+| `RAZORPAY_X_WEBHOOK_SECRET` | RazorpayX → Settings → Webhooks → create webhook (events: `payout.processed`, `payout.failed`, `payout.reversed`) → copy secret |
+
+> ⚠️ **Razorpay X requires its own account activation** — it is a separate product from standard Razorpay Payments and has its own KYC/approval process. Apply at x.razorpay.com before going live. Until these are set, `/payments/driver/withdraw` runs in mock mode (no real money moves).
 
 ### Optional (have defaults)
 
@@ -392,6 +428,8 @@ All database changes are managed through Prisma migrations in `backend/prisma/mi
 | `20260731122145_add_driver_details_and_doc_fields` | DL number, DL expiry, Gov ID, alt phone on drivers; rejection_note, reviewed_by on documents |
 | `20260731130000_add_escort_fields` | escort_required, escort_name on rides |
 | `20260731200000_add_escort_charge` | escort_charge (Float) on rides |
+| `20260801000000_payouts_remove_route` | Drops `razorpayAccountId`/`razorpayAccountVerified` (Route columns); adds `DriverBankDetail` and `PayoutTransaction` models for the Payments + Payouts architecture |
+| `20260801010000_add_payment_status_index` | Composite index `(supervisorId, paymentStatus)` on `rides` — speeds up the `/payments/pending` query |
 
 To apply on a fresh server:
 ```bash
@@ -480,8 +518,9 @@ docker compose down -v        # Stop AND wipe all data (requires re-seed)
 
 - [ ] HTTPS/SSL configured (nginx + Let's Encrypt or Cloudflare)
 - [ ] Twilio SMS configured and tested (`SMS_PROVIDER=twilio`)
-- [ ] Razorpay Route product enabled (contact support)
-- [ ] Razorpay webhook registered and `RAZORPAY_WEBHOOK_SECRET` set
+- [ ] Razorpay X account activated at x.razorpay.com (separate from standard Payments account)
+- [ ] Razorpay Payments webhook registered and `RAZORPAY_WEBHOOK_SECRET` set
+- [ ] Razorpay X payout webhook registered and `RAZORPAY_X_WEBHOOK_SECRET` set
 - [ ] `CORS_ORIGIN` set to production domain (not `*`)
 - [ ] `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` are strong random values
 - [ ] `DEV_OTP_BYPASS` is NOT in `.env.prod`

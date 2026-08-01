@@ -50,13 +50,11 @@ model Driver {
   vehicleType     String?      @map("vehicle_type") // hatchback | sedan | suv
   seats           Int?         // total seats including driver
   walletBalance   Float        @default(0) @map("wallet_balance")
-  razorpayAccountId    String?  @map("razorpay_account_id")
-  razorpayAccountVerified Boolean @default(false) @map("razorpay_account_verified")
   // ── Additional personal / licence details ─────────────────────────────────
-  dlNumber        String?      @map("dl_number")       // Driving Licence number
-  dlExpiry        DateTime?    @map("dl_expiry")        // DL expiry date
-  govIdNumber     String?      @map("gov_id_number")    // Aadhaar / PAN / Voter ID
-  altPhone        String?      @map("alt_phone")        // Alternate phone number
+  dlNumber        String?      @map("dl_number")
+  dlExpiry        DateTime?    @map("dl_expiry")
+  govIdNumber     String?      @map("gov_id_number")
+  altPhone        String?      @map("alt_phone")
   createdAt       DateTime     @default(now()) @map("created_at")
 
   vendor        Vendor         @relation(fields: [vendorId], references: [id])
@@ -68,6 +66,7 @@ model Driver {
   issues        DriverIssue[]
   locationLogs  RideLocationLog[]
   bankDetail    DriverBankDetail?
+  payouts       PayoutTransaction[]
 
   @@index([vendorId])
   @@index([isOnline, status])
@@ -146,6 +145,28 @@ model DriverBankDetail {
   driver Driver @relation(fields: [driverId], references: [id])
 
   @@map("driver_bank_details")
+}
+
+model PayoutTransaction {
+  id               String   @id @default(uuid())
+  driverId         String   @map("driver_id")
+  amount           Float                           // amount sent to driver's bank (after fee deduction)
+  fee              Float    @default(5.90)         // Razorpay payout fee (₹5 + ₹0.90 GST)
+  totalDeducted    Float    @map("total_deducted") // amount + fee — deducted from wallet
+  mode             String                           // UPI | IMPS | NEFT
+  status           String   @default("processing") // processing | processed | failed | reversed
+  razorpayPayoutId String?  @map("razorpay_payout_id") // pout_xxx from Razorpay
+  utr              String?                          // UTR from bank
+  narration        String?                          // shown on driver's bank statement
+  idempotencyKey   String   @unique @map("idempotency_key") // prevent duplicate payouts
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@index([driverId, status])
+  @@map("payout_transactions")
 }
 
 model DriverOtp {
@@ -346,6 +367,7 @@ model Ride {
   @@index([vendorId])
   @@index([status])
   @@index([status, broadcastExpiresAt])
+  @@index([supervisorId, paymentStatus])
   @@map("rides")
 }
 

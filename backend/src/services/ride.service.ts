@@ -223,11 +223,12 @@ export async function acceptRide(rideId: string, driverId: string): Promise<void
     const rows = await tx.$queryRaw<Array<{ id: string; status: string }>>`
       SELECT id, status FROM rides
       WHERE id = ${rideId} AND status = 'broadcasting'
+        AND (broadcast_expires_at IS NULL OR broadcast_expires_at > NOW())
       FOR UPDATE SKIP LOCKED
     `;
 
     if (rows.length === 0) {
-      throw new ConflictError('Ride already taken or not available');
+      throw new ConflictError('Ride already taken, expired, or not available');
     }
 
     // Assign driver and update status atomically
@@ -482,9 +483,11 @@ export async function driverReleaseScheduledRide(rideId: string, driverId: strin
   if (!ride) throw new NotFoundError('Ride not found');
   if (ride.driverId !== driverId) throw new ForbiddenError('Not your ride');
   if (!ride.scheduledFor) throw new ValidationError('Only scheduled rides can be released');
-  // No fine if cancelled within 3 hours of claiming; ₹100 after that.
-  const withinGrace = ride.claimedAt != null && Date.now() - ride.claimedAt.getTime() <= 3 * 60 * 60 * 1000;
-  const fine = withinGrace ? 0 : 100;
+  // No fine if released promptly after claiming (within 3 hours of claiming).
+  // Fine applies if the driver holds the ride and bails later — especially
+  // close to the scheduled time, when it's harder for another driver to pick it up.
+  const releasedPromptly = ride.claimedAt != null && Date.now() - ride.claimedAt.getTime() <= 3 * 60 * 60 * 1000;
+  const fine = releasedPromptly ? 0 : 100;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ops: any[] = [
     prisma.$executeRaw`UPDATE rides SET status = 'scheduled', driver_id = NULL, vendor_id = NULL, claimed_at = NULL WHERE id = ${rideId}`,
@@ -599,7 +602,9 @@ export async function listRides(filters: {
   page?: number;
   limit?: number;
 }) {
-  await sweepStaleScheduledRides();
+  // NOTE: sweepStaleScheduledRides() was removed from here — it ran on every
+  // list call and caused unnecessary write load. It now runs only in the
+  // broadcastSweeper interval (server.ts).
   const page = filters.page ?? 1;
   const limit = filters.limit ?? 20;
   const skip = (page - 1) * limit;

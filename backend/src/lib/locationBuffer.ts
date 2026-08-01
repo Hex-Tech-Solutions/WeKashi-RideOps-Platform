@@ -37,6 +37,13 @@ export async function bufferDriverLocation(
   activeRideId: string | null,
   isInProgress: boolean,
 ): Promise<void> {
+  // Guard: reject non-finite coordinates (would break the SQL bulk-update)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) ||
+      lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    logger.warn({ driverId, lat, lng }, 'Invalid GPS coordinates — skipping buffer');
+    return;
+  }
+
   const pipeline = redis.pipeline();
 
   // 1. Store latest driver position (expires after 5 min of inactivity)
@@ -80,7 +87,11 @@ export async function flushLocationBuffer(): Promise<void> {
       try {
         const { lat, lng } = JSON.parse(raw) as { lat: number; lng: number };
         const driverId = posKeys[i].slice(DRIVER_POS_PREFIX.length);
-        positions.push({ driverId, lat, lng });
+        // Double-check coordinates from Redis are finite and in valid range
+        if (Number.isFinite(lat) && Number.isFinite(lng) &&
+            lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          positions.push({ driverId, lat, lng });
+        }
       } catch {
         // malformed entry — skip
       }

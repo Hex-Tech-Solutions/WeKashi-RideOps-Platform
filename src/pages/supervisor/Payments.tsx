@@ -99,9 +99,9 @@ function PaymentCard({ ride, onPay }: { ride: PendingPaymentRide; onPay: () => v
             </div>
             <div className="flex-1 min-w-0">
               <div className="font-medium truncate">{ride.driver.fullName}</div>
-              <div className={`flex items-center gap-1 mt-0.5 ${ride.driver.razorpayAccountVerified ? "text-success" : "text-warning"}`}>
+              <div className={`flex items-center gap-1 mt-0.5 ${ride.driver.bankDetail?.upiId || ride.driver.bankDetail?.accountNo ? "text-success" : "text-warning"}`}>
                 <Car className="h-3 w-3 shrink-0" />
-                {ride.driver.razorpayAccountVerified ? "Payout verified" : "Payout not set up"}
+                {ride.driver.bankDetail?.upiId || ride.driver.bankDetail?.accountNo ? "Bank details on file" : "No bank details — driver needs to add UPI/bank"}
               </div>
             </div>
           </div>
