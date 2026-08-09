@@ -71,7 +71,7 @@ export function PayRideDialog({ ride, onClose }: Props) {
           order_id:    data.orderId,
           name:        "RideOps",
           description: `Ride payment · ${data.driverName}`,
-          theme:       { color: "#D4AF37" },
+          theme:       { color: "#D5B036" },
           prefill:     {},
           notes:       { rideId: ride.id },
           handler: (resp: { razorpay_payment_id: string; razorpay_signature: string }) => {

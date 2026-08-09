@@ -352,6 +352,8 @@ export interface CreateRidePayload {
   vehicleType?: "hatchback" | "sedan" | "suv";
   /** AC flat surcharge option (₹100 added server-side). */
   isAc?: boolean;
+  /** Manual fare top-up the supervisor picks at booking time — one of FARE_ADJUSTMENT_OPTIONS. */
+  fareAdjustment?: number;
   scheduled?: boolean;
   /** Per-employee expected pickup times — empId → HH:MM */
   scheduledPickupTimes?: Record<string, string>;

@@ -327,6 +327,8 @@ model Ride {
   routePolyline      String?    @map("route_polyline")
   distanceKm         Float?     @map("distance_km")
   price              Float?
+  /// Manual fare top-up the supervisor added at booking time (e.g. +50/+100), already baked into `price`. Kept separately for audit/display.
+  fareAdjustment     Float?     @default(0) @map("fare_adjustment")
   platformFee        Float?   @default(20) @map("platform_fee")
   totalAmount        Float?   @map("total_amount")
   cancellationFee    Float?   @map("cancellation_fee")

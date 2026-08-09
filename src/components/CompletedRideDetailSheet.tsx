@@ -333,7 +333,7 @@ function TrailMap({ ride }: { ride: RideDetail }) {
         icon: {
           path: g.maps.SymbolPath.CIRCLE,
           scale: 10,
-          fillColor: "#D4AF37",
+          fillColor: "#D5B036",
           fillOpacity: 1,
           strokeColor: "#fff",
           strokeWeight: 2,
@@ -418,7 +418,7 @@ function TrailMap({ ride }: { ride: RideDetail }) {
             new g.maps.Polyline({
               map,
               path: suggestedPath,
-              strokeColor: "#D4AF37",  // gold — suggested route
+              strokeColor: "#D5B036",  // gold — suggested route
               strokeWeight: ride.locationTrail.length >= 2 ? 3 : 4, // thinner when GPS trail is also shown
               strokeOpacity: ride.locationTrail.length >= 2 ? 0.6 : 0.85,
               icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "14px" }],
@@ -438,7 +438,7 @@ function TrailMap({ ride }: { ride: RideDetail }) {
                 { lat: ride.pickupLat!, lng: ride.pickupLng! },
                 { lat: ride.dropLat!,   lng: ride.dropLng! },
               ],
-              strokeColor: "#D4AF37",
+              strokeColor: "#D5B036",
               strokeWeight: 3,
               strokeOpacity: 0.5,
               icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "14px" }],

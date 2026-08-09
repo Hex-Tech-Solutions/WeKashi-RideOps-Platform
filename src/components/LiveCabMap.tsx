@@ -48,7 +48,7 @@ export function LiveCabMap({ drivers, height = 520 }: { drivers: LiveDriver[]; h
       seen.add(d.id);
       const pos = { lat: d.lat, lng: d.lng };
       bounds.extend(pos);
-      const color = d.status === "active" ? "#D4AF37" : "#6b7280";
+      const color = d.status === "active" ? "#D5B036" : "#6b7280";
       let marker = markersRef.current.get(d.id);
       if (!marker) {
         marker = new g.maps.Marker({ map, position: pos });

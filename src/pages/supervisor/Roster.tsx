@@ -14,6 +14,7 @@ import { Upload, Plus, Search, Trash2, Loader2, Building2, Pencil } from "lucide
 import { AddEmployeeDialog } from "@/components/AddEmployeeDialog";
 import { CsvImportDialog } from "@/components/CsvImportDialog";
 import { PlacesInput } from "@/components/PlacesInput";
+import { TimeSelect } from "@/components/TimeSelect";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -313,12 +314,12 @@ function EditEmployeeDialog({
 
           <div>
             <Label>Login time</Label>
-            <Input className="mt-1" value={form.shiftStart} onChange={(e) => setForm({ ...form, shiftStart: e.target.value })} />
+            <TimeSelect className="mt-1" value={form.shiftStart} onChange={(v) => setForm({ ...form, shiftStart: v })} />
           </div>
 
           <div>
             <Label>Logout time</Label>
-            <Input className="mt-1" value={form.shiftEnd} onChange={(e) => setForm({ ...form, shiftEnd: e.target.value })} />
+            <TimeSelect className="mt-1" value={form.shiftEnd} onChange={(v) => setForm({ ...form, shiftEnd: v })} />
           </div>
 
           {offices.length > 0 && (
