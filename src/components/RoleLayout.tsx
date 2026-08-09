@@ -1,12 +1,15 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { NavLink, useLocation, Link, useNavigate } from "react-router-dom";
-import { Bell, LogOut, Search } from "lucide-react";
+import { Bell, LogOut, Search, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+
+const SIDEBAR_COLLAPSED_KEY = "rideops:sidebarCollapsed";
 
 export interface NavItem {
   to: string;
@@ -30,6 +33,14 @@ export function RoleLayout({ role, user, nav, children }: RoleLayoutProps) {
   const displaySub = auth.user?.email || user.sub;
   const initials = (displayName || "U").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
 
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1"; } catch { return false; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch { /* ignore */ }
+  }, [collapsed]);
+
   const handleSignOut = async () => {
     await auth.signOut();
     toast.success("Signed out");
@@ -39,43 +50,92 @@ export function RoleLayout({ role, user, nav, children }: RoleLayoutProps) {
   return (
     <div className="min-h-screen flex w-full bg-background">
       {/* Sidebar */}
-      <aside className="w-64 bg-sidebar text-sidebar-foreground flex flex-col border-r border-sidebar-border shrink-0">
-        <Link to="/" className="h-16 flex items-center gap-2 px-6 border-b border-sidebar-border">
-          <div className="h-8 w-8 rounded-md bg-gradient-gold flex items-center justify-center font-bold text-gold-foreground">R</div>
-          <div>
-            <div className="font-semibold text-white tracking-tight leading-none">RideOps</div>
-            <div className="text-[10px] uppercase tracking-widest text-gold mt-1">{role}</div>
-          </div>
+      <aside
+        className={cn(
+          "bg-sidebar text-sidebar-foreground flex flex-col border-r border-sidebar-border shrink-0 transition-[width] duration-200",
+          collapsed ? "w-[68px]" : "w-64",
+        )}
+      >
+        <Link
+          to="/"
+          className={cn(
+            "h-16 flex items-center gap-2 border-b border-sidebar-border",
+            collapsed ? "justify-center px-2" : "px-6",
+          )}
+        >
+          <div className="h-8 w-8 rounded-md bg-gradient-gold flex items-center justify-center font-bold text-gold-foreground shrink-0">R</div>
+          {!collapsed && (
+            <div>
+              <div className="font-semibold text-white tracking-tight leading-none">RideOps</div>
+              <div className="text-[10px] uppercase tracking-widest text-gold mt-1">{role}</div>
+            </div>
+          )}
         </Link>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {nav.map((item) => {
             const active = pathname === item.to;
             const Icon = item.icon;
-            return (
+            const link = (
               <NavLink
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                  "flex items-center gap-3 rounded-md text-sm transition-colors",
+                  collapsed ? "justify-center px-0 py-2.5" : "px-3 py-2",
                   active
                     ? "bg-sidebar-accent text-gold font-medium"
                     : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-white",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                <span className="flex-1 truncate">{item.label}</span>
-                {item.badge !== undefined && (
-                  <span className="text-[10px] font-semibold bg-gold text-gold-foreground rounded-full px-2 py-0.5">{item.badge}</span>
+                {!collapsed && (
+                  <>
+                    <span className="flex-1 truncate">{item.label}</span>
+                    {item.badge !== undefined && (
+                      <span className="text-[10px] font-semibold bg-gold text-gold-foreground rounded-full px-2 py-0.5">{item.badge}</span>
+                    )}
+                  </>
                 )}
               </NavLink>
+            );
+
+            if (!collapsed) return link;
+
+            return (
+              <Tooltip key={item.to} delayDuration={100}>
+                <TooltipTrigger asChild>{link}</TooltipTrigger>
+                <TooltipContent side="right">
+                  {item.label}
+                  {item.badge !== undefined && ` (${item.badge})`}
+                </TooltipContent>
+              </Tooltip>
             );
           })}
         </nav>
 
-        <div className="px-3 py-3 border-t border-sidebar-border">
-          <button onClick={handleSignOut} className="w-full flex items-center gap-2 text-xs text-sidebar-foreground/60 hover:text-gold px-3 py-2 rounded-md hover:bg-sidebar-accent/40">
-            <LogOut className="h-3.5 w-3.5" /> Sign out
+        <div className="px-3 py-3 border-t border-sidebar-border space-y-1">
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className={cn(
+              "w-full flex items-center gap-2 text-xs text-sidebar-foreground/60 hover:text-gold px-3 py-2 rounded-md hover:bg-sidebar-accent/40",
+              collapsed && "justify-center px-0",
+            )}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <ChevronsRight className="h-3.5 w-3.5" /> : <ChevronsLeft className="h-3.5 w-3.5" />}
+            {!collapsed && "Collapse"}
+          </button>
+          <button
+            onClick={handleSignOut}
+            className={cn(
+              "w-full flex items-center gap-2 text-xs text-sidebar-foreground/60 hover:text-gold px-3 py-2 rounded-md hover:bg-sidebar-accent/40",
+              collapsed && "justify-center px-0",
+            )}
+            title="Sign out"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            {!collapsed && "Sign out"}
           </button>
         </div>
       </aside>

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PlacesInput } from "@/components/PlacesInput";
+import { TimeSelect } from "@/components/TimeSelect";
 import { useCreateEmployee, useSupervisorOffice, useOfficeLocations, type CreateEmployeePayload } from "@/lib/queries";
 import { getPoint, DROP } from "@/lib/geo";
 import { loadGoogleMaps } from "@/lib/googleMaps";
@@ -158,8 +159,14 @@ export function AddEmployeeDialog({ open, onOpenChange }: { open: boolean; onOpe
                 </div>
               )}
 
-              <div><Label>Login time</Label><Input className="mt-1" value={form.loginTime} onChange={(e) => setForm({ ...form, loginTime: e.target.value })} /></div>
-              <div><Label>Logout time</Label><Input className="mt-1" value={form.logoutTime} onChange={(e) => setForm({ ...form, logoutTime: e.target.value })} /></div>
+              <div>
+                <Label>Login time</Label>
+                <TimeSelect className="mt-1" value={form.loginTime} onChange={(v) => setForm({ ...form, loginTime: v })} />
+              </div>
+              <div>
+                <Label>Logout time</Label>
+                <TimeSelect className="mt-1" value={form.logoutTime} onChange={(v) => setForm({ ...form, logoutTime: v })} />
+              </div>
             </div>
 
             <DialogFooter className="mt-6">
@@ -258,7 +265,7 @@ function PinMap({
       icon: {
         path: g.maps.SymbolPath.CIRCLE,
         scale: 11,
-        fillColor: "#D4AF37",
+        fillColor: "#D5B036",
         fillOpacity: 1,
         strokeColor: "#fff",
         strokeWeight: 3,

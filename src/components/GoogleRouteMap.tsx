@@ -1,6 +1,6 @@
 /// <reference types="google.maps" />
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GripVertical, X, Plus, ShieldCheck, ShieldAlert, MapPin, Loader2, Move } from "lucide-react";
+import { GripVertical, X, Plus, ShieldCheck, ShieldAlert, MapPin, Loader2, Move, ChevronUp, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -171,7 +171,7 @@ export function GoogleRouteMap({
         icon: {
           path: g.maps.SymbolPath.CIRCLE,
           scale: 14,
-          fillColor: "#D4AF37",
+          fillColor: "#D5B036",
           fillOpacity: 1,
           strokeColor: "#fff",
           strokeWeight: 3,
@@ -243,7 +243,7 @@ export function GoogleRouteMap({
         polylineRef.current = new g.maps.Polyline({
           map: mapRef.current!,
           path,
-          strokeColor: "#D4AF37",
+          strokeColor: "#D5B036",
           strokeWeight: 5,
           strokeOpacity: 0.95,
         });
@@ -258,7 +258,7 @@ export function GoogleRouteMap({
       polylineRef.current = new g.maps.Polyline({
         map,
         path: pts,
-        strokeColor: "#D4AF37",
+        strokeColor: "#D5B036",
         strokeWeight: 4,
         strokeOpacity: 0.9,
         icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "14px" }],
@@ -355,7 +355,7 @@ export function GoogleRouteMap({
         <div className="flex items-center justify-between">
           <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
             {type === "logout" ? "Drop sequence" : "Pickup sequence"}
-            {editable ? " · drag row to reorder" : ""}
+            {editable ? " · drag row or use arrows to reorder" : ""}
           </div>
           {editable && onAdd && (
             <Button size="sm" variant="outline" onClick={onAdd}>
@@ -375,6 +375,8 @@ export function GoogleRouteMap({
             key={s.empId}
             stop={s}
             idx={i}
+            isFirst={i === 0}
+            isLast={i === route.stops.length - 1}
             editable={!!editable}
             pickupTime={pickupTimes?.[s.empId] ?? ""}
             onTimeChange={onPickupTimeChange ? (t) => onPickupTimeChange(s.empId, t) : undefined}
@@ -384,6 +386,8 @@ export function GoogleRouteMap({
               if (dragIdx !== null && dragIdx !== i && onReorder) onReorder(dragIdx, i);
               setDragIdx(null);
             }}
+            onMoveUp={onReorder ? () => onReorder(i, i - 1) : undefined}
+            onMoveDown={onReorder ? () => onReorder(i, i + 1) : undefined}
             onRemove={onRemove ? () => onRemove(s.empId) : undefined}
           />
         ))}
@@ -406,10 +410,12 @@ export function GoogleRouteMap({
 // ─── Stop row ─────────────────────────────────────────────────────────────────
 
 function StopRow({
-  stop, idx, editable, onRemove, onDragStart, onDragOver, onDrop, pickupTime, onTimeChange,
+  stop, idx, isFirst, isLast, editable, onRemove, onDragStart, onDragOver, onDrop, onMoveUp, onMoveDown, pickupTime, onTimeChange,
 }: {
   stop: RouteStop;
   idx: number;
+  isFirst?: boolean;
+  isLast?: boolean;
   editable: boolean;
   pickupTime?: string;
   onTimeChange?: (time: string) => void;
@@ -417,6 +423,8 @@ function StopRow({
   onDragStart?: () => void;
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   return (
     <div
@@ -430,6 +438,34 @@ function StopRow({
       )}
     >
       {editable && <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />}
+      {editable && (onMoveUp || onMoveDown) && (
+        <div className="flex flex-col shrink-0 -my-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            draggable={false}
+            className="h-5 w-5 text-muted-foreground hover:text-gold-dark disabled:opacity-30"
+            disabled={isFirst || !onMoveUp}
+            onClick={(e) => { e.stopPropagation(); onMoveUp?.(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            title="Move up"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            draggable={false}
+            className="h-5 w-5 text-muted-foreground hover:text-gold-dark disabled:opacity-30"
+            disabled={isLast || !onMoveDown}
+            onClick={(e) => { e.stopPropagation(); onMoveDown?.(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            title="Move down"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
       <div className="h-8 w-8 rounded-full bg-gold text-gold-foreground flex items-center justify-center text-xs font-bold shrink-0">
         {idx + 1}
       </div>

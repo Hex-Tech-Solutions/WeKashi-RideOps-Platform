@@ -41,6 +41,9 @@ export const VEHICLE_SURCHARGE: Record<VehicleType, number> = {
 
 export const AC_SURCHARGE = 100;
 
+/** Manual fare top-up options the supervisor can pick at booking time (₹). */
+export const FARE_ADJUSTMENT_OPTIONS = [50, 75, 100, 125, 150] as const;
+
 /** Platform fee added on top of driver fare — shown to supervisor, kept by platform */
 export const PLATFORM_FEE = 20;
 

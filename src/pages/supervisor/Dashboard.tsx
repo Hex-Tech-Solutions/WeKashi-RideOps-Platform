@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 
 // ─── Colour palette ───────────────────────────────────────────────────────────
-const GOLD   = "hsl(43 74% 49%)";
+const GOLD   = "hsl(46 65% 52%)";
 const GREEN  = "hsl(142 76% 36%)";
 const WARN   = "hsl(38 92% 50%)";
 const RED    = "hsl(0 84% 60%)";

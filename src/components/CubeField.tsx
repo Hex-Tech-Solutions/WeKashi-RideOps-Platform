@@ -42,7 +42,7 @@ function Cubes({ count = 28 }: { count?: number }) {
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, count]} castShadow>
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="#D4AF37" metalness={0.6} roughness={0.25} />
+      <meshStandardMaterial color="#D5B036" metalness={0.6} roughness={0.25} />
     </instancedMesh>
   );
 }
@@ -70,7 +70,7 @@ export function CubeField({ className = "", variant = "dark", blurClass = "backd
         >
           <ambientLight intensity={0.4} />
           <directionalLight position={[5, 5, 5]} intensity={1.1} />
-          <pointLight position={[-5, -5, 4]} intensity={0.6} color="#D4AF37" />
+          <pointLight position={[-5, -5, 4]} intensity={0.6} color="#D5B036" />
           <Cubes />
         </Canvas>
       )}

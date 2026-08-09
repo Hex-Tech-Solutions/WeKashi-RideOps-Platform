@@ -11,11 +11,11 @@ import {
   useOfficeLocations, useRouteTemplates,
   type CreateRidePayload, type OfficeLocationRow, type RouteTemplateRow,
 } from "@/lib/queries";import { optimizeStops, buildResult, coordPoint, getPoint, DROP, type RouteStop, type GeoPoint } from "@/lib/geo";
-import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, escortCharge, type VehicleType } from "@/lib/pricing";
+import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS, type VehicleType } from "@/lib/pricing";
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Shield, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck } from "lucide-react";
+import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Shield, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck, IndianRupee } from "lucide-react";
 import { GoogleRouteMap } from "@/components/GoogleRouteMap";
 import { SaveRouteDialog } from "@/components/SaveRouteDialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -89,6 +89,9 @@ export default function RoutesPage() {
   const [scheduleAt, setScheduleAt] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isAc, setIsAc] = useState(false);
+  // Manual fare top-up — supervisor can bump the driver fare by a fixed amount
+  // to sweeten the offer (e.g. long/inconvenient routes). null = no adjustment.
+  const [fareAdjustment, setFareAdjustment] = useState<number | null>(null);
   const [plannedPickupTime, setPlannedPickupTime] = useState<string>("");
   // Overrides when the supervisor drags the office pin on the map.
   const [officeOverride, setOfficeOverride] = useState<{ lat: number; lng: number; address: string } | null>(null);
@@ -166,7 +169,8 @@ export default function RoutesPage() {
   // Use ONLY the real driving distance from Google Directions API.
   // null = still loading (Directions API hasn't responded yet).
   const displayKm = realDistanceKm;
-  const price = displayKm != null ? computeFare(displayKm, vehicleType, isAc) : null;
+  const baseFare = displayKm != null ? computeFare(displayKm, vehicleType, isAc) : null;
+  const price = baseFare != null ? baseFare + (fareAdjustment ?? 0) : null;
 
   // ── Escort policy ─────────────────────────────────────────────────────────
   // Uses per-stop pickup times (set beside each employee in Step 2) to check
@@ -218,6 +222,7 @@ export default function RoutesPage() {
     setOfficeOverride(null);
     setRealDistanceKm(null);
     setPickupTimes({});
+    setFareAdjustment(null);
     setStep(1);
   };
 
@@ -230,6 +235,7 @@ export default function RoutesPage() {
     setOfficeOverride(null);
     setRealDistanceKm(null);
     setPickupTimes({});
+    setFareAdjustment(null);
     if (t.officeLocationId) setSelectedOfficeId(t.officeLocationId);
     if (t.vehicleType) setVehicleType(t.vehicleType as VehicleType);
     setStep(2);
@@ -293,6 +299,7 @@ export default function RoutesPage() {
       distanceKm: displayKm,
       vehicleType,
       isAc,
+      fareAdjustment: fareAdjustment ?? undefined,
       scheduledPickupTimes: pickupTimes,
       escortRequired: escortPolicy.required,
       escortName: escortPolicy.required ? (escortName.trim() || null) : null,
@@ -652,9 +659,15 @@ export default function RoutesPage() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Driver fare · {displayKm != null ? `${displayKm} km` : "…"} · {VEHICLE_LABELS[vehicleType]}{isAc ? " · AC" : ""}</span>
                   <span className="font-semibold">
-                    {price != null ? `₹${price}` : <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> calculating</span>}
+                    {baseFare != null ? `₹${baseFare}` : <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> calculating</span>}
                   </span>
                 </div>
+                {fareAdjustment != null && (
+                  <div className="flex items-center justify-between text-sm rounded-md bg-gold/10 border border-gold/30 px-2 py-1.5">
+                    <span className="text-gold-dark">Fare top-up (added to driver fare)</span>
+                    <span className="font-semibold text-gold-dark">+₹{fareAdjustment}</span>
+                  </div>
+                )}
                 {escortPolicy.required && price != null && (
                   <div className="flex items-center justify-between text-sm rounded-md bg-destructive/10 border border-destructive/30 px-2 py-1.5">
                     <span className="text-destructive flex items-center gap-1.5">
@@ -691,6 +704,35 @@ export default function RoutesPage() {
                   {escortPolicy.required && price != null && ` · ₹${escortCharge(price)} escort charge`}
                   {` · ₹${PLATFORM_FEE} platform fee`}
                   {pendingCancellationFee > 0 ? ` · ₹${pendingCancellationFee.toFixed(2)} cancellation penalty` : ""}
+                </div>
+              </div>
+              {/* Fare top-up — bump the driver fare to sweeten the offer */}
+              <div className="rounded-md border px-3 py-2.5 space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <IndianRupee className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <div className="font-medium">Add money for driver</div>
+                    <div className="text-[11px] text-muted-foreground">Optional top-up on top of the calculated fare</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {FARE_ADJUSTMENT_OPTIONS.map((amt) => {
+                    const active = fareAdjustment === amt;
+                    return (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setFareAdjustment((cur) => (cur === amt ? null : amt))}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          active
+                            ? "border-gold bg-gold text-gold-foreground"
+                            : "border-border hover:border-gold/40 text-foreground"
+                        }`}
+                      >
+                        +₹{amt}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               {/* AC toggle */}

@@ -41,6 +41,8 @@ const CreateRideSchema = z.object({
   vehicleType: z.enum(['hatchback', 'sedan', 'suv']).optional(),
   /** AC flat surcharge option (₹100). */
   isAc: z.boolean().optional(),
+  /** Manual fare top-up the supervisor picks at booking time (must be one of the allowed options). */
+  fareAdjustment: z.number().min(0).max(1000).optional(),
   scheduled: z.boolean().optional(),
   /** Per-employee expected pickup times — empId → HH:MM */
   scheduledPickupTimes: z.record(z.string().regex(/^\d{2}:\d{2}$/)).optional(),

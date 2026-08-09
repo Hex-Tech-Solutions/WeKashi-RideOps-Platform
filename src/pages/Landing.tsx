@@ -128,7 +128,7 @@ export default function Landing() {
       className="relative min-h-screen text-white overflow-hidden font-sans"
       style={{
         background:
-          "radial-gradient(80% 60% at 20% 0%, hsl(43 74% 49% / 0.10), transparent 60%), radial-gradient(70% 50% at 90% 20%, hsl(43 90% 60% / 0.07), transparent 60%), linear-gradient(180deg, hsl(0 0% 4%) 0%, hsl(0 0% 7%) 40%, hsl(0 0% 4%) 100%)",
+          "radial-gradient(80% 60% at 20% 0%, hsl(46 65% 52% / 0.10), transparent 60%), radial-gradient(70% 50% at 90% 20%, hsl(46 80% 62% / 0.07), transparent 60%), linear-gradient(180deg, hsl(0 0% 4%) 0%, hsl(0 0% 7%) 40%, hsl(0 0% 4%) 100%)",
       }}
     >
       <CubeField variant="dark" />
@@ -177,7 +177,7 @@ export default function Landing() {
             className="absolute inset-0"
             style={{
               background:
-                "radial-gradient(70% 60% at 20% 50%, hsl(43 74% 49% / 0.14), transparent 70%), linear-gradient(180deg, hsl(0 0% 0% / 0.45) 0%, transparent 35%, hsl(0 0% 0% / 0.85) 100%)",
+                "radial-gradient(70% 60% at 20% 50%, hsl(46 65% 52% / 0.14), transparent 70%), linear-gradient(180deg, hsl(0 0% 0% / 0.45) 0%, transparent 35%, hsl(0 0% 0% / 0.85) 100%)",
             }}
           />
         </div>
@@ -236,7 +236,7 @@ export default function Landing() {
         {/* Gold rim light */}
         <div
           className="absolute inset-y-0 left-0 w-1/2 pointer-events-none"
-          style={{ background: "linear-gradient(90deg, hsl(43 74% 49% / 0.10), transparent 70%)" }}
+          style={{ background: "linear-gradient(90deg, hsl(46 65% 52% / 0.10), transparent 70%)" }}
         />
 
         {/* Content — flows naturally, no fixed height, nothing clips */}
@@ -341,7 +341,7 @@ export default function Landing() {
           className="absolute inset-0 -z-10"
           style={{
             background:
-              "radial-gradient(50% 60% at 50% 50%, hsl(43 74% 49% / 0.08), transparent 70%), linear-gradient(180deg, hsl(0 0% 6%), hsl(0 0% 3%))",
+              "radial-gradient(50% 60% at 50% 50%, hsl(46 65% 52% / 0.08), transparent 70%), linear-gradient(180deg, hsl(0 0% 6%), hsl(0 0% 3%))",
           }}
         />
         <div className="max-w-7xl mx-auto px-6">
@@ -463,7 +463,7 @@ export default function Landing() {
           className="absolute inset-0 -z-10"
           style={{
             background:
-              "linear-gradient(180deg, hsl(0 0% 5%), hsl(0 0% 7%)), conic-gradient(from 220deg at 50% 50%, hsl(43 74% 49% / 0.10), transparent 30%, hsl(43 74% 49% / 0.06) 70%, transparent)",
+              "linear-gradient(180deg, hsl(0 0% 5%), hsl(0 0% 7%)), conic-gradient(from 220deg at 50% 50%, hsl(46 65% 52% / 0.10), transparent 30%, hsl(46 65% 52% / 0.06) 70%, transparent)",
             backgroundBlendMode: "normal, screen",
           }}
         />
@@ -543,7 +543,7 @@ export default function Landing() {
           className="absolute inset-0 -z-10"
           style={{
             background:
-              "radial-gradient(50% 80% at 50% 50%, hsl(43 74% 49% / 0.18), transparent 70%), hsl(0 0% 3%)",
+              "radial-gradient(50% 80% at 50% 50%, hsl(46 65% 52% / 0.18), transparent 70%), hsl(0 0% 3%)",
           }}
         />
         <div className="max-w-4xl mx-auto px-6 text-center">
