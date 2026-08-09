@@ -1,41 +1,35 @@
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useRef } from "react";
+import { Input } from "@/components/ui/input";
 
-interface Props {
+interface Props extends Omit<React.ComponentPropsWithoutRef<"input">, "type" | "step" | "lang" | "value" | "onChange" | "ref"> {
   value: string;                    // "HH:MM", 24-hour
   onChange: (v: string) => void;
   className?: string;
-  stepMinutes?: 5 | 10 | 15 | 30;    // default 15
 }
 
-function buildOptions(stepMinutes: number): string[] {
-  const options: string[] = [];
-  for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m += stepMinutes) {
-      options.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    }
-  }
-  return options;
-}
-
-// 24-hour time dropdown (e.g. "08:30", "18:30") — replaces free-text time entry
-// so supervisors can't type an invalid or ambiguous (12h) value.
-export function TimeSelect({ value, onChange, className, stepMinutes = 15 }: Props) {
-  const options = buildOptions(stepMinutes);
-  // If the current value doesn't fall on a step boundary (e.g. legacy data,
-  // or a value saved before this component existed), still show it as a
-  // selectable option so nothing silently changes on open.
-  const allOptions = value && !options.includes(value) ? [...options, value].sort() : options;
+// 24-hour time input — uses the browser/OS native time picker (the wheel/spinner
+// UI you get on Android Chrome, iOS Safari, etc.) instead of a custom dropdown.
+// step=60 hides the seconds wheel; lang="en-GB" nudges browsers that default to
+// 12-hour AM/PM display (e.g. desktop Chrome on a US-locale OS) toward 24-hour.
+export function TimeSelect({ value, onChange, className, ...rest }: Props) {
+  const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={className}>
-        <SelectValue placeholder="Select time…" />
-      </SelectTrigger>
-      <SelectContent className="max-h-64">
-        {allOptions.map((t) => (
-          <SelectItem key={t} value={t}>{t}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Input
+      ref={inputRef}
+      type="time"
+      step={60}
+      lang="en-GB"
+      value={value}
+      onChange={(e) => {
+        onChange(e.target.value);
+        // Chrome's native time spinner only closes on blur/Enter/Tab, not
+        // automatically after picking a value — close it as soon as a
+        // complete time is set instead of leaving it open over the form.
+        if (e.target.value) inputRef.current?.blur();
+      }}
+      className={className}
+      {...rest}
+    />
   );
 }

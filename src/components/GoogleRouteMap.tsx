@@ -1,6 +1,7 @@
 /// <reference types="google.maps" />
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GripVertical, X, Plus, ShieldCheck, ShieldAlert, MapPin, Loader2, Move, ChevronUp, ChevronDown } from "lucide-react";
+import { TimeSelect } from "@/components/TimeSelect";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -486,14 +487,13 @@ function StopRow({
       {editable && onTimeChange && (
         <div className="flex flex-col items-end shrink-0 gap-0.5">
           <span className="text-[10px] text-muted-foreground">Stop pickup time</span>
-          <input
-            type="time"
+          <TimeSelect
             value={pickupTime ?? ""}
-            onChange={(e) => onTimeChange(e.target.value)}
+            onChange={onTimeChange}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             draggable={false}
-            className="h-7 rounded border border-border bg-background px-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-gold w-[80px]"
+            className="h-7 rounded border border-border bg-background px-1.5 text-xs font-mono text-foreground focus-visible:ring-1 focus-visible:ring-gold w-[80px]"
           />
         </div>
       )}

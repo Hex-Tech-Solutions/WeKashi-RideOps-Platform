@@ -17,6 +17,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Shield, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck, IndianRupee } from "lucide-react";
 import { GoogleRouteMap } from "@/components/GoogleRouteMap";
+import { TimeSelect } from "@/components/TimeSelect";
 import { SaveRouteDialog } from "@/components/SaveRouteDialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -545,11 +546,10 @@ export default function RoutesPage() {
                   </button>
                 )}
               </div>
-              <input
-                type="time"
+              <TimeSelect
                 value={plannedPickupTime}
-                onChange={(e) => setPlannedPickupTime(e.target.value)}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-gold"
+                onChange={setPlannedPickupTime}
+                className="w-full h-9 font-mono focus-visible:ring-1 focus-visible:ring-gold"
               />
             </div>
           </CardContent>

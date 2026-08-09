@@ -5,10 +5,10 @@
 // slab it falls into (not marginal/tiered).
 //
 // Slabs:  0–10 km → ₹50/km | 11–15 → ₹45 | 16–20 → ₹40 | 21–25 → ₹35 | 26+ → ₹30
-// Vehicle surcharge (₹/km): hatchback ₹3 | sedan ₹5 | SUV ₹7
+// Vehicle surcharge (₹/km): hatchback ₹0 | sedan ₹0 | SUV ₹5
 // AC option: flat ₹100 surcharge
 //
-// Example: 22 km, SUV, AC = 22×₹35 + 22×₹7 + ₹100 = ₹1,024
+// Example: 22 km, SUV, AC = 22×₹35 + 22×₹5 + ₹100 = ₹980
 
 export type VehicleType = "hatchback" | "sedan" | "suv";
 
@@ -22,7 +22,7 @@ const SLABS: { upTo: number; rate: number }[] = [
   { upTo: Infinity, rate: 30 },
 ];
 
-export const VEHICLE_SURCHARGE: Record<VehicleType, number> = { hatchback: 3, sedan: 5, suv: 7 };
+export const VEHICLE_SURCHARGE: Record<VehicleType, number> = { hatchback: 0, sedan: 0, suv: 5 };
 export const VEHICLE_LABELS: Record<VehicleType, string> = { hatchback: "Hatchback", sedan: "Sedan", suv: "SUV" };
 export const VEHICLE_TYPES: VehicleType[] = ["hatchback", "sedan", "suv"];
 export const AC_SURCHARGE = 100;

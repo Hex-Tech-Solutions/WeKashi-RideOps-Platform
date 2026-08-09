@@ -10,7 +10,7 @@ export const globalRateLimiter = rateLimit({
 
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many auth requests', code: 'TOO_MANY_REQUESTS' },
@@ -18,7 +18,7 @@ export const authRateLimiter = rateLimit({
 
 export const otpRateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 5,
+  max: 15,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'OTP request limit exceeded', code: 'TOO_MANY_REQUESTS' },
@@ -40,7 +40,7 @@ export const fileRateLimiter = rateLimit({
 // Rate limiter for token refresh endpoint
 export const refreshRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many refresh requests', code: 'TOO_MANY_REQUESTS' },

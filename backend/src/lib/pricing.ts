@@ -11,15 +11,15 @@
 //   31+ km   : ₹30/km
 //
 // Vehicle surcharge (₹/km, applied on the whole distance):
-//   hatchback: ₹3/km  |  sedan: ₹5/km  |  suv: ₹7/km
+//   hatchback: ₹0/km  |  sedan: ₹0/km  |  suv: ₹5/km
 //
 // AC option: flat ₹100 surcharge when isAc = true.
 //
 // Example: 22 km, SUV, AC
 //   base      = 22 × ₹35          = ₹770
-//   surcharge = 22 × ₹7           = ₹154
+//   surcharge = 22 × ₹5           = ₹110
 //   AC        =                     ₹100
-//   total     =                     ₹1,024
+//   total     =                     ₹980
 
 export type VehicleType = 'hatchback' | 'sedan' | 'suv';
 
@@ -34,9 +34,9 @@ const SLABS: { upTo: number; rate: number }[] = [
 ];
 
 export const VEHICLE_SURCHARGE: Record<VehicleType, number> = {
-  hatchback: 3,
-  sedan: 5,
-  suv: 7,
+  hatchback: 0,
+  sedan: 0,
+  suv: 5,
 };
 
 export const AC_SURCHARGE = 100;
