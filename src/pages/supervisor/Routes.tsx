@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/RoleLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,10 +30,26 @@ import {
 } from "@/components/ui/alert-dialog";
 
 interface UIEmployee {
-  id: string; name: string; gender: "M" | "F"; pickup: string; loginTime: string;
+  id: string; name: string; gender: "M" | "F"; pickup: string; loginTime: string; logoutTime: string;
   companyLabel?: string | null;
   pickupLat?: number | null; pickupLng?: number | null; dropLat?: number | null; dropLng?: number | null;
 }
+
+// Shift times are HH:MM strings — compare as minutes-since-midnight.
+const toMinutes = (hhmm: string): number | null => {
+  if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+};
+
+/** Add/subtract minutes from an HH:MM string, wrapping around midnight. */
+const addMinutes = (hhmm: string, delta: number): string => {
+  const base = toMinutes(hhmm) ?? 0;
+  const total = ((base + delta) % 1440 + 1440) % 1440;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+};
 
 const pt = (p: GeoPoint) => ({ lat: p.lat, lng: p.lng });
 const capFor = (n: number) => (n <= 4 ? 4 : n <= 6 ? 6 : 7);
@@ -64,6 +80,7 @@ export default function RoutesPage() {
       gender: e.gender?.toUpperCase().startsWith("F") ? "F" : "M",
       pickup: e.pickupAddress,
       loginTime: e.shiftStart,
+      logoutTime: e.shiftEnd,
       companyLabel: e.companyLabel,
       pickupLat: e.pickupLat, pickupLng: e.pickupLng, dropLat: e.dropLat, dropLng: e.dropLng,
     })),
@@ -224,6 +241,8 @@ export default function RoutesPage() {
     setRealDistanceKm(null);
     setPickupTimes({});
     setFareAdjustment(null);
+    setPlannedPickupTime("");
+    lastAutoFilled.current = null;
     setStep(1);
   };
 
@@ -237,6 +256,8 @@ export default function RoutesPage() {
     setRealDistanceKm(null);
     setPickupTimes({});
     setFareAdjustment(null);
+    setPlannedPickupTime("");
+    lastAutoFilled.current = null;
     if (t.officeLocationId) setSelectedOfficeId(t.officeLocationId);
     if (t.vehicleType) setVehicleType(t.vehicleType as VehicleType);
     setStep(2);
@@ -359,11 +380,70 @@ export default function RoutesPage() {
   );
   const timeRequiredButMissing = femaleStopsWithoutTime.length > 0;
 
+  // ── Shift-time mismatch guard ──────────────────────────────────────────────
+  // Employees being grouped into ONE ride must share the same shift (the
+  // relevant one for this ride's direction — shiftStart for login, shiftEnd
+  // for logout). Mixing shifts means the group doesn't actually travel
+  // together, so block it with a clear warning instead of silently allowing it.
+  const distinctShiftTimes = useMemo(() => {
+    const times = selected.map((e) => (type === "logout" ? e.logoutTime : e.loginTime)).filter(Boolean);
+    return Array.from(new Set(times));
+  }, [selected, type]);
+  const shiftMismatch = distinctShiftTimes.length > 1;
+  const groupShiftTime = distinctShiftTimes.length === 1 ? distinctShiftTimes[0] : null;
+
+  // ── Per-stop pickup time window (relative to the group's shared shift time) ──
+  // Login:  stop pickup time must be within 3 hours BEFORE the shift start time
+  //         (e.g. shift 08:30 -> window 05:30–08:30) — driver picks employees up
+  //         from home before the login time so they arrive at office on time.
+  // Logout: stop pickup time (driver picks everyone up AT the office) must be
+  //         AT or up to 1 hour AFTER the shift end time (e.g. shift 18:30 ->
+  //         window 18:30–19:30) — can't leave before the shift has ended.
+  const pickupTimeWindow = useMemo(() => {
+    if (!groupShiftTime) return null;
+    return type === "logout"
+      ? { min: groupShiftTime, max: addMinutes(groupShiftTime, 60) }
+      : { min: addMinutes(groupShiftTime, -180), max: groupShiftTime };
+  }, [groupShiftTime, type]);
+
+  const isWithinPickupWindow = (hhmm: string | null | undefined): boolean => {
+    if (!hhmm || !pickupTimeWindow) return true; // no shift time known yet — can't validate
+    const t = toMinutes(hhmm);
+    const min = toMinutes(pickupTimeWindow.min);
+    const max = toMinutes(pickupTimeWindow.max);
+    if (t == null || min == null || max == null) return true;
+    // Window can wrap past midnight (e.g. login shift 06:00 -> window 02:00-03:00 same day, fine;
+    // but a shift at 01:00 -> window 21:00-22:00 the PREVIOUS day — handle wraparound).
+    if (min <= max) return t >= min && t <= max;
+    return t >= min || t <= max; // wrapped window
+  };
+
+  const stopsOutsideWindow = pickupTimeWindow
+    ? route.stops.filter((s) => pickupTimes[s.empId] && !isWithinPickupWindow(pickupTimes[s.empId]))
+    : [];
+  const timeOutsideWindow = stopsOutsideWindow.length > 0;
+
   const canNext = step === 1
-    ? selected.length > 0
+    ? selected.length > 0 && !shiftMismatch
     : step === 2
-    ? displayKm != null && !timeRequiredButMissing
+    ? displayKm != null && !timeRequiredButMissing && !timeOutsideWindow
     : true;
+
+  // Auto-fill the Shift/pickup time from the group's shared shift time, and
+  // keep it in sync if the group's shift time changes later (e.g. switching
+  // between Login/Logout, which uses a different shift field). Only skip the
+  // sync if the supervisor has manually typed something different from the
+  // last value we auto-filled — that counts as an intentional override.
+  const lastAutoFilled = useRef<string | null>(null);
+  useEffect(() => {
+    if (step !== 2 || !groupShiftTime) return;
+    const wasAutoFilled = plannedPickupTime === "" || plannedPickupTime === lastAutoFilled.current;
+    if (wasAutoFilled && plannedPickupTime !== groupShiftTime) {
+      setPlannedPickupTime(groupShiftTime);
+      lastAutoFilled.current = groupShiftTime;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, groupShiftTime]);
 
   return (
     <div>
@@ -415,7 +495,7 @@ export default function RoutesPage() {
           return (
             <button
               key={n}
-              onClick={() => (n < step || (n === 2 && selected.length > 0)) && setStep(n as 1 | 2 | 3)}
+              onClick={() => (n < step || (n === 2 && selected.length > 0 && !shiftMismatch)) && setStep(n as 1 | 2 | 3)}
               className={`flex-1 flex items-center gap-2 px-4 py-2.5 rounded-md border text-sm transition-colors ${
                 active ? "border-gold bg-gold-soft text-gold-dark" : done ? "border-foreground bg-foreground/5" : "border-border bg-card text-muted-foreground"
               }`}
@@ -441,6 +521,20 @@ export default function RoutesPage() {
             <Badge variant="outline" className="border-gold/40 bg-gold-soft text-gold-dark">{selected.length} selected</Badge>
           </CardHeader>
           <CardContent>
+            {shiftMismatch && (
+              <div className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+                <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                <div className="text-xs text-destructive">
+                  <div className="font-semibold">
+                    Wrong timings — selected employees don't share the same {type === "logout" ? "logout" : "login"} time
+                  </div>
+                  <div className="mt-0.5">
+                    Found {distinctShiftTimes.length} different {type === "logout" ? "logout" : "login"} times ({distinctShiftTimes.join(", ")}) among the {selected.length} selected employees.
+                    Employees riding together must share the same shift {type === "logout" ? "end" : "start"} time — remove the mismatched employee(s) or create a separate ride for them.
+                  </div>
+                </div>
+              </div>
+            )}
             {visibleEmployees.length === 0 && offices.length > 0 && activeOffice ? (
               <div className="text-sm text-muted-foreground py-8 text-center space-y-1">
                 <Building2 className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
@@ -448,7 +542,7 @@ export default function RoutesPage() {
                 <div className="text-xs">Go to <b>Roster → Add employee</b> and select this office as the Company.</div>
               </div>
             ) : (
-              <EmployeeList employees={visibleEmployees} selectedIds={selectedIds} onToggle={toggleEmployee} />
+              <EmployeeList employees={visibleEmployees} selectedIds={selectedIds} onToggle={toggleEmployee} type={type} />
             )}
           </CardContent>
         </Card>
@@ -514,6 +608,7 @@ export default function RoutesPage() {
               onPickupTimeChange={(empId, time) =>
                 setPickupTimes((prev) => ({ ...prev, [empId]: time }))
               }
+              pickupTimeWindow={pickupTimeWindow}
             />
 
             {/* Per-stop time block warning — shown when female stops are missing their time */}
@@ -530,6 +625,22 @@ export default function RoutesPage() {
               </div>
             )}
 
+            {/* Warning — a stop's pickup time falls outside the allowed window for the shift time */}
+            {timeOutsideWindow && pickupTimeWindow && (
+              <div className="mt-4 rounded-md border border-destructive/60 bg-destructive/5 px-3 py-2.5 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                <div className="text-xs text-destructive">
+                  <div className="font-semibold">Wrong pickup timings</div>
+                  <div className="mt-0.5">
+                    {stopsOutsideWindow.map((s) => s.name).join(", ")} {stopsOutsideWindow.length === 1 ? "has" : "have"} a stop pickup time outside the allowed window ({pickupTimeWindow.min}–{pickupTimeWindow.max}) for this group's {type === "logout" ? "logout" : "login"} time ({groupShiftTime}).{" "}
+                    {type === "login"
+                      ? "Login pickups must be within 3 hours before the shift start time."
+                      : "Logout pickups must be at or up to 1 hour after the shift end time."}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Shift/pickup time picker — for OTD reporting only, not safety */}
             <div className="mt-4 rounded-md border px-3 py-2.5 space-y-2">
               <div className="flex items-center gap-2 text-sm">
@@ -537,7 +648,7 @@ export default function RoutesPage() {
                 <div className="flex-1">
                   <div className="font-medium">Shift / pickup time</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Used for OTD reports as "Planned Start Time". Women's safety window is checked from the per-stop times above.
+                    Auto-filled from the group's {type === "logout" ? "logout" : "login"} shift time ({groupShiftTime ?? "—"}). Used for OTD reports as "Planned Start Time". Women's safety window is checked from the per-stop times above.
                   </div>
                 </div>
                 {plannedPickupTime && (
@@ -792,9 +903,11 @@ export default function RoutesPage() {
         {step < 3 ? (
           <Button onClick={() => setStep((s) => (s + 1) as 1 | 2 | 3)} disabled={!canNext} className="bg-foreground text-background hover:bg-foreground/90">
             {step === 1
-              ? "Create group & view route"
+              ? (shiftMismatch ? "Fix timing mismatch to continue" : "Create group & view route")
               : timeRequiredButMissing
               ? "Set pickup time to continue"
+              : timeOutsideWindow
+              ? "Fix pickup timings to continue"
               : "Continue"
             } <ArrowRight className="h-4 w-4" />
           </Button>
@@ -809,7 +922,7 @@ export default function RoutesPage() {
         <SheetContent className="w-[420px]">
           <SheetHeader><SheetTitle>Add employees to this ride</SheetTitle></SheetHeader>
           <div className="mt-4">
-            <EmployeeList employees={visibleEmployees} selectedIds={selectedIds} onToggle={toggleEmployee} />
+            <EmployeeList employees={visibleEmployees} selectedIds={selectedIds} onToggle={toggleEmployee} type={type} />
           </div>
         </SheetContent>
       </Sheet>
@@ -831,10 +944,11 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="flex items-center justify-between"><span className="text-muted-foreground">{label}</span><span className="font-medium">{value}</span></div>;
 }
 
-function EmployeeList({ employees, selectedIds, onToggle }: {
+function EmployeeList({ employees, selectedIds, onToggle, type }: {
   employees: UIEmployee[];
   selectedIds: string[];
   onToggle: (id: string) => void;
+  type: "login" | "logout";
 }) {
   const [q, setQ] = useState("");
   const filtered = employees.filter((e) => e.name.toLowerCase().includes(q.toLowerCase()) || e.id.toLowerCase().includes(q.toLowerCase()));
@@ -866,7 +980,7 @@ function EmployeeList({ employees, selectedIds, onToggle }: {
                 </div>
                 <div className="text-xs text-muted-foreground truncate">{e.pickup}</div>
               </div>
-              <div className="text-xs text-muted-foreground">{e.loginTime}</div>
+              <div className="text-xs text-muted-foreground">{type === "logout" ? e.logoutTime : e.loginTime}</div>
             </button>
           );
         })}

@@ -27,6 +27,8 @@ interface Props {
   pickupTimes?: Record<string, string>;
   /** Called when the supervisor changes a stop's expected pickup time */
   onPickupTimeChange?: (empId: string, time: string) => void;
+  /** Allowed HH:MM range for per-stop pickup times, derived from the group's shift time. */
+  pickupTimeWindow?: { min: string; max: string } | null;
 }
 
 // ─── Reverse geocode helper ───────────────────────────────────────────────────
@@ -59,6 +61,7 @@ export function GoogleRouteMap({
   onRealDistanceKm,
   pickupTimes,
   onPickupTimeChange,
+  pickupTimeWindow,
 }: Props) {
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -381,6 +384,7 @@ export function GoogleRouteMap({
             editable={!!editable}
             pickupTime={pickupTimes?.[s.empId] ?? ""}
             onTimeChange={onPickupTimeChange ? (t) => onPickupTimeChange(s.empId, t) : undefined}
+            pickupTimeWindow={pickupTimeWindow}
             onDragStart={() => setDragIdx(i)}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => {
@@ -408,10 +412,22 @@ export function GoogleRouteMap({
   );
 }
 
+// Is `hhmm` outside the [min, max] window (min/max are "HH:MM" strings)?
+// Handles a window that wraps past midnight (min > max).
+function isOutsidePickupWindow(
+  hhmm: string | undefined,
+  window: { min: string; max: string } | null | undefined,
+): boolean {
+  if (!hhmm || !window) return false;
+  const { min, max } = window;
+  if (min <= max) return hhmm < min || hhmm > max;
+  return hhmm > max && hhmm < min; // wrapped window — outside is the gap between max and min
+}
+
 // ─── Stop row ─────────────────────────────────────────────────────────────────
 
 function StopRow({
-  stop, idx, isFirst, isLast, editable, onRemove, onDragStart, onDragOver, onDrop, onMoveUp, onMoveDown, pickupTime, onTimeChange,
+  stop, idx, isFirst, isLast, editable, onRemove, onDragStart, onDragOver, onDrop, onMoveUp, onMoveDown, pickupTime, onTimeChange, pickupTimeWindow,
 }: {
   stop: RouteStop;
   idx: number;
@@ -426,7 +442,9 @@ function StopRow({
   onDrop?: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  pickupTimeWindow?: { min: string; max: string } | null;
 }) {
+  const outsideWindow = isOutsidePickupWindow(pickupTime, pickupTimeWindow);
   return (
     <div
       draggable={editable}
@@ -486,15 +504,29 @@ function StopRow({
       {/* Pickup time picker — visible only in editable mode */}
       {editable && onTimeChange && (
         <div className="flex flex-col items-end shrink-0 gap-0.5">
-          <span className="text-[10px] text-muted-foreground">Stop pickup time</span>
+          <span className={cn("text-[10px]", outsideWindow ? "text-destructive font-medium" : "text-muted-foreground")}>
+            Stop pickup time
+          </span>
           <TimeSelect
             value={pickupTime ?? ""}
             onChange={onTimeChange}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             draggable={false}
-            className="h-7 rounded border border-border bg-background px-1.5 text-xs font-mono text-foreground focus-visible:ring-1 focus-visible:ring-gold w-[80px]"
+            min={pickupTimeWindow?.min}
+            max={pickupTimeWindow?.max}
+            className={cn(
+              "h-7 rounded border bg-background px-1.5 text-xs font-mono w-[80px] focus-visible:ring-1",
+              outsideWindow
+                ? "border-destructive text-destructive focus-visible:ring-destructive"
+                : "border-border text-foreground focus-visible:ring-gold",
+            )}
           />
+          {outsideWindow && pickupTimeWindow && (
+            <span className="text-[9px] text-destructive text-right leading-tight max-w-[140px]">
+              Should be {pickupTimeWindow.min}–{pickupTimeWindow.max}
+            </span>
+          )}
         </div>
       )}
       {editable && onRemove && (
