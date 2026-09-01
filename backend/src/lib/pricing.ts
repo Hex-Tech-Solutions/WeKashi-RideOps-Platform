@@ -60,6 +60,49 @@ export function escortCharge(driverFare: number): number {
   return Math.round(driverFare * ESCORT_CHARGE_RATE * 100) / 100;
 }
 
+// ── Driver scheduled-ride release policy ──────────────────────────────────────
+//
+// The fine is based on how much NOTICE the driver gives before the scheduled
+// pickup — not how long they held the ride. Releasing a ride 3 days out costs
+// nothing however long it was held; bailing an hour before pickup is what
+// actually hurts, because there's no time to re-fill the slot.
+
+/** Release this many hours (or more) before the scheduled pickup — no fine. */
+export const RELEASE_FREE_NOTICE_HOURS = 24;
+
+/** Released inside the free-notice window, but before the ride time. */
+export const RELEASE_LATE_FINE = 100;
+
+/** Released after the scheduled pickup time has already passed. */
+export const RELEASE_AFTER_START_FINE = 200;
+
+/** Driver held the ride and never showed — swept by sweepStaleScheduledRides. */
+export const SCHEDULED_NO_SHOW_FINE = 300;
+
+export type ReleaseFineOutcome = {
+  fine: number;
+  /** Machine-readable bucket, also used as the DriverFine.reason value. */
+  bucket: 'free_notice' | 'late_notice' | 'after_start';
+  hoursNotice: number;
+};
+
+/**
+ * Work out the fine for releasing a claimed scheduled ride.
+ * `scheduledFor` is the ride's pickup time; `now` is injectable for tests.
+ */
+export function releaseFine(scheduledFor: Date, now: Date = new Date()): ReleaseFineOutcome {
+  const msNotice = scheduledFor.getTime() - now.getTime();
+  const hoursNotice = Math.round((msNotice / 3_600_000) * 10) / 10;
+
+  if (msNotice < 0) {
+    return { fine: RELEASE_AFTER_START_FINE, bucket: 'after_start', hoursNotice };
+  }
+  if (msNotice >= RELEASE_FREE_NOTICE_HOURS * 3_600_000) {
+    return { fine: 0, bucket: 'free_notice', hoursNotice };
+  }
+  return { fine: RELEASE_LATE_FINE, bucket: 'late_notice', hoursNotice };
+}
+
 /**
  * Base distance fare: whole distance billed at the slab rate it falls into.
  */

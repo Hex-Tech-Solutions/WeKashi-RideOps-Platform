@@ -1,6 +1,6 @@
 /// <reference types="google.maps" />
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GripVertical, X, Plus, ShieldCheck, ShieldAlert, MapPin, Loader2, Move, ChevronUp, ChevronDown } from "lucide-react";
+import { GripVertical, X, Plus, MapPin, Loader2, Move, ChevronUp, ChevronDown } from "lucide-react";
 import { TimeSelect } from "@/components/TimeSelect";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,19 +16,20 @@ interface Props {
   onReorder?: (from: number, to: number) => void;
   onRemove?: (empId: string) => void;
   onAdd?: () => void;
-  onAutoFix?: () => void;
   /** Called when an employee pickup pin is dragged to a new position. */
   onPinMoved?: (empId: string, lat: number, lng: number, address: string) => void;
   /** Called when the office / drop pin is dragged to a new position. */
   onOfficeMoved?: (lat: number, lng: number, address: string) => void;
-  /** Called with the real driving distance (km) once the Directions API responds. */
-  onRealDistanceKm?: (km: number) => void;
   /** Current per-stop expected pickup times — empId → HH:MM */
   pickupTimes?: Record<string, string>;
   /** Called when the supervisor changes a stop's expected pickup time */
   onPickupTimeChange?: (empId: string, time: string) => void;
   /** Allowed HH:MM range for per-stop pickup times, derived from the group's shift time. */
   pickupTimeWindow?: { min: string; max: string } | null;
+  /** Encoded polyline from the backend's Routes API call, for the CURRENT stop order. Drawn as-is (no client-side Directions call). */
+  polyline?: string | null;
+  /** True while the backend is computing/re-computing the route for the current stops. */
+  routeLoading?: boolean;
 }
 
 // ─── Reverse geocode helper ───────────────────────────────────────────────────
@@ -55,27 +56,24 @@ export function GoogleRouteMap({
   onReorder,
   onRemove,
   onAdd,
-  onAutoFix,
   onPinMoved,
   onOfficeMoved,
-  onRealDistanceKm,
   pickupTimes,
   onPickupTimeChange,
   pickupTimeWindow,
+  polyline,
+  routeLoading,
 }: Props) {
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const officeMarkerRef = useRef<google.maps.Marker | null>(null);
   const polylineRef = useRef<google.maps.Polyline | null>(null);
-  const directionsRef = useRef<google.maps.DirectionsService | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [computedKm, setComputedKm] = useState<number | null>(null);
-  const [computedMin, setComputedMin] = useState<number | null>(null);
 
   // ── Boot the map once ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -90,7 +88,6 @@ export function GoogleRouteMap({
           zoomControl: true,
           styles: mapStyle,
         });
-        directionsRef.current = new g.maps.DirectionsService();
         geocoderRef.current = new g.maps.Geocoder();
         setReady(true);
       })
@@ -201,75 +198,41 @@ export function GoogleRouteMap({
     if (stops.length === 0) {
       mapRef.current.setCenter({ lat: office.lat, lng: office.lng });
       mapRef.current.setZoom(12);
-      setComputedKm(null);
-      setComputedMin(null);
       return;
     }
 
     mapRef.current.fitBounds(bounds, 60);
 
-    // ── Directions polyline ────────────────────────────────────────────────
-    // Use a local cancelled flag so stale Directions callbacks don't draw
-    // over a newer route when stops change rapidly.
-    let cancelled = false;
-
+    // ── Route line — drawn from the backend-provided polyline ──────────────
+    // The backend (Google Routes API) already computed the real driving
+    // route for the current stop order; we just decode + draw it here. No
+    // client-side Directions/Routes call happens in this component anymore.
     const ordered =
       type === "logout"
         ? [{ lat: office.lat, lng: office.lng }, ...stops.map((s) => ({ lat: s.point.lat, lng: s.point.lng }))]
         : [...stops.map((s) => ({ lat: s.point.lat, lng: s.point.lng })), { lat: office.lat, lng: office.lng }];
 
-    const origin = ordered[0];
-    const destination = ordered[ordered.length - 1];
-    const waypoints = ordered.slice(1, -1).map((p) => ({ location: p, stopover: true }));
-
-    directionsRef.current?.route(
-      {
-        origin,
-        destination,
-        waypoints,
-        travelMode: g.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false,
-      },
-      (res, status) => {
-        if (cancelled) return; // stale response — a newer route is already drawn
-        if (status !== "OK" || !res) {
-          drawStraight(g, mapRef.current!, ordered);
-          return;
-        }
-        const path: google.maps.LatLng[] = [];
-        let km = 0;
-        let secs = 0;
-        res.routes[0].legs.forEach((leg) => {
-          km += (leg.distance?.value ?? 0) / 1000;
-          secs += leg.duration?.value ?? 0;
-          leg.steps.forEach((step) => step.path.forEach((p) => path.push(p)));
-        });
-        polylineRef.current = new g.maps.Polyline({
-          map: mapRef.current!,
-          path,
-          strokeColor: "#D5B036",
-          strokeWeight: 5,
-          strokeOpacity: 0.95,
-        });
-        const realKm = Math.round(km * 10) / 10;
-        setComputedKm(realKm);
-        setComputedMin(Math.round(secs / 60));
-        onRealDistanceKm?.(realKm);
-      },
-    );
-
-    function drawStraight(g: typeof google, map: google.maps.Map, pts: google.maps.LatLngLiteral[]) {
+    if (polyline && g.maps.geometry?.encoding) {
+      const path = g.maps.geometry.encoding.decodePath(polyline);
       polylineRef.current = new g.maps.Polyline({
-        map,
-        path: pts,
+        map: mapRef.current,
+        path,
+        strokeColor: "#D5B036",
+        strokeWeight: 5,
+        strokeOpacity: 0.95,
+      });
+    } else {
+      // No polyline yet (still loading, or the backend call failed) — draw a
+      // dashed straight-line placeholder between stops in the current order.
+      polylineRef.current = new g.maps.Polyline({
+        map: mapRef.current,
+        path: ordered,
         strokeColor: "#D5B036",
         strokeWeight: 4,
         strokeOpacity: 0.9,
         icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "14px" }],
       });
     }
-
-    return () => { cancelled = true; };
   }, [
     ready,
     stopsKey,
@@ -280,11 +243,11 @@ export function GoogleRouteMap({
     editable,
     onPinMoved,
     onOfficeMoved,
-    onRealDistanceKm,
+    polyline,
   ]);
 
-  const totalKm = computedKm ?? route.totalKm;
-  const etaMin = computedMin ?? route.etaMin;
+  const totalKm = route.totalKm;
+  const etaMin = route.etaMin;
   const officeLabelText = type === "logout" ? "Start" : "Final drop";
   const showDragHint = editable && (!!onPinMoved || !!onOfficeMoved);
 
@@ -320,7 +283,11 @@ export function GoogleRouteMap({
             </div>
 
             <div className="absolute top-3 right-3 bg-card/95 rounded-md px-3 py-2 text-xs border shadow-sm space-y-0.5">
-              <div className="font-semibold">{totalKm} km · ~{etaMin} min</div>
+              {routeLoading ? (
+                <div className="font-semibold flex items-center gap-1.5 text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Optimizing route…</div>
+              ) : (
+                <div className="font-semibold">{totalKm} km · ~{etaMin} min</div>
+              )}
               <div className="text-muted-foreground">{route.stops.length} stop{route.stops.length === 1 ? "" : "s"}</div>
             </div>
 
@@ -333,26 +300,6 @@ export function GoogleRouteMap({
           </>
         )}
       </div>
-
-      {/* Safety banner */}
-      {route.stops.length > 0 && (
-        <div className={cn(
-          "flex items-center gap-3 p-3 rounded-md border text-sm",
-          route.safetyOk
-            ? "bg-success/5 border-success/30 text-success"
-            : "bg-warning/10 border-warning/40 text-warning",
-        )}>
-          {route.safetyOk
-            ? <ShieldCheck className="h-4 w-4 shrink-0" />
-            : <ShieldAlert className="h-4 w-4 shrink-0" />}
-          <div className="flex-1">
-            {route.safetyOk ? "All female-safety rules satisfied" : route.safetyIssue}
-          </div>
-          {!route.safetyOk && onAutoFix && (
-            <Button size="sm" variant="outline" onClick={onAutoFix}>Auto-fix</Button>
-          )}
-        </div>
-      )}
 
       {/* Stop list */}
       <div className="space-y-2">

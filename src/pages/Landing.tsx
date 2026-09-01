@@ -18,6 +18,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { CubeField } from "@/components/CubeField";
 import { useAuth } from "@/hooks/useAuth";
+import { BUSINESS, formattedAddress } from "@/lib/businessInfo";
+import { LEGAL_PAGES } from "@/pages/legal/LegalLayout";
 
 const features = [
   { icon: Sparkles, title: "Smart routing", desc: "Multi-pickup optimization with female-first / no-lone-female safety constraints baked in.", stat: "12+", statLabel: "route rules" },
@@ -564,13 +566,47 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="relative py-8 bg-black/90">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-white/40">
-          <div>© 2026 RideOps · Employee transport, on-demand</div>
-          <div className="flex gap-5">
-            <a href="#features" className="hover:text-white transition">Features</a>
-            <a href="#how" className="hover:text-white transition">How it works</a>
-            <a href="#benefits" className="hover:text-white transition">Benefits</a>
+      <footer className="relative py-10 bg-black/90">
+        <div className="max-w-7xl mx-auto px-6 space-y-6 text-xs text-white/40">
+          <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+            <div className="space-y-1.5">
+              <div className="text-white/70 font-semibold text-sm">{BUSINESS.tradeName}</div>
+              <div>Proprietor: {BUSINESS.legalName}</div>
+              <div>GSTIN: {BUSINESS.gstin}</div>
+              <div className="max-w-xs leading-relaxed">{formattedAddress()}</div>
+              <div className="pt-1">
+                <a href={`mailto:${BUSINESS.support.email}`} className="hover:text-white transition">
+                  {BUSINESS.support.email}
+                </a>
+                {" · "}
+                <a
+                  href={`tel:${BUSINESS.support.phone.replace(/\s/g, "")}`}
+                  className="hover:text-white transition"
+                >
+                  {BUSINESS.support.phone}
+                </a>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="text-white/70 font-semibold text-sm">Site</div>
+              <a href="#features" className="hover:text-white transition">Features</a>
+              <a href="#how" className="hover:text-white transition">How it works</a>
+              <a href="#benefits" className="hover:text-white transition">Benefits</a>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="text-white/70 font-semibold text-sm">Legal</div>
+              {LEGAL_PAGES.map((p) => (
+                <Link key={p.to} to={p.to} className="hover:text-white transition">
+                  {p.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-white/10 pt-5">
+            © 2026 {BUSINESS.tradeName} · Employee transport, on-demand
           </div>
         </div>
       </footer>

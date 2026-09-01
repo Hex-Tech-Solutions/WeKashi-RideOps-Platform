@@ -119,43 +119,39 @@ export function optimizeRoute(employees: EmployeeLike[], dropName = DROP, type: 
   return optimizeStops(stops, { name: dropName, point: getPoint(dropName) }, type);
 }
 
-// Order a set of pre-built stops (with real coordinates) and apply female-safety.
+// Order a set of pre-built stops (with real coordinates).
+//
+// NOTE: this used to also run a pre-emptive gender-swap here to avoid ever
+// placing a female at the "dangerous" position (seq=0 for login, last for
+// logout). That's been REMOVED — stop ordering is now delegated to the
+// backend (Google Routes API, see useOptimizeRoute()/routeOptimize.service.ts
+// on the backend), which orders purely for efficiency/traffic with no gender
+// awareness at all.
+//
+// The safety guarantee has NOT been weakened: the escort requirement check
+// (escortPolicy.ts, both here and re-validated server-side in POST /rides)
+// still runs against whatever the FINAL order is — this function's fallback
+// order, the Routes API result, or the supervisor's manual drag/arrow edit —
+// and hard-blocks broadcasting a night ride with a female in that position
+// unless an escort is assigned. See CONVERSATION/design notes for the full
+// reasoning: two mechanisms (pre-emptive avoidance + hard block) were
+// redundant; the hard block was always the actual enforcement, so removing
+// the pre-emptive one only removes a nice-to-have, not the safety guarantee.
+//
+// This function is now only a LOCAL FALLBACK — used for the initial render
+// before the Routes API result comes back, and if that call fails. The
+// authoritative order comes from the backend.
 export function optimizeStops(
   stops: RouteStop[],
   drop: { name: string; point: GeoPoint },
   type: "login" | "logout" = "login",
 ): RouteResult {
-  // ── Step 1: nearest-neighbour ordering ───────────────────────────────────
+  // Nearest-neighbour ordering (Haversine — local, no API call).
   // Login: collect from homes toward the office → reverse so we start at the
   // furthest-from-office stop and end nearest.
   // Logout: start from office and drop at homes in nearest-first order.
   let ordered = nearestNeighborOrder(drop.point, stops);
   if (type === "login") ordered = ordered.reverse();
-
-  const hasMale   = ordered.some((s) => s.gender === "M");
-  const hasFemale = ordered.some((s) => s.gender === "F");
-
-  // ── Step 2: female-safety reordering ─────────────────────────────────────
-  // Only possible when there is at least one male to act as buffer.
-  if (hasMale && hasFemale) {
-    if (type === "logout") {
-      // LOGOUT: all board at the office together.
-      // Drop females FIRST so a male is always the last to exit.
-      const females = ordered.filter((s) => s.gender === "F");
-      const males   = ordered.filter((s) => s.gender === "M");
-      ordered = [...females, ...males];
-    } else {
-      // LOGIN: only seq=0 is an isolation risk.
-      // After seq=0 boards, every subsequent pickup has at least one other
-      // passenger already in the cab — the last pickup is NOT alone with the driver.
-      if (ordered[0].gender === "F") {
-        const firstMaleIdx = ordered.findIndex((s) => s.gender === "M");
-        if (firstMaleIdx > 0) {
-          [ordered[0], ordered[firstMaleIdx]] = [ordered[firstMaleIdx], ordered[0]];
-        }
-      }
-    }
-  }
 
   return buildResult(ordered, drop, type);
 }

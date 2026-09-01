@@ -16,7 +16,7 @@ import {
   nearbyDriversForRide,
   manualAssignRide,
 } from '../services/ride.service';
-import { getRidePax, verifyPickup, verifyDrop, markNoShow } from '../services/ridePax.service';
+import { getRidePax, verifyPickup, verifyDrop, markNoShow, verifyEscortDrop } from '../services/ridePax.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
 import type { AuthRequest } from '../types';
@@ -377,6 +377,20 @@ export function createRidesRouter(io: IoServer): Router {
     }
   });
 
+  // POST /rides/:id/escort-drop — verify escort return-drop OTP (logout escort
+  // rides only). The supervisor relays this OTP to the driver directly after
+  // confirming with the escort in person — it's never SMS'd automatically.
+  router.post('/:id/escort-drop', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { otp } = z.object({ otp: z.string().min(4).max(6) }).parse(req.body);
+      const result = await verifyEscortDrop(req.params.id, otp, req.driver!.id);
+      await notifyPax(req.params.id, 'escort:dropped');
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // GET /rides/:id/nearby-drivers?radius= — drivers near pickup (manual assign)
   router.get('/:id/nearby-drivers', requireRole('supervisor', 'admin'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -411,7 +425,9 @@ export function createRidesRouter(io: IoServer): Router {
     }
   });
 
-  // POST /rides/:id/release — driver releases a claimed scheduled ride (>24h only)
+  // POST /rides/:id/release — driver hands a claimed scheduled ride back to the
+  // marketplace. Allowed any time before the trip starts; the fine depends on
+  // how much notice is given (free at 24h+, see releaseFine in lib/pricing.ts).
   router.post('/:id/release', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const result = await driverReleaseScheduledRide(req.params.id, req.driver!.id);

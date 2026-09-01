@@ -8,9 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   useEmployees, useCreateRide, useVehicleOptions, useSupervisorOffice,
-  useOfficeLocations, useRouteTemplates,
+  useOfficeLocations, useRouteTemplates, useOptimizeRoute,
   type CreateRidePayload, type OfficeLocationRow, type RouteTemplateRow,
-} from "@/lib/queries";import { optimizeStops, buildResult, coordPoint, getPoint, DROP, type RouteStop, type GeoPoint } from "@/lib/geo";
+} from "@/lib/queries";
+import { optimizeStops, buildResult, coordPoint, getPoint, DROP, type RouteStop, type RouteResult, type GeoPoint } from "@/lib/geo";
 import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS, type VehicleType } from "@/lib/pricing";
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -113,8 +114,6 @@ export default function RoutesPage() {
   const [plannedPickupTime, setPlannedPickupTime] = useState<string>("");
   // Overrides when the supervisor drags the office pin on the map.
   const [officeOverride, setOfficeOverride] = useState<{ lat: number; lng: number; address: string } | null>(null);
-  // Real driving distance from Google Directions API — replaces Haversine once available.
-  const [realDistanceKm, setRealDistanceKm] = useState<number | null>(null);
   // Per-employee expected pickup times — empId → HH:MM
   const [pickupTimes, setPickupTimes] = useState<Record<string, string>>({});
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -151,11 +150,14 @@ export default function RoutesPage() {
       : { name: DROP, point: getPoint(DROP) };
   }, [officeOverride, activeOffice, officeData]);
 
-  const route = useMemo(() => {
+  // Local fallback route — Haversine nearest-neighbour, used for the initial
+  // render before the Routes API result arrives, and as a fallback if that
+  // call fails. No gender/safety reordering happens here (or anywhere else,
+  // now) — see optimizeStops() in geo.ts for why.
+  const fallbackRoute = useMemo(() => {
     if (customStops && customStops.length) {
-      return buildResult(customStops, dropNode);
+      return buildResult(customStops, dropNode, type);
     }
-    // Build stops from each employee's REAL saved coordinates so distance/fare is accurate.
     const stops: RouteStop[] = selected.map((e) => ({
       empId: e.id,
       name: e.name,
@@ -165,6 +167,78 @@ export default function RoutesPage() {
     }));
     return optimizeStops(stops, dropNode, type);
   }, [selected, customStops, type, dropNode]);
+
+  // ── Server-side route ordering (Google Routes API) ────────────────────────
+  // Calls the backend whenever the input set of stops/office/type changes, OR
+  // after a manual drag/pin-move (with optimize:false, so the order the
+  // supervisor just set is preserved — only distance/duration get refreshed).
+  const optimizeRoute = useOptimizeRoute();
+  const [serverRoute, setServerRoute] = useState<RouteResult | null>(null);
+  const [serverPolyline, setServerPolyline] = useState<string | null>(null);
+  // Bump this to force a re-fetch even if the stop SET is unchanged (e.g. a
+  // pin was moved to a new address, or the office was dragged).
+  const [routeRefreshToken, setRouteRefreshToken] = useState(0);
+
+  const officePoint = dropNode.point;
+
+  useEffect(() => {
+    // Only fetch once the supervisor has actually reached the route-review
+    // screen (or later). Step 1 toggles selectedIds on every checkbox click —
+    // without this gate we'd fire a Routes API request per click, before the
+    // supervisor has even finished picking employees.
+    if (step < 2) return;
+    if (!selected.length) { setServerRoute(null); setServerPolyline(null); return; }
+
+    // If the supervisor has manually reordered/moved a pin (customStops is
+    // set), preserve that exact order — just refresh distance/duration.
+    const manualOrder = customStops && customStops.length ? customStops : null;
+    const stopsForRequest = (manualOrder ?? fallbackRoute.stops).map((s) => ({
+      empId: s.empId,
+      lat: s.point.lat,
+      lng: s.point.lng,
+    }));
+    if (!stopsForRequest.length) return;
+
+    let cancelled = false;
+    optimizeRoute.mutate(
+      {
+        type,
+        office: { lat: officePoint.lat, lng: officePoint.lng },
+        stops: stopsForRequest,
+        optimize: !manualOrder,
+      },
+      {
+        onSuccess: (result) => {
+          if (cancelled) return;
+          // Rebuild RouteStop[] in the server's returned order (server only
+          // returns empId/lat/lng/seq — merge back name/gender/location from
+          // whichever list we sent, keyed by empId).
+          const byId = new Map((manualOrder ?? fallbackRoute.stops).map((s) => [s.empId, s]));
+          const ordered: RouteStop[] = result.stops
+            .map((rs) => byId.get(rs.empId))
+            .filter((s): s is RouteStop => !!s);
+          const built = buildResult(ordered, dropNode, type);
+          setServerRoute({
+            ...built,
+            totalKm: result.totalDistanceKm || built.totalKm,
+            etaMin: result.etaMin || built.etaMin,
+          });
+          setServerPolyline(result.encodedPolyline);
+        },
+        onError: () => {
+          if (cancelled) return;
+          // Fall back silently to local Haversine ordering — booking still works.
+          setServerRoute(null);
+          setServerPolyline(null);
+        },
+      },
+    );
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selected.map((e) => e.id).join(","), type, officePoint.lat, officePoint.lng, customStops, routeRefreshToken]);
+
+  const route = serverRoute ?? fallbackRoute;
+  const routeLoading = optimizeRoute.isPending;
 
   const [vehicleType, setVehicleType] = useState<VehicleType>("suv");
   const allowedTypes = allowedVehicleTypes(selected.length);
@@ -184,9 +258,9 @@ export default function RoutesPage() {
     if (!isSelectable(vehicleType) && selectableTypes.length) setVehicleType(selectableTypes[selectableTypes.length - 1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectableTypes.join(","), vehicleType]);
-  // Use ONLY the real driving distance from Google Directions API.
-  // null = still loading (Directions API hasn't responded yet).
-  const displayKm = realDistanceKm;
+  // Real driving distance from the backend's Routes API call. null = still
+  // loading (server hasn't responded yet) or no stops selected.
+  const displayKm = serverRoute ? route.totalKm : null;
   const baseFare = displayKm != null ? computeFare(displayKm, vehicleType, isAc) : null;
   const price = baseFare != null ? baseFare + (fareAdjustment ?? 0) : null;
 
@@ -229,7 +303,6 @@ export default function RoutesPage() {
   const toggleEmployee = (id: string) => {
     setCustomStops(undefined);
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
-    setRealDistanceKm(null);
   };
 
   // When the office changes, clear selections and reset route state.
@@ -238,7 +311,6 @@ export default function RoutesPage() {
     setSelectedIds([]);
     setCustomStops(undefined);
     setOfficeOverride(null);
-    setRealDistanceKm(null);
     setPickupTimes({});
     setFareAdjustment(null);
     setPlannedPickupTime("");
@@ -253,7 +325,6 @@ export default function RoutesPage() {
     setType(t.rideType);
     setCustomStops(undefined);
     setOfficeOverride(null);
-    setRealDistanceKm(null);
     setPickupTimes({});
     setFareAdjustment(null);
     setPlannedPickupTime("");
@@ -272,11 +343,13 @@ export default function RoutesPage() {
     setSelectedIds((ids) => ids.filter((x) => x !== empId));
     setCustomStops((cs) => cs?.filter((s) => s.empId !== empId));
   };
-  const autoFix = () => { setCustomStops(undefined); toast.success("Route re-optimized to satisfy safety rules"); };
 
   // Called when an employee pickup pin is dragged on the map.
+  // Setting customStops locks in the current order (including this new
+  // position) — the route-fetch effect will call the backend with
+  // optimize:false so this exact order is preserved, and only
+  // distance/duration get refreshed for the new location.
   const handlePinMoved = (empId: string, lat: number, lng: number, address: string) => {
-    // Build from current route.stops so the full list is preserved.
     const base = customStops ?? route.stops;
     setCustomStops(
       base.map((s) =>
@@ -285,14 +358,12 @@ export default function RoutesPage() {
           : s,
       ),
     );
-    setRealDistanceKm(null); // will be recalculated by the map
     toast.success("Pickup location updated");
   };
 
   // Called when the office/drop pin is dragged on the map.
   const handleOfficeMoved = (lat: number, lng: number, address: string) => {
     setOfficeOverride({ lat, lng, address });
-    setRealDistanceKm(null); // will be recalculated by the map
     toast.success("Drop-off location updated");
   };
 
@@ -597,13 +668,13 @@ export default function RoutesPage() {
               route={route}
               type={type}
               editable
+              routeLoading={routeLoading}
+              polyline={serverPolyline}
               onReorder={reorderStops}
               onRemove={removeStop}
               onAdd={() => setPickerOpen(true)}
-              onAutoFix={autoFix}
               onPinMoved={handlePinMoved}
               onOfficeMoved={handleOfficeMoved}
-              onRealDistanceKm={setRealDistanceKm}
               pickupTimes={pickupTimes}
               onPickupTimeChange={(empId, time) =>
                 setPickupTimes((prev) => ({ ...prev, [empId]: time }))

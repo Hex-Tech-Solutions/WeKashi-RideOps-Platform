@@ -7,6 +7,7 @@ import {
   useVerifyPickup,
   useVerifyDrop,
   useMarkNoShow,
+  useVerifyEscortDrop,
   mapsUrl,
   multiStopMapsUrl,
   type RidePaxRow,
@@ -31,6 +32,7 @@ import { toast } from "sonner";
 
 type PaxPhase =
   | "awaiting_pickup"
+  | "awaiting_board"
   | "awaiting_drop"
   | "completed"
   | "no_show";
@@ -42,25 +44,18 @@ function getPaxPhase(p: RidePaxRow): PaxPhase {
   return "awaiting_pickup";
 }
 
-function getLogoutPhase(p: RidePaxRow): "awaiting_drop" | "completed" | "no_show" {
+// Logout rides now also have a boarding step: every employee boards together
+// at the office and must be individually OTP-verified before the driver can
+// depart (mirrors login's per-employee pickup, just at one shared location
+// instead of separate home stops).
+function getLogoutPhase(p: RidePaxRow): "awaiting_board" | "awaiting_drop" | "completed" | "no_show" {
   if (p.noShow) return "no_show";
   if (p.droppedAt) return "completed";
-  return "awaiting_drop";
+  if (p.pickedAt) return "awaiting_drop";
+  return "awaiting_board";
 }
 
-const PHASE_LABEL: Record<string, string> = {
-  awaiting_pickup: "waiting",
-  awaiting_drop: "on board",
-  completed: "dropped",
-  no_show: "no-show",
-};
 
-const PHASE_COLOR: Record<string, string> = {
-  awaiting_pickup: "border-border text-muted-foreground",
-  awaiting_drop: "border-gold/50 text-gold-dark bg-gold/5",
-  completed: "border-success/40 text-success",
-  no_show: "border-destructive/40 text-destructive",
-};
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -88,45 +83,64 @@ export default function DriverTrip({
   const verifyPickup = useVerifyPickup();
   const verifyDrop = useVerifyDrop();
   const noShow = useMarkNoShow();
+  const verifyEscortDrop = useVerifyEscortDrop();
   const [otp, setOtp] = useState("");
+  const [escortOtpInput, setEscortOtpInput] = useState("");
 
   const pax = data?.pax ?? [];
   const escortRequired = data?.escortRequired ?? false;
   const escortName     = data?.escortName ?? null;
+  const escortDroppedAt = data?.escortDroppedAt ?? null;
 
   const currentPickup = isLogin
     ? pax.find((p) => getPaxPhase(p) === "awaiting_pickup")
-    : undefined;
+    : pax.find((p) => getLogoutPhase(p) === "awaiting_board");
   const currentDrop = isLogin
     ? pax.find((p) => getPaxPhase(p) === "awaiting_drop")
     : pax.find((p) => getLogoutPhase(p) === "awaiting_drop");
 
-  const allPickupsDone =
-    !isLogin || pax.every((p) => getPaxPhase(p) !== "awaiting_pickup");
+  const allPickupsDone = isLogin
+    ? pax.every((p) => getPaxPhase(p) !== "awaiting_pickup")
+    : pax.every((p) => getLogoutPhase(p) !== "awaiting_board");
 
-  const current = isLogin
-    ? allPickupsDone
-      ? currentDrop
-      : currentPickup
-    : currentDrop;
+  const current = allPickupsDone ? currentDrop : currentPickup;
 
-  const phase: "pickup" | "drop" =
-    isLogin && !allPickupsDone ? "pickup" : "drop";
+  const phase: "pickup" | "drop" = !allPickupsDone ? "pickup" : "drop";
 
-  const boardedPax = pax.filter((p) => !p.noShow && (p.pickedAt || !isLogin));
-  const allDropsDone =
+  const boardedPax = pax.filter((p) => !p.noShow && p.pickedAt);
+  const allEmployeesDropped =
     boardedPax.length > 0 && boardedPax.every((p) => !!p.droppedAt);
+  // Escort rides (logout only) additionally require the escort's own
+  // return-drop OTP to be verified before the trip can complete — see
+  // maybeComplete() on the backend, which enforces this same gate server-side.
+  const escortDropNeeded = !isLogin && escortRequired;
+  const allDropsDone =
+    allEmployeesDropped && (!escortDropNeeded || !!escortDroppedAt);
 
   onAllDropsDone?.(allDropsDone);
 
+  const submitEscortOtp = () => {
+    if (escortOtpInput.length < 4) { toast.error("Enter the 4-digit escort OTP"); return; }
+    verifyEscortDrop.mutate(
+      { rideId, otp: escortOtpInput },
+      {
+        onSuccess: () => { toast.success("Escort drop verified ✓"); setEscortOtpInput(""); },
+        onError: (e: any) => toast.error(e?.message ?? "Wrong OTP"),
+      },
+    );
+  };
+
   const remainingPickups = isLogin
     ? pax.filter((p) => getPaxPhase(p) === "awaiting_pickup")
-    : [];
+    : pax.filter((p) => getLogoutPhase(p) === "awaiting_board");
   const remainingDrops = isLogin
     ? pax.filter((p) => getPaxPhase(p) === "awaiting_drop")
     : pax.filter((p) => getLogoutPhase(p) === "awaiting_drop");
 
-  const navStops = phase === "pickup" ? remainingPickups : remainingDrops;
+  // For logout, all boarding stops are the same office point — navigation to
+  // that single location doesn't need a multi-stop link. Once boarding is
+  // done, navStops becomes the per-employee home drops as before.
+  const navStops = phase === "pickup" && !isLogin ? [] : phase === "pickup" ? remainingPickups : remainingDrops;
 
   const submitOtp = () => {
     if (!current) return;
@@ -135,7 +149,7 @@ export default function DriverTrip({
     const clear = () => setOtp("");
     if (phase === "pickup") {
       verifyPickup.mutate(args, {
-        onSuccess: () => { toast.success(`${current.name} picked up ✓`); clear(); },
+        onSuccess: () => { toast.success(isLogin ? `${current.name} picked up ✓` : `${current.name} boarded ✓`); clear(); },
         onError: (e: any) => toast.error(e?.message ?? "Wrong OTP"),
       });
     } else {
@@ -174,6 +188,17 @@ export default function DriverTrip({
         </div>
       )}
 
+      {/* Logout boarding banner — all employees board together at the office,
+          no navigation needed since the driver is already there. */}
+      {!isLogin && !allPickupsDone && (
+        <div className="rounded-lg border border-gold/40 bg-gold/5 p-3 flex items-center gap-2">
+          <LogIn className="h-4 w-4 text-gold-dark shrink-0" />
+          <div className="text-xs text-gold-dark">
+            <span className="font-semibold">Boarding at office.</span> Verify each employee's OTP as they get in.
+          </div>
+        </div>
+      )}
+
       {/* Multi-stop nav */}
       {navStops.length > 1 && (
         <a
@@ -188,10 +213,10 @@ export default function DriverTrip({
       )}
 
       {/* Phase chips */}
-      {isLogin && pax.length > 0 && (
+      {pax.length > 0 && (
         <div className="flex gap-2">
           <PhaseChip
-            label="Pickup phase"
+            label={isLogin ? "Pickup phase" : "Boarding phase"}
             Icon={LogIn}
             active={phase === "pickup"}
             done={allPickupsDone}
@@ -207,13 +232,52 @@ export default function DriverTrip({
         </div>
       )}
 
+      {/* Escort return-drop OTP card — logout escort rides, shown once every
+          employee has been dropped but the escort hasn't been verified back
+          at the office yet. Blocks trip completion until verified. */}
+      {escortDropNeeded && allEmployeesDropped && !escortDroppedAt && (
+        <div className="rounded-lg border border-amber-400/60 bg-amber-50 p-3 space-y-3">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-amber-700 shrink-0" />
+            <div className="flex-1">
+              <div className="text-xs uppercase tracking-wider font-semibold text-amber-700">
+                Drop escort back at office
+              </div>
+              <div className="text-sm font-medium text-amber-900 flex items-center gap-1.5 mt-0.5">
+                <UserCheck className="h-3.5 w-3.5" /> {escortName}
+              </div>
+            </div>
+          </div>
+          <p className="text-[11px] text-amber-700">
+            All employees are dropped. Get the escort OTP from your supervisor by phone once you've
+            dropped the escort back at the office.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={escortOtpInput}
+              onChange={(e) => setEscortOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="Escort OTP"
+              inputMode="numeric"
+              className="tracking-[0.3em] text-center bg-white"
+            />
+            <Button
+              className="bg-amber-600 text-white hover:bg-amber-700 shrink-0"
+              disabled={verifyEscortDrop.isPending}
+              onClick={submitEscortOtp}
+            >
+              <Check className="h-4 w-4" /> Verify
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Status messages */}
       {allDropsDone ? (
         <div className="flex items-center justify-center gap-2 text-sm text-success py-2">
           <CheckCircle2 className="h-4 w-4" />
           All passengers dropped — you can complete the trip.
         </div>
-      ) : allPickupsDone && !currentDrop && isLogin ? (
+      ) : allPickupsDone && !currentDrop ? (
         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-2">
           <CheckCircle2 className="h-4 w-4" />
           No passengers boarded.
@@ -223,8 +287,10 @@ export default function DriverTrip({
         <div className="rounded-lg border border-gold/50 bg-gold/5 p-3 space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-xs uppercase tracking-wider text-gold-dark font-semibold flex items-center gap-1.5">
-              {phase === "pickup" ? (
+              {phase === "pickup" && isLogin ? (
                 <><LogIn className="h-3.5 w-3.5" /> Pickup · stop {current.seq + 1}/{pax.length}</>
+              ) : phase === "pickup" && !isLogin ? (
+                <><LogIn className="h-3.5 w-3.5" /> Boarding · {current.seq + 1}/{pax.length}</>
               ) : (
                 <><LogOut className="h-3.5 w-3.5" /> Drop · stop {current.seq + 1}/{pax.length}</>
               )}
@@ -241,15 +307,20 @@ export default function DriverTrip({
             </div>
           </div>
 
-          <a
-            href={mapsUrl(current.lat, current.lng)}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2.5 text-sm font-medium"
-          >
-            <Navigation className="h-4 w-4" />
-            {phase === "pickup" ? "Go to pickup" : "Go to drop-off"} — open maps
-          </a>
+          {/* Logout boarding has no "navigate" link — the driver is already
+              at the office. Navigation only applies to login pickups and to
+              any drop-off (home for logout, sequential stops for login). */}
+          {!(phase === "pickup" && !isLogin) && (
+            <a
+              href={mapsUrl(current.lat, current.lng)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2.5 text-sm font-medium"
+            >
+              <Navigation className="h-4 w-4" />
+              {phase === "pickup" ? "Go to pickup" : "Go to drop-off"} — open maps
+            </a>
+          )}
 
           {current.contactPhone && (
             <a
@@ -265,7 +336,7 @@ export default function DriverTrip({
             <Input
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              placeholder={phase === "pickup" ? "Pickup OTP" : "Drop OTP"}
+              placeholder={phase === "pickup" ? (isLogin ? "Pickup OTP" : "Boarding OTP") : "Drop OTP"}
               inputMode="numeric"
               className="tracking-[0.3em] text-center"
             />
@@ -330,30 +401,22 @@ export default function DriverTrip({
                 </span>
               )}
 
-              {isLogin && (
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className={`text-[10px] px-1.5 py-0 rounded border ${
-                    p.pickedAt ? "border-success/40 text-success"
-                    : p.noShow ? "border-destructive/40 text-destructive"
-                    : "border-border text-muted-foreground"
-                  }`}>
-                    {p.pickedAt ? "↑ in" : p.noShow ? "↑ skip" : "↑ wait"}
-                  </span>
-                  <span className={`text-[10px] px-1.5 py-0 rounded border ${
-                    p.droppedAt ? "border-success/40 text-success"
-                    : p.pickedAt ? "border-gold/50 text-gold-dark"
-                    : "border-border text-muted-foreground"
-                  }`}>
-                    {p.droppedAt ? "↓ out" : p.pickedAt ? "↓ pend" : "↓ —"}
-                  </span>
-                </div>
-              )}
-
-              {!isLogin && (
-                <Badge variant="outline" className={`ml-auto text-[10px] py-0 ${PHASE_COLOR[ph]}`}>
-                  {PHASE_LABEL[ph]}
-                </Badge>
-              )}
+              <div className="flex items-center gap-1 shrink-0">
+                <span className={`text-[10px] px-1.5 py-0 rounded border ${
+                  p.pickedAt ? "border-success/40 text-success"
+                  : p.noShow ? "border-destructive/40 text-destructive"
+                  : "border-border text-muted-foreground"
+                }`}>
+                  {p.pickedAt ? "↑ in" : p.noShow ? "↑ skip" : "↑ wait"}
+                </span>
+                <span className={`text-[10px] px-1.5 py-0 rounded border ${
+                  p.droppedAt ? "border-success/40 text-success"
+                  : p.pickedAt ? "border-gold/50 text-gold-dark"
+                  : "border-border text-muted-foreground"
+                }`}>
+                  {p.droppedAt ? "↓ out" : p.pickedAt ? "↓ pend" : "↓ —"}
+                </span>
+              </div>
             </div>
           );
         })}

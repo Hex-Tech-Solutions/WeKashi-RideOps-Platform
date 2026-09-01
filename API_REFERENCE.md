@@ -167,7 +167,11 @@ Full completed-ride detail including passengers, GPS trail, driver vehicle, time
 ---
 
 ### GET /rides/:id/pax
-Ordered passenger list with pickup/drop status. OTPs included for supervisor/admin.
+Ordered passenger list with boarding/drop status. OTPs included for supervisor/admin only (never returned to drivers).
+
+Each passenger's `lat`/`lng` is always the employee's **home** location, for both ride directions — the office is the ride-level pickup/drop point and is never a per-employee stop.
+
+Also returns `escortRequired`, `escortName`, `escortDroppedAt`, and (supervisor/admin only) `escortOtp`.
 
 **Auth:** Required (driver sees own ride only, supervisor sees own rides only)
 
@@ -218,10 +222,22 @@ Driver claims an unassigned scheduled ride from the marketplace.
 ---
 
 ### POST /rides/:id/release
-Driver releases a claimed scheduled ride. ₹100 fine applied after 3h grace.
+Driver hands a claimed scheduled ride back to the marketplace. Allowed any time before the trip starts; rejected once the ride is `in_progress`.
+
+The fine is based on **notice given before the scheduled pickup**, not how long the driver held the ride:
+
+| Notice before pickup | Fine | `bucket` |
+|---|---|---|
+| 24 h or more | ₹0 | `free_notice` |
+| Under 24 h | ₹100 | `late_notice` |
+| Pickup time already passed | ₹200 | `after_start` |
+
+Any fine is debited from the driver's wallet and recorded in `driver_fines` in the same transaction. See `releaseFine()` in `backend/src/lib/pricing.ts`.
 
 **Auth:** Driver only  
-**Response:** `{ "fine": 100 }`
+**Response:** `{ "fine": 100, "hoursNotice": 6.2, "bucket": "late_notice" }`
+
+**Related:** a driver who claims a scheduled ride and never starts it is fined ₹300 (`scheduled_no_show`) by `sweepStaleScheduledRides()` when the ride is expired ~1 h after its scheduled time.
 
 ---
 
@@ -262,7 +278,10 @@ Re-broadcast an expired or cancelled ride.
 ---
 
 ### POST /rides/:id/pax/:paxId/pickup
-Verify passenger pickup OTP.
+Verify a passenger's boarding OTP.
+
+- **`login` rides** — verified at the employee's home, one stop at a time during the trip.
+- **`logout` rides** — verified at the office *before departure*. Every employee must be boarded (or marked no-show) before the driver can start the trip.
 
 **Auth:** Driver only  
 **Body:** `{ "otp": "1234" }`
@@ -272,8 +291,25 @@ Verify passenger pickup OTP.
 ### POST /rides/:id/pax/:paxId/drop
 Verify passenger drop OTP.
 
+Rejects with `Passenger has not boarded yet` if the passenger has no `picked_at` stamp and is not marked no-show — a passenger cannot be dropped before being boarded.
+
 **Auth:** Driver only  
 **Body:** `{ "otp": "5678" }`
+
+---
+
+### POST /rides/:id/escort-drop
+Verify the escort's return-drop OTP. **`logout` rides with `escortRequired` only.**
+
+On a logout escort ride the escort boards at the office with the employees and must be returned to the office after the last employee is dropped. This OTP gates ride completion — `maybeComplete()` will not complete the ride until `escort_dropped_at` is stamped.
+
+The OTP is visible to the supervisor in the trip-detail view and is **never** sent to the escort. The supervisor relays it to the driver verbally after confirming the escort was dropped back.
+
+Rate-limited to 5 attempts per ride.
+
+**Auth:** Driver only  
+**Body:** `{ "otp": "4321" }`  
+**Response:** `{ "ok": true }`
 
 ---
 
@@ -287,7 +323,70 @@ Mark a passenger as no-show (didn't board).
 ### GET /rides/:id/nearby-drivers?radius=10
 List available drivers near the ride's pickup point (for manual assign).
 
+Filters to drivers who are `is_online = true` and within `radius` km of the pickup point.
+
 **Auth:** Supervisor or Admin
+
+---
+
+## Routing (Google Routes API proxy)
+
+Server-side proxy over the **Google Routes API** (`computeRoutes` / `computeRouteMatrix`). The API key lives only on the backend (`GOOGLE_ROUTES_API_KEY`) and is never exposed to the browser.
+
+These endpoints replaced the earlier client-side Directions API and Haversine estimates, so distances and ETAs are real driving values with live traffic.
+
+> **Cost note:** every call here is billable. Frontend callers throttle to one call per 60 s and pause entirely while the browser tab is backgrounded (`usePageVisibleRef`). Keep that in mind before adding new callers.
+
+All routing endpoints require authentication.
+
+### POST /routing/optimize
+Order stops for driving efficiency and return the final sequence with real distance, duration and polyline.
+
+No gender/safety logic runs here — this is pure efficiency. The women's-safety escort check happens separately in `POST /rides`, against whatever order is finally submitted.
+
+**Auth:** Supervisor only  
+**Body:**
+```json
+{
+  "type": "logout",
+  "office": { "lat": 12.9716, "lng": 77.5946 },
+  "stops": [{ "empId": "uuid", "lat": 12.95, "lng": 77.59 }],
+  "optimize": true
+}
+```
+- `stops` — 1 to 20 entries
+- `optimize` — defaults to `true`. Pass `false` to keep the given order (after a manual drag/arrow reorder or pin move) and just compute real distance/duration.
+
+---
+
+### POST /routing/route
+Real driving distance and traffic-aware duration for a **fixed** sequence, with a per-leg breakdown. Waypoints are never reordered.
+
+Used for live ride tracking: driver's current GPS → remaining stops → office.
+
+**Auth:** Any authenticated role  
+**Body:**
+```json
+{
+  "origin": { "lat": 12.96, "lng": 77.60 },
+  "destination": { "lat": 12.97, "lng": 77.61 },
+  "intermediates": [{ "lat": 12.95, "lng": 77.59 }]
+}
+```
+- `intermediates` — max 23, kept in the given order
+
+**Response:** `{ "distanceMeters": 18300, "durationSeconds": 2760, "encodedPolyline": "...", "legs": [...] }`
+
+---
+
+### POST /routing/matrix
+Driving distance and traffic-aware duration for every origin/destination pair. Used for "how far is the driver from the next stop" instead of a straight-line guess.
+
+**Auth:** Any authenticated role  
+**Body:** `{ "origins": [...], "destinations": [...] }`
+- Max 25 origins, 25 destinations, and 625 total combinations
+
+**Response:** `{ "elements": [...] }`
 
 ---
 
@@ -299,7 +398,9 @@ All `/driver/*` endpoints require driver authentication.
 Driver profile including vendor, vehicle, wallet balance, expired docs.
 
 ### GET /driver/offers
-Active ride broadcasts this driver can accept.  
+Active ride broadcasts this driver can accept. **Uncapped** — every eligible pending offer is returned, ordered by soonest-expiring, and shown as a scrollable list in the app.
+
+**Response:** `{ "offers": [...], "totalCount": 12 }` — `totalCount` drives the badge on the app's Rides tab.  
 **Refreshed:** every 8s by the app
 
 ### GET /driver/rides
@@ -757,13 +858,17 @@ const socket = io('/supervisor', { auth: { token: accessToken } });
 
 ## Rate Limits
 
-| Scope | Limit |
-|---|---|
-| Global | 500 req / 15 min |
-| Auth (login, register) | 20 req / 15 min |
-| Token refresh | 30 req / 15 min |
-| OTP request | 5 req / 10 min (per phone) |
-| File serving | 60 req / min |
+| Scope | Limit | Keyed by |
+|---|---|---|
+| Global | 3000 req / 15 min | Authenticated user id, else IP |
+| Auth (login, register) | 100 req / 15 min | IP |
+| Token refresh | 100 req / 15 min | IP |
+| OTP request | 15 req / 10 min | Phone number |
+| File serving | 60 req / min | IP |
+
+The global limiter is keyed by **authenticated user id** (decoded from the bearer token) and falls back to IP for unauthenticated requests. A flat per-IP budget was exhausted by legitimate use: the app runs many background-polling queries per open dashboard (6–30 s intervals), and multiple supervisors behind one office NAT shared a single bucket. Per-user keying gives each signed-in person their own budget while login/OTP stay IP-keyed under their own tighter limits.
+
+See `backend/src/middleware/rateLimiter.ts`.
 
 ---
 

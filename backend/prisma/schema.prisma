@@ -67,6 +67,7 @@ model Driver {
   locationLogs  RideLocationLog[]
   bankDetail    DriverBankDetail?
   payouts       PayoutTransaction[]
+  fines         DriverFine[]
 
   @@index([vendorId])
   @@index([isOnline, status])
@@ -167,6 +168,26 @@ model PayoutTransaction {
   @@index([driverId])
   @@index([driverId, status])
   @@map("payout_transactions")
+}
+
+/// Audit trail for every penalty debited from a driver's wallet.
+/// Previously fines were a bare `walletBalance` decrement with no record, so a
+/// driver disputing a deduction (or finance reconciling accounts) had nothing
+/// to point at. Every wallet debit that isn't a payout should land here.
+model DriverFine {
+  id        String   @id @default(uuid())
+  driverId  String   @map("driver_id")
+  rideId    String?  @map("ride_id")            // null if the ride is later deleted
+  amount    Float                                // positive number, debited from wallet
+  reason    String                               // machine-readable: scheduled_release | scheduled_no_show
+  notes     String?                              // human-readable detail for support/disputes
+  createdAt DateTime @default(now()) @map("created_at")
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@index([driverId, createdAt])
+  @@map("driver_fines")
 }
 
 model DriverOtp {
@@ -353,6 +374,16 @@ model Ride {
   escortRequired     Boolean    @default(false) @map("escort_required")
   escortName         String?    @map("escort_name")
   escortCharge       Float?     @map("escort_charge")
+  /// Logout only: escort boards at the office alongside employees (no pickup
+  /// OTP needed — supervisor already vouched for them by name). Generated
+  /// only when escortRequired=true. Not sent to the escort (no phone on
+  /// file) — the supervisor relays it to the driver directly after
+  /// confirming with the escort in person/by call.
+  escortOtp          String?    @map("escort_otp")
+  /// Stamped once the driver verifies escortOtp after dropping the last
+  /// employee, confirming the escort was dropped back at the office. Gates
+  /// ride completion for escort rides — see maybeComplete() in ridePax.service.ts.
+  escortDroppedAt    DateTime?  @map("escort_dropped_at")
 
   supervisor    User           @relation("SupervisorRides", fields: [supervisorId], references: [id])
   driver        Driver?        @relation("DriverRides", fields: [driverId], references: [id])

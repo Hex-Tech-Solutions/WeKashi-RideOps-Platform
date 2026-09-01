@@ -220,6 +220,9 @@ export async function setDriverOnlineStatus(
 }
 
 // Rides currently broadcasting that this driver has a pending offer for.
+// No cap — every eligible pending offer is returned; the driver app renders
+// this as a scrollable list. Soonest-expiring first, since those need action
+// first.
 export async function listDriverOffers(driverId: string) {
   const offers = await prisma.rideOffer.findMany({
     where: { driverId, response: 'pending', ride: { status: 'broadcasting' } },
@@ -243,7 +246,16 @@ export async function listDriverOffers(driverId: string) {
         },
       },
     },
-    orderBy: { offeredAt: 'desc' },
+    orderBy: { ride: { broadcastExpiresAt: 'asc' } },
   });
   return offers.map((o) => o.ride);
+}
+
+// Total count of pending offers for this driver — used to show "N available"
+// on the Rides tab badge without re-deriving it from the (already uncapped)
+// offers list on every render.
+export async function countDriverOffers(driverId: string): Promise<number> {
+  return prisma.rideOffer.count({
+    where: { driverId, response: 'pending', ride: { status: 'broadcasting' } },
+  });
 }

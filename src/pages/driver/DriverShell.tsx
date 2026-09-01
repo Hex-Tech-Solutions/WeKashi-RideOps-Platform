@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useDriverMe, useDriverRides, useDriverSosIssues, type IssueRow } from "@/lib/queries";
+import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, type IssueRow } from "@/lib/queries";
 import DriverHome from "./DriverHome";
 import DriverScheduled from "./DriverScheduled";
 import DriverDocuments from "./DriverDocuments";
@@ -23,7 +23,9 @@ export default function DriverShell() {
   const { data: me }        = useDriverMe();
   const { data: ridesData } = useDriverRides();
   const { data: sosData }   = useDriverSosIssues();
+  const { data: offersData } = useDriverOffers();
   const online = me?.isOnline ?? false;
+  const availableOffersCount = offersData?.totalCount ?? 0;
 
   // Active ride — needed to attach the SOS to the right ride
   const rides  = ridesData?.rides ?? [];
@@ -104,11 +106,18 @@ export default function DriverShell() {
               <button
                 key={key}
                 onClick={() => setTab(key)}
-                className={`flex flex-col items-center gap-1 py-2.5 text-xs transition-colors ${
+                className={`relative flex flex-col items-center gap-1 py-2.5 text-xs transition-colors ${
                   tab === key ? "text-gold" : "text-muted-foreground"
                 }`}
               >
-                <Icon className="h-5 w-5" />
+                <span className="relative">
+                  <Icon className="h-5 w-5" />
+                  {key === "rides" && availableOffersCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold flex items-center justify-center leading-none">
+                      {availableOffersCount > 99 ? "99+" : availableOffersCount}
+                    </span>
+                  )}
+                </span>
                 {label}
               </button>
             ))}

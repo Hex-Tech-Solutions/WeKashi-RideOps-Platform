@@ -1,20 +1,31 @@
-/// <reference types="google.maps" />
 /**
  * LiveRideTracker — shown inside the active ride card in supervisor/Live.tsx.
+ * Only rendered while status === "in_progress" (see Live.tsx).
  *
- * Receives real-time driver GPS via Socket.io (driver:location_update).
- * Falls back to polling GET /rides/:id/driver-location every 8 s.
+ * Receives real-time driver GPS via Socket.io (driver:location_update) for
+ * the position DISPLAY, updated as often as pings arrive (no API cost — pure
+ * socket data). Falls back to polling GET /rides/:id/driver-location every 8s.
  *
- * Calls Google Directions API client-side to compute per-stop ETAs:
- *   driver → next unvisited pax stops → office
+ * Calls the backend's Routes API proxy (POST /routing/route) to compute
+ * per-stop ETAs: driver -> next unvisited pax stops -> office, in the FIXED
+ * pax order (never re-optimized — the driver is physically following that
+ * sequence already). This is the BILLABLE part, so it's throttled to once
+ * per ETA_REFRESH_MS (60s) regardless of GPS ping frequency, and skipped
+ * entirely while the browser tab is backgrounded (unmounting Live.tsx or
+ * switching tabs stops it completely).
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { io as ioClient, type Socket } from "socket.io-client";
-import { useRidePax, useRideDriverLocation } from "@/lib/queries";
-import { loadGoogleMaps } from "@/lib/googleMaps";
+import { useRidePax, useRideDriverLocation, useComputeRoute } from "@/lib/queries";
 import { tokenStore } from "@/lib/api";
+import { usePageVisibleRef } from "@/hooks/usePageVisible";
 import { Navigation, Clock, CheckCircle2, Loader2, MapPin } from "lucide-react";
+
+// Real Routes API call happens at most once per this interval, no matter how
+// often the driver's GPS position updates (which is every ~5s via socket).
+// Skipped entirely while the browser tab is backgrounded.
+const ETA_REFRESH_MS = 60_000;
 
 // Singleton supervisor socket — created once, shared across all tracker instances
 let supervisorSocket: Socket | null = null;
@@ -48,12 +59,14 @@ interface Props {
 export function LiveRideTracker({ rideId, rideType, dropAddress, dropLat, dropLng }: Props) {
   const { data: paxData } = useRidePax(rideId);
   const { data: initialLoc } = useRideDriverLocation(rideId);
+  const computeRoute = useComputeRoute();
 
   const [driverPos, setDriverPos]   = useState<{ lat: number; lng: number } | null>(null);
   const [stopEtas, setStopEtas]     = useState<StopEta[]>([]);
   const [computing, setComputing]   = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const computeRef                  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestDriverPosRef          = useRef<{ lat: number; lng: number } | null>(null);
+  const isVisibleRef                = usePageVisibleRef();
 
   const pax = paxData?.pax ?? [];
   const isLogin = rideType !== "logout";
@@ -77,59 +90,69 @@ export function LiveRideTracker({ rideId, rideType, dropAddress, dropLat, dropLn
     return () => { sock.off("driver:location_update", handler); };
   }, [rideId]);
 
-  // Compute ETAs via Google Directions whenever driver position changes
-  const computeEtas = useCallback(async (pos: { lat: number; lng: number }) => {
+  // Compute ETAs via the backend's Routes API proxy whenever driver position changes
+  const computeEtas = useCallback((pos: { lat: number; lng: number }) => {
     if (!dropLat || !dropLng) return;
+
+    // Build remaining stops: unvisited pax pickups (login) or drops (logout)
+    const remainingStops = isLogin
+      ? pax
+          .filter((p) => !p.pickedAt && !p.noShow)
+          .map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, isOffice: false }))
+      : pax
+          .filter((p) => !p.droppedAt && !p.noShow)
+          .map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, isOffice: false }));
+
+    const officeStop = { name: dropAddress, lat: dropLat, lng: dropLng, isOffice: true };
+    const allStops = [...remainingStops, officeStop];
+    if (allStops.length === 0) { setStopEtas([]); return; }
+
     setComputing(true);
-    try {
-      const g = await loadGoogleMaps();
-      const svc = new g.maps.DirectionsService();
+    const destination = { lat: allStops[allStops.length - 1].lat, lng: allStops[allStops.length - 1].lng };
+    const intermediates = allStops.slice(0, -1).map((s) => ({ lat: s.lat, lng: s.lng }));
 
-      // Build remaining stops: unvisited pax pickups (login) or drops (logout)
-      const remainingStops = isLogin
-        ? pax
-            .filter((p) => !p.pickedAt && !p.noShow)
-            .map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, picked: false, isOffice: false }))
-        : pax
-            .filter((p) => !p.droppedAt && !p.noShow)
-            .map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, picked: false, isOffice: false }));
-
-      const officeStop = { name: dropAddress, lat: dropLat, lng: dropLng, picked: false, isOffice: true };
-      const allStops = [...remainingStops, officeStop];
-
-      if (allStops.length === 0) { setStopEtas([]); setComputing(false); return; }
-
-      // One Directions request: driver → all remaining stops in order
-      const origin      = pos;
-      const destination = { lat: allStops[allStops.length - 1].lat, lng: allStops[allStops.length - 1].lng };
-      const waypoints   = allStops.slice(0, -1).map((s) => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
-
-      svc.route(
-        { origin, destination, waypoints, travelMode: g.maps.TravelMode.DRIVING, optimizeWaypoints: false },
-        (result, status) => {
-          if (status !== "OK" || !result) { setComputing(false); return; }
-          const legs = result.routes[0].legs;
-          const etas: StopEta[] = legs.map((leg, i) => ({
-            name:        allStops[i].name,
-            etaMin:      Math.ceil((leg.duration?.value ?? 0) / 60),
-            distanceKm:  Math.round((leg.distance?.value ?? 0) / 100) / 10,
-            picked:      false,
-            isOffice:    allStops[i].isOffice,
+    computeRoute.mutate(
+      { origin: pos, destination, intermediates },
+      {
+        onSuccess: (result) => {
+          const etas: StopEta[] = result.legs.map((leg, i) => ({
+            name:       allStops[i].name,
+            etaMin:     Math.ceil(leg.durationSeconds / 60),
+            distanceKm: Math.round((leg.distanceMeters / 100)) / 10,
+            picked:     false,
+            isOffice:   allStops[i].isOffice,
           }));
           setStopEtas(etas);
           setComputing(false);
         },
-      );
-    } catch { setComputing(false); }
+        onError: () => setComputing(false),
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pax, dropLat, dropLng, dropAddress, isLogin]);
 
-  // Debounce ETA compute — max once every 10 s
+  // Track the latest driver position for the interval tick to read, without
+  // re-creating the interval every time a new GPS ping arrives.
+  useEffect(() => { latestDriverPosRef.current = driverPos; }, [driverPos]);
+
+  // Recompute ETAs on a fixed interval (not on every GPS ping) — this is the
+  // actual cost control. The driver's position updates every ~5s via socket,
+  // but a real Routes API call only fires once per ETA_REFRESH_MS, and is
+  // skipped entirely while the browser tab is backgrounded.
   useEffect(() => {
     if (!driverPos) return;
-    if (computeRef.current) clearTimeout(computeRef.current);
-    computeRef.current = setTimeout(() => computeEtas(driverPos), 500);
-    return () => { if (computeRef.current) clearTimeout(computeRef.current); };
-  }, [driverPos, computeEtas]);
+    // Compute once immediately so the tracker isn't empty on first mount.
+    computeEtas(driverPos);
+    const interval = setInterval(() => {
+      if (!isVisibleRef.current) return; // tab backgrounded — skip this tick, no API call
+      const pos = latestDriverPosRef.current;
+      if (pos) computeEtas(pos);
+    }, ETA_REFRESH_MS);
+    return () => clearInterval(interval);
+    // Only (re)start the interval when we first get a driver position or the
+    // callback identity changes (stops/office change) — NOT on every ping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!driverPos, computeEtas]);
 
   // Picked-up pax for already boarded section
   const pickedPax = pax.filter((p) => p.pickedAt && !p.droppedAt && !p.noShow);

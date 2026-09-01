@@ -252,8 +252,25 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="w-full"><Route className="h-3.5 w-3.5" /> Trip &amp; OTPs</Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[85vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Trip progress</DialogTitle></DialogHeader>
+              {/* Per-stop / total ETA — only meaningful once the trip has
+                  actually started (in_progress). Same live tracker shown
+                  inline on the card, just full detail in the popup. */}
+              {ride.status === "in_progress" && (
+                <div className="rounded-lg border border-gold/30 bg-gold/5 p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-gold-dark font-semibold mb-2 flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" /> Live tracking
+                  </div>
+                  <LiveRideTracker
+                    rideId={ride.id}
+                    rideType={ride.type}
+                    dropAddress={rideFull?.dropAddress ?? ride.dropAddress}
+                    dropLat={rideFull?.dropLat}
+                    dropLng={rideFull?.dropLng}
+                  />
+                </div>
+              )}
               <TripProgress rideId={ride.id} type={ride.type} />
             </DialogContent>
           </Dialog>

@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { TripProgress } from "@/components/TripProgress";
 import { LiveCabMap } from "@/components/LiveCabMap";
-import { useRides, useLiveDriverLocations } from "@/lib/queries";
+import { LiveRideTracker } from "@/components/LiveRideTracker";
+import { useRides, useLiveDriverLocations, useRide } from "@/lib/queries";
 import { statusColor } from "@/lib/rideStatus";
 import { Route } from "lucide-react";
 
@@ -43,8 +44,9 @@ export default function Live() {
                     <DialogTrigger asChild>
                       <Button variant="outline" size="sm" className="h-7 text-xs mt-1"><Route className="h-3 w-3" /> Trip & OTPs</Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="max-h-[85vh] overflow-y-auto">
                       <DialogHeader><DialogTitle>Trip progress</DialogTitle></DialogHeader>
+                      {r.status === "in_progress" && <LiveTrackerSection ride={r} />}
                       <TripProgress rideId={r.id} type={r.type} />
                     </DialogContent>
                   </Dialog>
@@ -54,6 +56,24 @@ export default function Live() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function LiveTrackerSection({ ride }: { ride: { id: string; type: string; dropAddress: string } }) {
+  const { data: rideFull } = useRide(ride.id);
+  return (
+    <div className="rounded-lg border border-gold/30 bg-gold/5 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-gold-dark font-semibold mb-2 flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" /> Live tracking
+      </div>
+      <LiveRideTracker
+        rideId={ride.id}
+        rideType={ride.type}
+        dropAddress={rideFull?.dropAddress ?? ride.dropAddress}
+        dropLat={rideFull?.dropLat}
+        dropLng={rideFull?.dropLng}
+      />
     </div>
   );
 }

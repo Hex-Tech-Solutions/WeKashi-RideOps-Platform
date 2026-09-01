@@ -14,17 +14,50 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 
 ## 1. Google Maps (routing + live map)
 
-The web bundle reads `VITE_GOOGLE_MAPS_KEY` at **build time**.
+Two separate keys are involved: a **browser key** baked into the web bundle, and a
+**server-side key** used by the backend for the Routes API.
 
-1. In Google Cloud Console, enable: **Maps JavaScript API, Directions API,
-   Distance Matrix API, Places API**, and create a **browser key** (restrict it
-   to your domain/EC2 IP once you have HTTPS).
+### 1a. Browser key — `VITE_GOOGLE_MAPS_KEY`
+
+Read at **build time** by the web bundle.
+
+1. In Google Cloud Console, enable: **Maps JavaScript API, Places API**, and
+   create a **browser key** (restrict it to your domain once you have HTTPS).
 2. On EC2, set in `.env.prod`:
    ```
    VITE_GOOGLE_MAPS_KEY=AIza...thekey
    ```
 3. Redeploy (command above). The compose build passes it as a build arg →
    baked into the bundle.
+
+### 1b. Server key — `GOOGLE_ROUTES_API_KEY`
+
+Route ordering, distances and traffic-aware ETAs run **server-side** through the
+Routes API, proxied by `POST /api/routing/{optimize,route,matrix}`. This key is
+never sent to the browser.
+
+1. Enable **Routes API** in Google Cloud Console. This is a *separate product*
+   from Maps JavaScript API, Places API and the older Directions/Distance Matrix
+   APIs — enabling those does **not** enable Routes API.
+2. Set in `.env.prod`:
+   ```
+   GOOGLE_ROUTES_API_KEY=AIza...thekey
+   ```
+3. Restart the api container (no rebuild needed — it is read at runtime).
+
+> **Troubleshooting `403 PERMISSION_DENIED`:** check the *project-level* enabled
+> APIs list (APIs & Services → Enabled APIs & services), not just the key's
+> restriction list. A key can list "Routes API" under its restrictions while the
+> API itself is still disabled on the project. Verify with a direct curl to
+> `https://routes.googleapis.com/directions/v2:computeRoutes` before debugging
+> application code.
+
+You can reuse the browser key here if Routes API is enabled for it, but a
+server-only key restricted by IP (not HTTP referrer) is recommended.
+
+**Cost control:** these calls are billable per request. Frontend callers are
+throttled to one call per 60 s and pause while the browser tab is backgrounded.
+Review that behaviour before adding new callers.
 
 ---
 

@@ -391,6 +391,86 @@ export function useCreateRide() {
   });
 }
 
+// ─── Routing (Google Routes API, server-proxied) ───────────────────────────
+
+export interface OptimizeRouteStopInput {
+  empId: string;
+  lat: number;
+  lng: number;
+}
+
+export interface OptimizedStop extends OptimizeRouteStopInput {
+  seq: number;
+}
+
+export interface OptimizeRouteResult {
+  stops: OptimizedStop[];
+  totalDistanceKm: number;
+  etaMin: number;
+  encodedPolyline: string | null;
+}
+
+/**
+ * Orders the given stops for efficiency via the backend (Google Routes API —
+ * real driving distance + traffic-aware ETA, not straight-line Haversine).
+ * No gender/safety logic — see escortPolicy.ts for the safety check, which
+ * runs separately against whatever the final order ends up being.
+ */
+export function useOptimizeRoute() {
+  return useMutation({
+    mutationFn: (payload: { type: "login" | "logout"; office: { lat: number; lng: number }; stops: OptimizeRouteStopInput[]; optimize?: boolean }) =>
+      api<OptimizeRouteResult>("/routing/optimize", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+  });
+}
+
+export interface ComputeRouteResult {
+  distanceMeters: number;
+  durationSeconds: number;
+  encodedPolyline: string | null;
+  legs: Array<{ distanceMeters: number; durationSeconds: number }>;
+}
+
+/**
+ * Real driving distance/duration for a FIXED sequence of stops (never
+ * reordered) — e.g. driver's current GPS -> remaining pax stops -> office,
+ * for live ride tracking. Returns a per-leg breakdown.
+ */
+export function useComputeRoute() {
+  return useMutation({
+    mutationFn: (payload: { origin: { lat: number; lng: number }; destination: { lat: number; lng: number }; intermediates?: { lat: number; lng: number }[] }) =>
+      api<ComputeRouteResult>("/routing/route", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+  });
+}
+
+export interface RouteMatrixElement {
+  originIndex: number;
+  destinationIndex: number;
+  distanceMeters: number | null;
+  durationSeconds: number | null;
+  routeExists: boolean;
+}
+
+/**
+ * Real driving distance + traffic-aware duration for every (origin,
+ * destination) pair — e.g. "driver's distance from the next pickup stop".
+ * Replaces flat Haversine + assumed-speed ETA guesses.
+ */
+export function useRouteMatrix() {
+  return useMutation({
+    mutationFn: (payload: { origins: { lat: number; lng: number }[]; destinations: { lat: number; lng: number }[] }) =>
+      api<{ elements: RouteMatrixElement[] }>("/routing/matrix", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+  });
+}
+
 export function useCancelRide() {
   const qc = useQueryClient();
   return useMutation({
@@ -491,7 +571,9 @@ export function useSetDriverVehicle() {
 export function useDriverOffers() {
   return useQuery({
     queryKey: ["driver", "offers"],
-    queryFn: () => api<{ offers: RideRow[] }>("/driver/offers"),
+    // `offers` is capped server-side (soonest-expiring first); `totalCount`
+    // is the uncapped total, used to show "N available" on the Rides tab.
+    queryFn: () => api<{ offers: RideRow[]; totalCount: number }>("/driver/offers"),
     refetchInterval: 8_000,
   });
 }
@@ -591,6 +673,14 @@ export function mapsUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
 }
 
+// Address-based directions link. Used as a fallback when a stop's PostGIS
+// coordinates aren't available (e.g. the ride-detail request hasn't resolved
+// yet, or an older ride has no pickup_point) — a driver should never be left
+// with no way to navigate, even if it's slightly less precise than coords.
+export function mapsUrlForAddress(address: string): string {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
+}
+
 // Full multi-stop directions in the given order: origin = driver's current location,
 // intermediate stops become ordered waypoints, the final stop is the destination.
 // Google keeps the supplied order (we don't pass an optimize flag).
@@ -605,7 +695,11 @@ export function multiStopMapsUrl(stops: { lat: number; lng: number }[]): string 
 export function useRidePax(rideId?: string) {
   return useQuery({
     queryKey: ["ridepax", rideId],
-    queryFn: () => api<{ type: string; escortRequired: boolean; escortName: string | null; pax: RidePaxRow[] }>(`/rides/${rideId}/pax`),
+    queryFn: () => api<{
+      type: string; escortRequired: boolean; escortName: string | null;
+      escortDroppedAt: string | null; escortOtp?: string; // escortOtp only present for supervisor/admin
+      pax: RidePaxRow[];
+    }>(`/rides/${rideId}/pax`),
     enabled: !!rideId,
     refetchInterval: 6_000,
   });
@@ -709,6 +803,18 @@ export function useMarkNoShow() {
   return useMutation({
     mutationFn: ({ rideId, paxId }: { rideId: string; paxId: string }) =>
       api(`/rides/${rideId}/pax/${paxId}/no-show`, { method: "POST" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ridepax"] }); qc.invalidateQueries({ queryKey: ["driver"] }); },
+  });
+}
+
+// Escort return-drop OTP (logout escort rides only) — driver enters the OTP
+// the supervisor relayed to them by phone/in person after confirming the
+// escort's identity, verifying the escort was dropped back at the office.
+export function useVerifyEscortDrop() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rideId, otp }: { rideId: string; otp: string }) =>
+      api(`/rides/${rideId}/escort-drop`, { method: "POST", body: JSON.stringify({ otp }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ridepax"] }); qc.invalidateQueries({ queryKey: ["driver"] }); },
   });
 }

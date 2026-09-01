@@ -16,6 +16,7 @@ import payoutsRouter from './routes/payouts';
 import paymentsRouter from './routes/payments';
 import analyticsRouter from './routes/analytics';
 import safetyRouter from './routes/safety';
+import routingRouter from './routes/routing';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { globalRateLimiter, fileRateLimiter, refreshRateLimiter } from './middleware/rateLimiter';
 import type { Server as IoServer } from 'socket.io';
@@ -130,6 +131,7 @@ export function createApp(io: IoServer): express.Application {
   app.use('/api/payments', paymentsRouter);
   app.use('/api/analytics', analyticsRouter);
   app.use('/api/safety', safetyRouter);
+  app.use('/api/routing', routingRouter);
 
   // 404 handler
   app.use(notFoundHandler);

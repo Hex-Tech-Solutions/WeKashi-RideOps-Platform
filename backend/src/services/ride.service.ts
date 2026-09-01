@@ -9,9 +9,16 @@ import {
   ValidationError,
 } from '../types';
 import { logger } from '../lib/logger';
-import { computeFare, type VehicleType, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS } from '../lib/pricing';
+import {
+  computeFare, type VehicleType, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS,
+  releaseFine, SCHEDULED_NO_SHOW_FINE,
+} from '../lib/pricing';
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
+import { randomInt } from 'crypto';
 import type { Server as IoServer } from 'socket.io';
+
+// Same 4-digit OTP format as employee pickup/drop OTPs (ridePax.service.ts).
+const genEscortOtp = () => String(randomInt(1000, 10000));
 
 export interface CreateRideInput {
   type: 'login' | 'logout' | 'scheduled';
@@ -64,6 +71,14 @@ export async function createRide(
   const pendingCancellationFee = supervisor?.pendingCancellationFee ?? 0;
   const totalAmount = price != null ? price + PLATFORM_FEE + escort + pendingCancellationFee : null;
 
+  // Escort return-drop OTP — LOGOUT rides only (per product decision: login
+  // escorts are out of scope for the return-drop flow). Escort boards at the
+  // office with the employees (no separate pickup OTP needed), and this OTP
+  // gates their verified drop back at the office once all employees are
+  // dropped. Never sent to the escort automatically — supervisor relays it
+  // to the driver directly (visible in the supervisor console's trip detail).
+  const escortOtp = input.escortRequired && input.type === 'logout' ? genEscortOtp() : null;
+
   // Scheduled ride: goes to the marketplace (status 'scheduled'), not broadcast.
   if (input.scheduled) {
     if (!input.scheduledFor) throw new ValidationError('A scheduled time is required');
@@ -77,7 +92,7 @@ export async function createRide(
         pickup_point, drop_point, pickup_address, drop_address,
         distance_km, price, fare_adjustment, platform_fee, total_amount, vehicle_type,
         pax_count, capacity, scheduled_for, planned_start_time,
-        escort_required, escort_name, escort_charge,
+        escort_required, escort_name, escort_charge, escort_otp,
         created_at
       ) VALUES (
         gen_random_uuid(),
@@ -101,6 +116,7 @@ export async function createRide(
         ${input.escortRequired ?? false},
         ${input.escortName ?? null},
         ${escort > 0 ? escort : null},
+        ${escortOtp},
         NOW()
       )
       RETURNING id
@@ -128,7 +144,7 @@ export async function createRide(
       distance_km, price, fare_adjustment, platform_fee, total_amount, vehicle_type,
       pax_count, capacity, scheduled_for,
       planned_start_time,
-      escort_required, escort_name, escort_charge,
+      escort_required, escort_name, escort_charge, escort_otp,
       broadcast_started_at, broadcast_expires_at, created_at
     ) VALUES (
       gen_random_uuid(),
@@ -153,6 +169,7 @@ export async function createRide(
       ${input.escortRequired ?? false},
       ${input.escortName ?? null},
       ${escort > 0 ? escort : null},
+      ${escortOtp},
       NOW(),
       NOW() + INTERVAL '3 minutes',
       NOW()
@@ -488,24 +505,59 @@ export async function claimScheduledRide(rideId: string, driverId: string): Prom
   logger.info({ rideId, driverId }, 'Scheduled ride claimed');
 }
 
-// Driver releases a claimed scheduled ride — ₹100 fine to their wallet.
-export async function driverReleaseScheduledRide(rideId: string, driverId: string): Promise<{ fine: number }> {
+/**
+ * Driver releases a claimed scheduled ride, putting it back on the marketplace.
+ *
+ * The fine is based on NOTICE GIVEN before the scheduled pickup, not on how
+ * long the driver held the ride. The previous rule (free if released within 3h
+ * of *claiming*) had it backwards: it fined a driver who released 3 days early
+ * after holding the ride overnight, but let someone off free for claiming 2h
+ * before pickup and bailing 30 minutes later — the far more damaging case.
+ *
+ * See releaseFine() in lib/pricing.ts for the bands.
+ */
+export async function driverReleaseScheduledRide(
+  rideId: string,
+  driverId: string,
+): Promise<{ fine: number; hoursNotice: number; bucket: string }> {
   const ride = await prisma.ride.findUnique({ where: { id: rideId } });
   if (!ride) throw new NotFoundError('Ride not found');
   if (ride.driverId !== driverId) throw new ForbiddenError('Not your ride');
   if (!ride.scheduledFor) throw new ValidationError('Only scheduled rides can be released');
-  // No fine if released promptly after claiming (within 3 hours of claiming).
-  // Fine applies if the driver holds the ride and bails later — especially
-  // close to the scheduled time, when it's harder for another driver to pick it up.
-  const releasedPromptly = ride.claimedAt != null && Date.now() - ride.claimedAt.getTime() <= 3 * 60 * 60 * 1000;
-  const fine = releasedPromptly ? 0 : 100;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ops: any[] = [
-    prisma.$executeRaw`UPDATE rides SET status = 'scheduled', driver_id = NULL, vendor_id = NULL, claimed_at = NULL WHERE id = ${rideId}`,
-  ];
-  if (fine > 0) ops.push(prisma.driver.update({ where: { id: driverId }, data: { walletBalance: { decrement: fine } } }));
-  await prisma.$transaction(ops);
-  return { fine };
+  // Once the trip is underway the driver can't hand it back — a supervisor has
+  // to cancel it, so the passengers' situation is handled deliberately.
+  if (ride.status === 'in_progress') {
+    throw new ValidationError('Trip already started — contact your supervisor to cancel');
+  }
+
+  const { fine, bucket, hoursNotice } = releaseFine(ride.scheduledFor);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      UPDATE rides SET status = 'scheduled', driver_id = NULL, vendor_id = NULL, claimed_at = NULL
+      WHERE id = ${rideId}
+    `;
+    if (fine > 0) {
+      // Wallet debit and its audit record are written together — a fine can
+      // never hit the balance without a matching row explaining it.
+      await tx.driver.update({
+        where: { id: driverId },
+        data: { walletBalance: { decrement: fine } },
+      });
+      await tx.driverFine.create({
+        data: {
+          driverId,
+          rideId,
+          amount: fine,
+          reason: `scheduled_release_${bucket}`,
+          notes: `Released a claimed scheduled ride with ${hoursNotice}h notice before pickup.`,
+        },
+      });
+    }
+  });
+
+  logger.info({ rideId, driverId, fine, bucket, hoursNotice }, 'Driver released scheduled ride');
+  return { fine, hoursNotice, bucket };
 }
 
 // Drivers near a ride's pickup — for the supervisor's manual-assign popup.
@@ -525,7 +577,8 @@ export async function nearbyDriversForRide(rideId: string, radiusKm: number) {
            ST_Distance(d.current_location, ST_Point(${lng}, ${lat})::geography) as distance_m
     FROM drivers d
     LEFT JOIN vehicles v ON v.id = d.vehicle_id
-    WHERE d.status = 'active'
+    WHERE d.is_online = true
+      AND d.status = 'active'
       AND d.kyc_status = 'approved'
       AND d.current_location IS NOT NULL
       AND ST_DWithin(d.current_location, ST_Point(${lng}, ${lat})::geography, ${radiusKm * 1000})
@@ -596,12 +649,52 @@ export async function listScheduledRidesForDriver(vehicleType?: string | null) {
 
 // Expire stale scheduled rides: unclaimed ones past their time, and claimed
 // ones never started more than 1h after their time (driver no-show).
+//
+// Driver no-shows are fined. Without this, simply ghosting the ride was the
+// cheapest option available to a driver — releasing it properly cost ₹100-200,
+// while never turning up cost nothing at all.
 export async function sweepStaleScheduledRides(): Promise<void> {
+  // Claimed-but-never-started rides, captured before we expire them so we know
+  // which drivers to charge.
+  const noShows = await prisma.$queryRaw<Array<{ id: string; driver_id: string; scheduled_for: Date }>>`
+    SELECT id, driver_id, scheduled_for
+    FROM rides
+    WHERE status = 'assigned'
+      AND scheduled_for IS NOT NULL
+      AND scheduled_for < NOW() - INTERVAL '1 hour'
+      AND driver_id IS NOT NULL
+  `;
+
   await prisma.$executeRaw`
     UPDATE rides SET status = 'expired'
     WHERE (status = 'scheduled' AND scheduled_for IS NOT NULL AND scheduled_for < NOW())
        OR (status = 'assigned' AND scheduled_for IS NOT NULL AND scheduled_for < NOW() - INTERVAL '1 hour')
   `;
+
+  for (const r of noShows) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.driver.update({
+          where: { id: r.driver_id },
+          data: { walletBalance: { decrement: SCHEDULED_NO_SHOW_FINE } },
+        });
+        await tx.driverFine.create({
+          data: {
+            driverId: r.driver_id,
+            rideId: r.id,
+            amount: SCHEDULED_NO_SHOW_FINE,
+            reason: 'scheduled_no_show',
+            notes: 'Claimed a scheduled ride and never started it (no-show).',
+          },
+        });
+      });
+      logger.warn({ rideId: r.id, driverId: r.driver_id, fine: SCHEDULED_NO_SHOW_FINE },
+        'Scheduled-ride no-show fine applied');
+    } catch (err) {
+      // One bad driver row shouldn't stop the sweeper expiring the rest.
+      logger.error({ err, rideId: r.id, driverId: r.driver_id }, 'Failed to apply no-show fine');
+    }
+  }
 }
 
 export async function listRides(filters: {

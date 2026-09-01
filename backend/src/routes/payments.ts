@@ -219,29 +219,37 @@ router.post(
       const fineDeduction  = walletBalance < 0 ? Math.abs(walletBalance) : 0;
       const driverReceives = Math.max(0, driverFare + escortFee - fineDeduction);
 
-      // ── Atomic payment confirmation — prevents double-credit ─────────────
-      // Use an UPDATE with a WHERE guard so only one concurrent request wins.
-      const updated = await prisma.$executeRaw`
-        UPDATE rides
-        SET payment_status = 'paid',
-            razorpay_payment_id = ${razorpayPaymentId},
-            paid_at = NOW()
-        WHERE id = ${ride.id}
-          AND payment_status = 'unpaid'
-      `;
-      if (updated === 0) {
-        // Another request already marked this ride paid — do not credit wallet again
+      // ── Atomic payment confirmation + wallet credit ──────────────────────
+      // Both writes happen in ONE transaction: mark the ride 'paid' AND credit
+      // the driver's wallet. If either fails, BOTH are rolled back — the ride
+      // stays 'unpaid' and simply reappears in /payments/pending for retry.
+      // This guarantees a ride can never end up "paid" with an un-credited
+      // driver wallet (the original bug: two separate writes meant a crash
+      // between them left payment_status='paid' but no money in the wallet,
+      // with no way to detect or recover it). Uses increment (not a computed
+      // absolute value) so concurrent credits to the same driver never race.
+      const alreadyPaid = await prisma.$transaction(async (tx) => {
+        const updated = await tx.$executeRaw`
+          UPDATE rides
+          SET payment_status = 'paid',
+              razorpay_payment_id = ${razorpayPaymentId},
+              paid_at = NOW()
+          WHERE id = ${ride.id}
+            AND payment_status = 'unpaid'
+        `;
+        if (updated === 0) return true; // another request already confirmed this ride
+
+        await tx.driver.update({
+          where: { id: ride.driverId! },
+          data:  { walletBalance: { increment: driverFare + escortFee } },
+        });
+        return false;
+      });
+
+      if (alreadyPaid) {
         res.json({ ok: true, alreadyPaid: true, driverFare, escortFee, fineDeduction, driverReceives });
         return;
       }
-
-      // Safe to credit wallet — only one request gets past the gate above
-      const newWalletBalance = walletBalance + driverFare + escortFee;
-
-      await prisma.driver.update({
-        where: { id: ride.driverId! },
-        data:  { walletBalance: newWalletBalance },
-      });
 
       logger.info({ rideId: ride.id, driverFare, escortFee, fineDeduction, driverReceives }, 'Payment confirmed — wallet credited');
       res.json({ ok: true, driverFare, escortFee, fineDeduction, driverReceives });
@@ -271,19 +279,23 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
           include: { driver: { select: { walletBalance: true } } },
         });
         if (ride && ride.paymentStatus !== 'paid' && ride.driverId && ride.price) {
-          // Atomic guard — prevents double-credit if confirm endpoint already processed this
-          const updated = await prisma.$executeRaw`
-            UPDATE rides
-            SET payment_status = 'paid', razorpay_payment_id = ${payment.id}, paid_at = NOW()
-            WHERE id = ${rideId} AND payment_status = 'unpaid'
-          `;
-          if (updated > 0) {
-            const walletBalance = ride.driver?.walletBalance ?? 0;
-            const escortFee     = ride.escortCharge ?? 0;
-            const newBalance    = walletBalance + ride.price + escortFee;
-            await prisma.driver.update({ where: { id: ride.driverId }, data: { walletBalance: newBalance } });
+          // Same atomic pattern as /rides/:id/confirm — mark-paid and wallet
+          // credit happen in ONE transaction, so a crash between them can
+          // never leave a ride "paid" with no money in the driver's wallet.
+          const escortFee = ride.escortCharge ?? 0;
+          await prisma.$transaction(async (tx) => {
+            const updated = await tx.$executeRaw`
+              UPDATE rides
+              SET payment_status = 'paid', razorpay_payment_id = ${payment.id}, paid_at = NOW()
+              WHERE id = ${rideId} AND payment_status = 'unpaid'
+            `;
+            if (updated === 0) return; // /confirm already processed this — do not double-credit
+            await tx.driver.update({
+              where: { id: ride.driverId! },
+              data:  { walletBalance: { increment: ride.price! + escortFee } },
+            });
             logger.info({ rideId }, 'Webhook: payment captured — wallet credited');
-          }
+          });
         }
       }
     }
@@ -414,35 +426,43 @@ router.post(
       const idempotencyKey  = uuidv4();
       const narration       = 'WeKashi RideOps';
 
-      // ── Atomic wallet debit — prevents race condition double-spend ─────────
-      // UPDATE with WHERE guard: only one concurrent request deducts.
-      const deducted = await prisma.$executeRaw`
-        UPDATE drivers
-        SET wallet_balance = wallet_balance - ${totalDeducted}
-        WHERE id = ${driver.id}
-          AND wallet_balance >= ${totalDeducted}
-      `;
-      if (deducted === 0) {
-        throw new ValidationError(
-          `Insufficient balance. You need ₹${totalDeducted} (₹${amount} + ₹${PAYOUT_TOTAL_FEE} fee).`,
-        );
-      }
+      // ── Atomic wallet debit + payout record creation ────────────────────────
+      // Both writes happen in ONE transaction: debit the wallet AND create the
+      // PayoutTransaction audit record. Without this, a crash right after the
+      // debit (before the record existed) would silently vanish money from
+      // the driver's wallet with zero trace of why — worse than the ride
+      // payment case, since no Razorpay payout call has even been attempted
+      // yet at this point. If either write fails, both roll back and the
+      // driver's balance is untouched.
+      const txn = await prisma.$transaction(async (tx) => {
+        // UPDATE with WHERE guard — only one concurrent request deducts.
+        const deducted = await tx.$executeRaw`
+          UPDATE drivers
+          SET wallet_balance = wallet_balance - ${totalDeducted}
+          WHERE id = ${driver.id}
+            AND wallet_balance >= ${totalDeducted}
+        `;
+        if (deducted === 0) {
+          throw new ValidationError(
+            `Insufficient balance. You need ₹${totalDeducted} (₹${amount} + ₹${PAYOUT_TOTAL_FEE} fee).`,
+          );
+        }
+
+        return tx.payoutTransaction.create({
+          data: {
+            driverId:       driver.id,
+            amount,
+            fee:            PAYOUT_TOTAL_FEE,
+            totalDeducted,
+            mode,
+            status:         'processing',
+            idempotencyKey,
+            narration,
+          },
+        });
+      });
 
       const newBalance = Math.round((driver.walletBalance - totalDeducted) * 100) / 100;
-
-      // ── Create payout transaction record ──────────────────────────────────
-      const txn = await prisma.payoutTransaction.create({
-        data: {
-          driverId:       driver.id,
-          amount,
-          fee:            PAYOUT_TOTAL_FEE,
-          totalDeducted,
-          mode,
-          status:         'processing',
-          idempotencyKey,
-          narration,
-        },
-      });
 
       // ── Dev mode: mock payout ──────────────────────────────────────────────
       if (isDevPayouts) {

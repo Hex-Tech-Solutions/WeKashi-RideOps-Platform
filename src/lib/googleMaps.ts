@@ -19,7 +19,9 @@ export function loadGoogleMaps(): Promise<typeof google> {
   loadPromise = new Promise((resolve, reject) => {
     (window as any).__rideopsInitMap = () => resolve((window as any).google);
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&loading=async&libraries=places&callback=__rideopsInitMap`;
+    // "geometry" is needed to decode the polyline returned by the backend's
+    // Routes API calls (google.maps.geometry.encoding.decodePath).
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&loading=async&libraries=places,geometry&callback=__rideopsInitMap`;
     script.async = true;
     script.onerror = () => {
       loadPromise = null;

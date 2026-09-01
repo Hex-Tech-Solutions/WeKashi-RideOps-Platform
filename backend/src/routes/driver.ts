@@ -6,6 +6,7 @@ import { requireRole } from '../middleware/requireRole';
 import {
   getDriver,
   listDriverOffers,
+  countDriverOffers,
   updateDriverLocation,
   setDriverOnlineStatus,
 } from '../services/driver.service';
@@ -43,10 +44,17 @@ router.get('/me', async (req: AuthRequest, res: Response, next: NextFunction) =>
   }
 });
 
-// GET /api/driver/offers — broadcasting rides I can accept
+// GET /api/driver/offers — broadcasting rides I can accept.
+// `offers` is capped (see MAX_DRIVER_OFFERS) so the list stays scrollable
+// instead of growing unbounded; `totalCount` is the uncapped total, used to
+// show "N available" on the Rides tab even when more exist than are listed.
 router.get('/offers', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    res.json({ offers: await listDriverOffers(req.driver!.id) });
+    const [offers, totalCount] = await Promise.all([
+      listDriverOffers(req.driver!.id),
+      countDriverOffers(req.driver!.id),
+    ]);
+    res.json({ offers, totalCount });
   } catch (err) {
     next(err);
   }

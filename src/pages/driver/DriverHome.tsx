@@ -9,11 +9,13 @@ import {
   useRide, useMarkDriverArrived,
   type RideRow,
 } from "@/lib/queries";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield } from "lucide-react";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield, Navigation } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
+import DriverBoarding from "./DriverBoarding";
 import { getDevicePosition, watchDevicePosition } from "@/lib/deviceLocation";
 import { CompletedRideDetailSheet } from "@/components/CompletedRideDetailSheet";
+import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
 
 export default function DriverHome() {
   const { data: me } = useDriverMe();
@@ -37,6 +39,10 @@ export default function DriverHome() {
   // the driver can complete the trip. Starts as false; DriverTrip reports up.
   const [allDropsDone, setAllDropsDone] = useState(false);
 
+  // Gate: on logout rides every employee must be boarding-verified (or marked
+  // no-show) at the office before the trip can start. DriverBoarding reports up.
+  const [allBoarded, setAllBoarded] = useState(false);
+
   // Track which assigned rides the driver has already confirmed arrival for
   const [arrivedRideIds, setArrivedRideIds] = useState<Set<string>>(new Set());
 
@@ -53,6 +59,22 @@ export default function DriverHome() {
     return stop;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
+
+  // Logout rides board everyone at the office up front, so departure is gated
+  // on boarding verification. Login rides pick up employee-by-employee during
+  // the trip, so there's nothing to verify before starting.
+  const isLogoutRide = (ride: RideRow) => ride.type === "logout";
+
+  const canStartTrip = (ride: RideRow) => {
+    if (!isLogoutRide(ride)) return true;
+    // Must be at the office and have everyone accounted for before departing.
+    return arrivedRideIds.has(ride.id) && allBoarded;
+  };
+
+  const startBlockedReason = (ride: RideRow) => {
+    if (!arrivedRideIds.has(ride.id)) return "Confirm arrival at the office first.";
+    return "Verify every employee's boarding OTP (or mark them no-show) before starting.";
+  };
 
   const toggleOnline = async (on: boolean) => {
     if (on) {
@@ -105,6 +127,26 @@ export default function DriverHome() {
                 <RideSummary ride={active} />
                 {active.status === "assigned" ? (
                   <div className="space-y-3">
+                    {/* Navigate to pickup — office for logout, first employee's
+                        home for login. Always rendered while the driver hasn't
+                        confirmed arrival: prefers exact PostGIS coords, falls
+                        back to the pickup address so the link never vanishes
+                        just because the ride-detail request hasn't resolved. */}
+                    {!arrivedRideIds.has(active.id) && (
+                      <a
+                        href={
+                          activeRideFull?.pickupLat != null && activeRideFull?.pickupLng != null
+                            ? mapsUrl(activeRideFull.pickupLat, activeRideFull.pickupLng)
+                            : mapsUrlForAddress(active.pickupAddress)
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2.5 text-sm font-medium"
+                      >
+                        <Navigation className="h-4 w-4" />
+                        Navigate to pickup — open maps
+                      </a>
+                    )}
                     {/* Arrived slider — shown until driver confirms */}
                     {!arrivedRideIds.has(active.id) && (
                       <ArrivedSlider
@@ -125,10 +167,28 @@ export default function DriverHome() {
                         <Check className="h-3.5 w-3.5" /> Arrival confirmed at pickup location
                       </div>
                     )}
-                    <Button className="w-full bg-gold text-gold-foreground hover:bg-gold/90" disabled={advance.isPending}
-                      onClick={() => advance.mutate({ id: active.id, status: "in_progress" }, { onSuccess: () => toast.success("Trip started"), onError: (e: any) => toast.error(e?.message ?? "Failed") })}>
+
+                    {/* Logout rides: employees board together at the office, so
+                        boarding is verified HERE — before departure — not after
+                        Start trip. Only shown once the driver confirms arrival,
+                        since there's nobody to board until the cab is there. */}
+                    {isLogoutRide(active) && arrivedRideIds.has(active.id) && (
+                      <DriverBoarding rideId={active.id} onAllBoarded={setAllBoarded} />
+                    )}
+
+                    <Button
+                      className="w-full bg-gold text-gold-foreground hover:bg-gold/90 disabled:opacity-50"
+                      disabled={advance.isPending || !canStartTrip(active)}
+                      title={!canStartTrip(active) ? startBlockedReason(active) : undefined}
+                      onClick={() => advance.mutate({ id: active.id, status: "in_progress" }, { onSuccess: () => toast.success("Trip started"), onError: (e: any) => toast.error(e?.message ?? "Failed") })}
+                    >
                       Start trip
                     </Button>
+                    {!canStartTrip(active) && (
+                      <p className="text-[11px] text-muted-foreground text-center -mt-1">
+                        {startBlockedReason(active)}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -143,7 +203,7 @@ export default function DriverHome() {
                     <Button
                       className="w-full bg-foreground text-background hover:bg-foreground/90 disabled:opacity-50"
                       disabled={advance.isPending || !allDropsDone}
-                      title={!allDropsDone ? "Verify all drop OTPs before completing the trip" : undefined}
+                      title={!allDropsDone ? completionBlockedReason(active) : undefined}
                       onClick={() => advance.mutate(
                         { id: active.id, status: "completed" },
                         { onSuccess: () => toast.success("Trip completed"), onError: (e: any) => toast.error(e?.message ?? "Failed") },
@@ -153,7 +213,7 @@ export default function DriverHome() {
                     </Button>
                     {!allDropsDone && (
                       <p className="text-[11px] text-muted-foreground text-center -mt-1">
-                        Verify all drop OTPs to enable trip completion.
+                        {completionBlockedReason(active)}
                       </p>
                     )}
                   </>
@@ -163,15 +223,17 @@ export default function DriverHome() {
           </div>
         )}
 
-        {/* Offers */}
+        {/* Offers — scrollable list, no cap. Every eligible pending offer shows up here. */}
         <div className="px-4 pb-2">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Ride broadcasts ({offers.length})</div>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
+            Ride broadcasts ({offers.length})
+          </div>
           {!online ? (
             <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Go online to see broadcasts.</CardContent></Card>
           ) : offers.length === 0 ? (
             <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No broadcasts right now. Waiting…</CardContent></Card>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-0.5">
               {offers.map((o) => (
                 <Card key={o.id} className="border-gold/30">
                   <CardContent className="p-4 space-y-3">
@@ -228,6 +290,16 @@ export default function DriverHome() {
       />
     </div>
   );
+}
+
+// Trip completion is blocked until every employee's drop OTP is verified,
+// and — for logout rides with an escort — the escort's own return-drop OTP
+// is also verified. Mirrors the gate enforced server-side in maybeComplete().
+function completionBlockedReason(ride: RideRow) {
+  if (ride.type !== "login" && ride.escortRequired) {
+    return "Verify all drop OTPs, then the escort's return-drop OTP, to enable trip completion.";
+  }
+  return "Verify all drop OTPs to enable trip completion.";
 }
 
 function RideSummary({ ride }: { ride: RideRow }) {

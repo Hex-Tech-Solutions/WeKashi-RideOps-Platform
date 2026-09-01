@@ -43,6 +43,14 @@ import SupervisorIssues from "./pages/supervisor/Issues";
 import VendorIssues from "./pages/vendor/Issues";
 import AdminIssues from "./pages/admin/Issues";
 
+// Public legal/policy pages — must stay outside ProtectedRoute so a payment
+// gateway reviewer can open them without an account.
+import About from "./pages/legal/About";
+import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
+import RefundPolicy from "./pages/legal/RefundPolicy";
+import ShippingAndReturns from "./pages/legal/ShippingAndReturns";
+import Terms from "./pages/legal/Terms";
+
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
@@ -59,6 +67,13 @@ const App = () => (
             <Route path="/" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/driver/*" element={<DriverApp />} />
+
+            {/* Public policy pages */}
+            <Route path="/about" element={<About />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="/refund-policy" element={<RefundPolicy />} />
+            <Route path="/shipping-and-returns" element={<ShippingAndReturns />} />
+            <Route path="/terms" element={<Terms />} />
 
             <Route path="/supervisor" element={<ProtectedRoute requiredRole="supervisor"><SupervisorLayout /></ProtectedRoute>}>
               <Route index element={<SupervisorDashboard />} />
