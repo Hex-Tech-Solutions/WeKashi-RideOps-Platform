@@ -21,8 +21,8 @@ name: Deploy to Server
 # the whole file as invalid rather than skipping the step.
 #
 # DB migrations run automatically when the api container boots (see the
-# `command:` in the compose file), and again explicitly below so a migration
-# failure surfaces in the Actions log rather than only in container logs.
+# `command:` in the compose file), i.e. after the image is rebuilt. Do not add
+# a separate pre-build migrate step: `compose run` would use the stale image.
 #
 # .env.prod must already exist on the server at $APP_DIR/.env.prod — it is
 # never committed to git.
@@ -64,8 +64,15 @@ jobs:
             echo "==> Pulling latest code..."
             git pull --ff-only origin main
 
-            echo "==> Applying DB migrations..."
-            $COMPOSE run --rm api npx prisma migrate deploy
+            # NOTE: do not run `compose run --rm api npx prisma migrate deploy`
+            # before the build. `compose run` uses the CURRENT image, so it
+            # executes old code against the new migration files and fails
+            # before the rebuild that would fix it ever happens.
+            #
+            # Migrations are applied by the api container on startup — see the
+            # `command:` in docker-compose.demo.yml — so they run against the
+            # freshly built image, in the right order. Failures show up in the
+            # api logs dumped below.
 
             echo "==> Building & starting the stack (postgres, redis, api, web)..."
             # If a container fails its healthcheck, compose exits non-zero here
