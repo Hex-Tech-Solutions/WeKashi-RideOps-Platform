@@ -11,13 +11,18 @@ name: Deploy to Server
 #   SERVER_APP_DIR   repo path on the server
 #                    (optional, defaults to $HOME/WeKashi-RideOps-Platform)
 #
+# Uses docker-compose.demo.yml — the self-contained stack (postgres + redis as
+# containers), which is what this box actually runs. docker-compose.prod.yml is
+# for a future Azure-managed-services deployment and expects DATABASE_URL /
+# REDIS_URL to be supplied externally; demo builds them from POSTGRES_* instead.
+#
 # NOTE: do not gate steps with `if: ${{ secrets.X != '' }}` — the `secrets`
 # context is not available in step-level `if:` conditions, and GitHub rejects
-# the whole file as invalid rather than just skipping the step.
+# the whole file as invalid rather than skipping the step.
 #
-# DB migrations are applied by the api container itself on boot (see the
-# `command:` in docker-compose.prod.yml), and again explicitly below so a
-# migration failure surfaces in the Actions log rather than in container logs.
+# DB migrations run automatically when the api container boots (see the
+# `command:` in the compose file), and again explicitly below so a migration
+# failure surfaces in the Actions log rather than only in container logs.
 #
 # .env.prod must already exist on the server at $APP_DIR/.env.prod — it is
 # never committed to git.
@@ -43,8 +48,8 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          # A full image rebuild routinely takes longer than the action's
-          # default timeout, which would otherwise kill the job mid-build.
+          # A full image rebuild routinely exceeds the action's default timeout,
+          # which would otherwise kill the job mid-build.
           command_timeout: 20m
           script: |
             set -e
@@ -52,32 +57,36 @@ jobs:
             cd "${APP_DIR:-$HOME/WeKashi-RideOps-Platform}"
             echo "==> Deploying in $(pwd)"
 
+            COMPOSE="sudo docker compose --env-file .env.prod -f docker-compose.demo.yml"
+
             test -f .env.prod || { echo "ERROR: .env.prod not found in $(pwd)"; exit 1; }
 
             echo "==> Pulling latest code..."
             git pull --ff-only origin main
 
             echo "==> Applying DB migrations..."
-            docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm api \
-              npx prisma migrate deploy
+            $COMPOSE run --rm api npx prisma migrate deploy
 
-            echo "==> Building & starting the full stack (postgres, redis, api, web)..."
-            docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+            echo "==> Building & starting the stack (postgres, redis, api, web)..."
+            $COMPOSE up -d --build
 
             echo "==> Pruning dangling images..."
-            docker image prune -f
+            sudo docker image prune -f
 
             echo "==> Health check..."
+            # Checked inside the api container: `web` publishes only on
+            # 127.0.0.1:8090 (a host-level reverse proxy fronts it), and nothing
+            # listens on :80, so curling the host would always fail.
             ok=0
             for i in $(seq 1 12); do
-              if curl -sf http://localhost/health | grep -q '"status":"ok"'; then
+              if $COMPOSE exec -T api curl -sf http://localhost:3000/health 2>/dev/null | grep -q '"status":"ok"'; then
                 echo "Health OK (attempt $i)"; ok=1; break
               fi
               echo "waiting for health... ($i/12)"; sleep 5
             done
             if [ "$ok" != "1" ]; then
               echo "ERROR: health check failed after ~60s — recent api logs:"
-              docker compose --env-file .env.prod -f docker-compose.prod.yml logs --tail=50 api
+              $COMPOSE logs --tail=50 api
               exit 1
             fi
 

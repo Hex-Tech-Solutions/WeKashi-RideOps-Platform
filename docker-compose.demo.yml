@@ -1,0 +1,76 @@
+# ============================================================
+# RideOps — SELF-CONTAINED stack (Postgres + Redis as containers)
+#
+# Use when NOT using Azure managed services. Needs no external keys.
+# This is what the dev/test box (dev.wekashi.in) actually runs, and what
+# .github/workflows/deploy.yml deploys.
+#
+# DATABASE_URL and REDIS_URL are built here from the POSTGRES_* values in
+# .env.prod, so .env.prod does not need to define them itself.
+#
+#   Bring up: sudo docker compose --env-file .env.prod -f docker-compose.demo.yml up -d --build
+#   Seed:     sudo docker compose --env-file .env.prod -f docker-compose.demo.yml exec api npm run db:seed
+#   Logs:     sudo docker compose --env-file .env.prod -f docker-compose.demo.yml logs -f api
+#
+# NOTE: `web` publishes to 127.0.0.1:8090 (loopback only) — a host-level
+# reverse proxy terminates TLS and forwards to it. It is deliberately not
+# bound to 0.0.0.0:80.
+# ============================================================
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      PORT: "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+
+  web:
+    build:
+      context: .
+      args:
+        VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY:-}
+        VITE_RAZORPAY_KEY_ID: ${VITE_RAZORPAY_KEY_ID:-}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8090:80"
+
+volumes:
+  pgdata:
