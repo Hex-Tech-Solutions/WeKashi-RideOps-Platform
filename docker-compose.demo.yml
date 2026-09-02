@@ -44,7 +44,22 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
-      NODE_ENV: production
+      # 'development', not 'production' — this is the dev/test environment
+      # (dev.wekashi.in) and it relies on DEV_OTP_BYPASS for driver login.
+      # createApp() refuses to boot when NODE_ENV=production and
+      # DEV_OTP_BYPASS is set, which is correct: a real production deployment
+      # must never ship an OTP bypass.
+      #
+      # Consequences of 'development' here, all acceptable for a test box but
+      # NOT for real production:
+      #   - CORS_ORIGIN and JWT secret-strength guards are not enforced
+      #   - the Razorpay signature becomes optional on payment confirm
+      #   - error responses include real messages instead of a generic string
+      #   - every Prisma query is logged
+      #
+      # The eventual production stack (docker-compose.prod.yml) keeps
+      # NODE_ENV=production and must not define DEV_OTP_BYPASS.
+      NODE_ENV: development
       PORT: "3000"
     depends_on:
       postgres:

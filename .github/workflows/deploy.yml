@@ -68,7 +68,14 @@ jobs:
             $COMPOSE run --rm api npx prisma migrate deploy
 
             echo "==> Building & starting the stack (postgres, redis, api, web)..."
-            $COMPOSE up -d --build
+            # If a container fails its healthcheck, compose exits non-zero here
+            # and `set -e` would abort before the health-check block below —
+            # hiding the actual reason. Dump api logs on failure first.
+            if ! $COMPOSE up -d --build; then
+              echo "ERROR: stack failed to come up — recent api logs:"
+              $COMPOSE logs --tail=60 api
+              exit 1
+            fi
 
             echo "==> Pruning dangling images..."
             sudo docker image prune -f
