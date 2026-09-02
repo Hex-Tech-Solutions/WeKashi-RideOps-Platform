@@ -102,9 +102,25 @@ export async function streamBlobToResponse(
 }
 
 // ─── Ensure local upload dir exists (dev mode) ───────────────────────────────
+//
+// This runs at import time, so an unhandled throw here takes down the whole
+// process before the server ever listens. The container runs as a non-root user
+// and cannot create directories under /app, so mkdir fails with EACCES when
+// AZURE_STORAGE_CONNECTION_STRING is unset. Log and continue instead: uploads
+// will fail with a clear per-request error, which is far better than the API
+// refusing to boot for a feature that may not even be in use.
 
 if (!USE_AZURE_STORAGE && !fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  } catch (err) {
+    logger.error(
+      { err, uploadDir: UPLOAD_DIR },
+      'Could not create local upload directory — file uploads will fail. ' +
+        'Set AZURE_STORAGE_CONNECTION_STRING to use Blob Storage, or point ' +
+        'UPLOAD_DIR at a writable path.',
+    );
+  }
 }
 
 // ─── Multer configuration ─────────────────────────────────────────────────────

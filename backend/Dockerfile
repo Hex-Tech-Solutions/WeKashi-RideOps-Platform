@@ -51,6 +51,11 @@ COPY --from=build /app/prisma         ./prisma
 # when `prisma migrate deploy` runs at container startup.
 RUN apk add --no-cache curl openssl
 
+# Local upload dir, owned by the runtime user. Only used when
+# AZURE_STORAGE_CONNECTION_STRING is unset (storage.ts falls back to disk);
+# without this, appuser cannot mkdir under /app and uploads fail.
+RUN mkdir -p /app/uploads && chown -R appuser:appgroup /app/uploads
+
 # Switch to non-root user
 USER appuser
 
