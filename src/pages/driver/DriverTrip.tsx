@@ -444,12 +444,17 @@ export default function DriverTrip({
         </DialogContent>
       </Dialog>
 
-      {/* Final destination card */}
-      {dropAddress && (
+      {/* Final destination — LOGIN rides only.
+          On a logout ride the "final destination" is just the last employee's
+          home, which is already the last row of the passenger list above, so
+          the card only repeated information and took up a screen's worth of
+          space. For login rides the office IS a separate endpoint that appears
+          nowhere else, so it stays. */}
+      {isLogin && dropAddress && (
         <div className="rounded-lg border border-foreground/20 bg-secondary p-3 space-y-2">
           <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
             <MapPin className="h-3.5 w-3.5" />
-            {isLogin ? "Final destination — office" : "Final destination"}
+            Final destination — office
           </div>
           <div className="text-sm font-medium">{dropAddress}</div>
           {dropLat != null && dropLng != null && (
