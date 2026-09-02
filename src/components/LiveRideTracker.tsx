@@ -92,9 +92,21 @@ export function LiveRideTracker({ rideId, rideType, dropAddress, dropLat, dropLn
 
   // Compute ETAs via the backend's Routes API proxy whenever driver position changes
   const computeEtas = useCallback((pos: { lat: number; lng: number }) => {
-    if (!dropLat || !dropLng) return;
+    // Only login rides need the ride-level drop point (the office) as a final
+    // stop; logout rides end at the last employee's home, which is already in
+    // the pax list.
+    if (isLogin && (dropLat == null || dropLng == null)) return;
 
-    // Build remaining stops: unvisited pax pickups (login) or drops (logout)
+    // Build the remaining stop sequence from the driver's current position.
+    //
+    // Login: each unvisited employee's home, then the office as the final
+    // destination (ride.dropPoint IS the office for login rides).
+    //
+    // Logout: each employee still to be dropped, in order. The final stop is
+    // simply the last of those homes — do NOT append ride.dropPoint, because
+    // for a logout ride that IS the last employee's home (see createRide:
+    // dropPoint = pt(last.point)), so appending it duplicated the last stop and
+    // mislabelled it "Office".
     const remainingStops = isLogin
       ? pax
           .filter((p) => !p.pickedAt && !p.noShow)
@@ -103,8 +115,9 @@ export function LiveRideTracker({ rideId, rideType, dropAddress, dropLat, dropLn
           .filter((p) => !p.droppedAt && !p.noShow)
           .map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, isOffice: false }));
 
-    const officeStop = { name: dropAddress, lat: dropLat, lng: dropLng, isOffice: true };
-    const allStops = [...remainingStops, officeStop];
+    const allStops = isLogin && dropLat != null && dropLng != null
+      ? [...remainingStops, { name: dropAddress, lat: dropLat, lng: dropLng, isOffice: true }]
+      : remainingStops;
     if (allStops.length === 0) { setStopEtas([]); return; }
 
     setComputing(true);

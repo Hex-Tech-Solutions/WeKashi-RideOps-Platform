@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { io as ioClient, type Socket } from "socket.io-client";
-import { useRideDriverLocation, useRidePax, useRouteMatrix } from "@/lib/queries";
+import { useRide, useRideDriverLocation, useRidePax, useRouteMatrix } from "@/lib/queries";
 import { tokenStore } from "@/lib/api";
 import { usePageVisibleRef } from "@/hooks/usePageVisible";
 import { Navigation, Loader2 } from "lucide-react";
@@ -52,6 +52,7 @@ interface Props {
 export function DriverApproachBadge({ rideId }: Props) {
   const { data: initialLoc } = useRideDriverLocation(rideId);
   const { data: paxData }    = useRidePax(rideId);
+  const { data: ride }       = useRide(rideId);
   const routeMatrix = useRouteMatrix();
 
   const [driverPos, setDriverPos] = useState<{ lat: number; lng: number } | null>(null);
@@ -80,9 +81,23 @@ export function DriverApproachBadge({ rideId }: Props) {
     return () => { sock.off("driver:location_update", handler); };
   }, [rideId]);
 
-  // Find first unvisited pax pickup
+  // Where the driver is actually headed first.
+  //
+  // Login rides: the first employee's home, since pickups happen one by one.
+  //
+  // Logout rides: the OFFICE. Everyone boards there together, so the driver's
+  // first destination is the ride-level pickup point — NOT an employee's home.
+  // getRidePax() returns each employee's home for both directions (that's their
+  // own stop), so using pax[0] here measured the distance to a home the driver
+  // won't reach until after boarding, badly overstating the approach distance.
   const pax = paxData?.pax ?? [];
-  const firstStop = pax.find((p) => !p.pickedAt && !p.noShow);
+  const isLogin = (paxData?.type ?? "login") !== "logout";
+
+  const firstStop = isLogin
+    ? pax.find((p) => !p.pickedAt && !p.noShow)
+    : ride?.pickupLat != null && ride?.pickupLng != null
+      ? { lat: ride.pickupLat, lng: ride.pickupLng }
+      : undefined;
 
   // Throttled real distance/ETA via backend Routes API (traffic-aware, real roads).
   // Skipped while the browser tab is backgrounded — no API call happens if
@@ -127,7 +142,7 @@ export function DriverApproachBadge({ rideId }: Props) {
     return (
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Navigation className="h-3 w-3" />
-        All stops visited
+        {isLogin ? "All stops visited" : "Waiting for pickup location…"}
       </div>
     );
   }
@@ -150,7 +165,7 @@ export function DriverApproachBadge({ rideId }: Props) {
       <span className="flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse shrink-0" />
         Driver is <span className="font-semibold">{display} away</span>
-        {" "}· ETA ~{eta} min to first pickup
+        {" "}· ETA ~{eta} min to {isLogin ? "first pickup" : "office"}
       </span>
       {lastUpdate && (
         <span className="text-muted-foreground text-[10px] shrink-0">
