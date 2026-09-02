@@ -13,6 +13,7 @@ import {
   rebroadcastRide,
   claimScheduledRide,
   driverReleaseScheduledRide,
+  driverCancelAssignedRide,
   nearbyDriversForRide,
   manualAssignRide,
 } from '../services/ride.service';
@@ -431,6 +432,40 @@ export function createRidesRouter(io: IoServer): Router {
   router.post('/:id/release', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const result = await driverReleaseScheduledRide(req.params.id, req.driver!.id);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /rides/:id/driver-cancel — driver drops a ride they already accepted.
+  // The ride returns to 'broadcasting' so nearby drivers can claim it, since
+  // the employees still need transport. Fine applies only if the driver had
+  // already confirmed arrival (see driverCancelAssignedRide).
+  router.post('/:id/driver-cancel', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { reason } = z.object({
+        reason: z.string().trim().min(3).max(200),
+      }).parse(req.body);
+
+      // Passing io lets the service re-offer the ride to nearby drivers as part
+      // of the same operation, so it never sits in 'broadcasting' with nobody
+      // actually notified.
+      const result = await driverCancelAssignedRide(req.params.id, req.driver!.id, reason, io);
+
+      // Tell the supervisor immediately — their cab just disappeared and they
+      // need to know it's being re-broadcast rather than silently stalled.
+      const ride = await getRide(req.params.id);
+      io.of('/supervisor').to(`supervisor:${ride.supervisorId}`).emit('ride:driver_cancelled', {
+        rideId: req.params.id,
+        reason,
+      });
+      io.of('/admin').to('admin').emit('admin:activity', {
+        type: 'driver_cancelled_ride',
+        rideId: req.params.id,
+        reason,
+      });
+
       res.json(result);
     } catch (err) {
       next(err);

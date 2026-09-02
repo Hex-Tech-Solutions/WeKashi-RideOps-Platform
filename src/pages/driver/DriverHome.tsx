@@ -6,9 +6,11 @@ import { Switch } from "@/components/ui/switch";
 import {
   useDriverMe, useDriverOffers, useDriverRides,
   useGoOnline, useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
-  useRide, useMarkDriverArrived, useRouteMatrix,
+  useRide, useMarkDriverArrived, useRouteMatrix, useDriverCancelRide,
   type RideRow,
 } from "@/lib/queries";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield, Navigation, Timer } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
@@ -55,6 +57,11 @@ export default function DriverHome() {
 
   // Completed-ride detail sheet
   const [detailRideId, setDetailRideId] = useState<string | undefined>(undefined);
+
+  // "Can't take this ride" dialog
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const driverCancel = useDriverCancelRide();
 
   // Fetch full ride detail for the active ride so we have drop lat/lng.
   const { data: activeRideFull } = useRide(active?.id);
@@ -258,6 +265,17 @@ export default function DriverHome() {
                         {startBlockedReason(active)}
                       </p>
                     )}
+
+                    {/* Can't do this ride — hands it back so another driver can
+                        take it, rather than the driver simply not turning up. */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-muted-foreground hover:text-destructive"
+                      onClick={() => { setCancelReason(""); setCancelOpen(true); }}
+                    >
+                      <X className="h-3.5 w-3.5" /> Can't take this ride
+                    </Button>
                   </div>
                 ) : (
                   <>
@@ -348,6 +366,72 @@ export default function DriverHome() {
           </div>
         )}
       </div>
+
+      {/* Drop-ride dialog — a reason is required so the supervisor and support
+          have something concrete on record, and the fine (if any) is stated
+          plainly before the driver commits. */}
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">Can't take this ride?</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              The ride goes back to other drivers nearby, so the employees still get
+              picked up.
+            </p>
+
+            {active && arrivedRideIds.has(active.id) ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[11px] text-destructive leading-relaxed">
+                You've already confirmed arrival, so a <strong>₹150 fine</strong> applies —
+                the supervisor was expecting the cab to be there.
+              </div>
+            ) : (
+              <div className="rounded-md border border-success/40 bg-success/5 px-2.5 py-2 text-[11px] text-success leading-relaxed">
+                No fine — you haven't confirmed arrival yet, so there's still time to
+                find another driver.
+              </div>
+            )}
+
+            <Input
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Reason (e.g. breakdown, unwell)"
+              maxLength={200}
+            />
+
+            <Button
+              variant="destructive"
+              className="w-full"
+              disabled={cancelReason.trim().length < 3 || driverCancel.isPending}
+              onClick={() => {
+                if (!active) return;
+                driverCancel.mutate(
+                  { rideId: active.id, reason: cancelReason.trim() },
+                  {
+                    onSuccess: (r) => {
+                      toast.success(
+                        r.fine > 0
+                          ? `Ride released. ₹${r.fine} fine applied.`
+                          : "Ride released — no fine.",
+                      );
+                      setCancelOpen(false);
+                      setAllBoarded(false);
+                    },
+                    onError: (e: any) => toast.error(e?.message ?? "Could not release the ride"),
+                  },
+                );
+              }}
+            >
+              Release this ride
+            </Button>
+            <Button variant="outline" size="sm" className="w-full" onClick={() => setCancelOpen(false)}>
+              Keep the ride
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Completed ride detail sheet */}
       <CompletedRideDetailSheet

@@ -79,6 +79,16 @@ export const RELEASE_AFTER_START_FINE = 200;
 /** Driver held the ride and never showed — swept by sweepStaleScheduledRides. */
 export const SCHEDULED_NO_SHOW_FINE = 300;
 
+/**
+ * Driver dropped an already-accepted immediate ride AFTER confirming arrival.
+ *
+ * Dropping before arrival is free: an early, honest release lets the ride be
+ * re-broadcast while there is still time to fill it. Once the driver has marked
+ * themselves at the pickup, the supervisor believes the cab is there and has
+ * stopped looking for alternatives, so bailing then is what causes real harm.
+ */
+export const DRIVER_DROP_AFTER_ARRIVAL_FINE = 150;
+
 export type ReleaseFineOutcome = {
   fine: number;
   /** Machine-readable bucket, also used as the DriverFine.reason value. */

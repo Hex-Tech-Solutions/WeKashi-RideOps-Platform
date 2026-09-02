@@ -11,7 +11,7 @@ import {
 import { logger } from '../lib/logger';
 import {
   computeFare, type VehicleType, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS,
-  releaseFine, SCHEDULED_NO_SHOW_FINE,
+  releaseFine, SCHEDULED_NO_SHOW_FINE, DRIVER_DROP_AFTER_ARRIVAL_FINE,
 } from '../lib/pricing';
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import { randomInt } from 'crypto';
@@ -480,6 +480,107 @@ export async function rebroadcastRide(
       }
     }
   }
+}
+
+/**
+ * Driver drops a ride they already accepted (status 'assigned').
+ *
+ * Previously there was no way out: a driver who broke down, fell ill, or
+ * accepted by mistake had to simply not turn up, and the supervisor absorbed a
+ * 5% cancellation fee for a situation the driver caused. This gives them an
+ * honest exit while keeping the ride fillable.
+ *
+ * The ride goes back to 'broadcasting' rather than 'cancelled' so nearby
+ * drivers can claim it immediately — the employees still need transport. For a
+ * SCHEDULED ride, driverReleaseScheduledRide() is the correct path instead
+ * (it returns the ride to the marketplace and applies the notice-based fine).
+ *
+ * Fine: charged only once the driver has confirmed arrival, since at that point
+ * the supervisor believes the cab is at the pickup and has stopped looking for
+ * alternatives. Dropping the ride before arriving is free — an early, honest
+ * release is the behaviour we want, not something to punish.
+ */
+export async function driverCancelAssignedRide(
+  rideId: string,
+  driverId: string,
+  reason: string,
+  io?: IoServer,
+): Promise<{ fine: number; rebroadcast: boolean }> {
+  const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+  if (!ride) throw new NotFoundError('Ride not found');
+  if (ride.driverId !== driverId) throw new ForbiddenError('Not your ride');
+  if (ride.status !== 'assigned') {
+    throw new ValidationError(
+      ride.status === 'in_progress'
+        ? 'Trip already started — contact your supervisor'
+        : `Cannot drop a ride with status: ${ride.status}`,
+    );
+  }
+  if (ride.scheduledFor) {
+    throw new ValidationError('Use release for scheduled rides');
+  }
+
+  const fine = ride.driverReportingTime ? DRIVER_DROP_AFTER_ARRIVAL_FINE : 0;
+
+  await prisma.$transaction(async (tx) => {
+    // Back to the marketplace, driver detached, offers cleared so the previous
+    // driver isn't re-offered their own dropped ride.
+    await tx.$executeRaw`
+      UPDATE rides
+      SET status = 'broadcasting',
+          driver_id = NULL,
+          vendor_id = NULL,
+          driver_reporting_time = NULL,
+          broadcast_started_at = NOW(),
+          broadcast_expires_at = NOW() + INTERVAL '3 minutes'
+      WHERE id = ${rideId}
+    `;
+    await tx.rideOffer.deleteMany({ where: { rideId } });
+
+    if (fine > 0) {
+      await tx.driver.update({
+        where: { id: driverId },
+        data: { walletBalance: { decrement: fine } },
+      });
+      await tx.driverFine.create({
+        data: {
+          driverId,
+          rideId,
+          amount: fine,
+          reason: 'assigned_drop_after_arrival',
+          notes: `Dropped an accepted ride after confirming arrival. Reason given: ${reason}`,
+        },
+      });
+    }
+  });
+
+  // Register the broadcast window in Redis and push the offer to nearby
+  // drivers, exactly as a fresh broadcast would.
+  await startRideBroadcast(rideId);
+
+  if (io) {
+    const ridePayload = await getRidePublicPayload(rideId);
+    const pickupRows = await prisma.$queryRaw<Array<{ lat: number; lng: number }>>`
+      SELECT ST_Y(pickup_point::geometry) as lat, ST_X(pickup_point::geometry) as lng
+      FROM rides WHERE id = ${rideId}
+    `;
+    if (pickupRows.length > 0) {
+      const { lat, lng } = pickupRows[0];
+      const nearby = await findNearbyDrivers(lat, lng, BROADCAST_RADIUS_KM);
+      // Exclude the driver who just dropped it — re-offering them their own
+      // abandoned ride is noise at best.
+      const drivers = await prisma.driver.findMany({
+        where: { id: { in: nearby.map((d) => d.id).filter((id) => id !== driverId) } },
+        select: { vendorId: true },
+      });
+      for (const vendorId of [...new Set(drivers.map((d) => d.vendorId))]) {
+        io.of('/driver').to(`vendor:${vendorId}`).emit('ride:broadcast', ridePayload);
+      }
+    }
+  }
+
+  logger.warn({ rideId, driverId, fine, reason }, 'Driver dropped an assigned ride');
+  return { fine, rebroadcast: true };
 }
 
 // Scheduled-ride marketplace: a driver claims an unassigned scheduled ride.
