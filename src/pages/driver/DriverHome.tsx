@@ -9,7 +9,7 @@ import {
   useRide, useMarkDriverArrived,
   type RideRow,
 } from "@/lib/queries";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield, Navigation } from "lucide-react";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield, Navigation, Timer } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
@@ -302,13 +302,44 @@ function completionBlockedReason(ride: RideRow) {
   return "Verify all drop OTPs to enable trip completion.";
 }
 
+/**
+ * Countdown to a broadcast's expiry. Broadcasts only live ~3 minutes, so
+ * without this the driver has no idea how long an offer will stay acceptable.
+ */
+function OfferCountdown({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const left = Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1000));
+  const mm = String(Math.floor(left / 60)).padStart(2, "0");
+  const ss = String(left % 60).padStart(2, "0");
+
+  // Turn red in the last 30s so it reads as urgent at a glance.
+  const urgent = left <= 30;
+
+  return (
+    <span
+      className={`flex items-center gap-1 font-mono font-semibold shrink-0 ${
+        urgent ? "text-destructive animate-pulse" : "text-gold-dark"
+      }`}
+    >
+      <Timer className="h-3.5 w-3.5" />
+      {left > 0 ? `${mm}:${ss}` : "expired"}
+    </span>
+  );
+}
+
 function RideSummary({ ride }: { ride: RideRow }) {
   // Driver earnings = fare + escort charge (escort charge belongs to driver)
   const driverEarnings = (ride.price ?? 0) + (ride.escortCharge ?? 0);
 
   return (
     <div className="space-y-2">
-      {/* Top badges row */}
+      {/* Top badges row — countdown pinned right while broadcasting */}
       <div className="flex items-center gap-2 flex-wrap">
         <Badge variant="outline" className="capitalize">{ride.type}</Badge>
         <Badge variant="outline" className="capitalize">{ride.status.replace("_", " ")}</Badge>
@@ -316,6 +347,11 @@ function RideSummary({ ride }: { ride: RideRow }) {
           <Badge className="bg-amber-500 text-white gap-1 text-[11px]">
             <Shield className="h-3 w-3" /> Escort Ride
           </Badge>
+        )}
+        {ride.status === "broadcasting" && ride.broadcastExpiresAt && (
+          <span className="ml-auto text-xs">
+            <OfferCountdown expiresAt={ride.broadcastExpiresAt} />
+          </span>
         )}
       </div>
 
@@ -336,7 +372,10 @@ function RideSummary({ ride }: { ride: RideRow }) {
           {ride.escortRequired && " + escort"}
         </span>
         {ride.capacity != null && <span>needs {ride.capacity}-seater</span>}
-        {ride.distanceKm != null && <span>· {ride.distanceKm} km</span>}
+        {/* Label the distance explicitly — an unlabelled "15.5 km" reads
+            ambiguously as either the trip length or how far the driver has to
+            travel to reach the pickup. This is the trip itself. */}
+        {ride.distanceKm != null && <span>· {ride.distanceKm} km trip</span>}
 
         {/* Earnings — always show total including escort */}
         {ride.price != null && (
