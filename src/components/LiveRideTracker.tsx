@@ -224,7 +224,9 @@ export function LiveRideTracker({ rideId, rideType, dropAddress, dropLat, dropLn
                 : <Navigation className="h-3.5 w-3.5 shrink-0 text-gold" />
               }
               <span className={`flex-1 truncate font-medium ${s.isOffice ? "text-foreground" : "text-foreground/80"}`}>
-                {i === 0 && !s.isOffice ? "Next pickup — " : s.isOffice ? "Office — " : ""}{s.name}
+                {i === 0 && !s.isOffice
+                  ? (isLogin ? "Next pickup — " : "Next drop — ")
+                  : s.isOffice ? "Office — " : ""}{s.name}
               </span>
               <span className="shrink-0 flex items-center gap-1 text-muted-foreground">
                 <Clock className="h-3 w-3" />
