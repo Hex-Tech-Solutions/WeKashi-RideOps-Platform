@@ -180,11 +180,15 @@ export function LiveRideTracker({ rideId, rideType, dropAddress, dropLat, dropLn
     );
   }
 
-  // Cumulative ETA = sum of all leg durations up to that stop
+  // Running totals from the driver's current position, so each row answers
+  // "how far / how long until this stop" rather than mixing a cumulative time
+  // with a single-leg distance.
   let cumMin = 0;
+  let cumKm = 0;
   const cumulativeEtas = stopEtas.map((s) => {
     cumMin += s.etaMin ?? 0;
-    return { ...s, cumMin };
+    cumKm += s.distanceKm ?? 0;
+    return { ...s, cumMin, cumKm: Math.round(cumKm * 10) / 10 };
   });
 
   return (
@@ -228,12 +232,17 @@ export function LiveRideTracker({ rideId, rideType, dropAddress, dropLat, dropLn
                   ? (isLogin ? "Next pickup — " : "Next drop — ")
                   : s.isOffice ? "Office — " : ""}{s.name}
               </span>
+              {/* Both figures are cumulative from the driver's current position,
+                  so they read consistently down the list. Showing a cumulative
+                  ETA next to a per-leg distance made a later stop look nearer
+                  than an earlier one (e.g. "~48 min · 3 km" after "~40 min ·
+                  13.2 km"), which is exactly backwards. */}
               <span className="shrink-0 flex items-center gap-1 text-muted-foreground">
                 <Clock className="h-3 w-3" />
                 {s.cumMin != null ? `~${s.cumMin} min` : "—"}
               </span>
-              {s.distanceKm != null && (
-                <span className="shrink-0 text-muted-foreground">{s.distanceKm} km</span>
+              {s.cumKm != null && (
+                <span className="shrink-0 text-muted-foreground">{s.cumKm} km</span>
               )}
             </div>
           ))}

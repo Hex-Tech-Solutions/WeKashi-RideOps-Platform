@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import {
   useRidePax,
   useVerifyPickup,
@@ -25,6 +27,7 @@ import {
   LogOut,
   Shield,
   UserCheck,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -86,6 +89,10 @@ export default function DriverTrip({
   const verifyEscortDrop = useVerifyEscortDrop();
   const [otp, setOtp] = useState("");
   const [escortOtpInput, setEscortOtpInput] = useState("");
+  // Which passenger's OTP dialog is open. Verification is driven by explicit
+  // selection from the list rather than by whichever stop happens to be next,
+  // so the driver can handle passengers out of order if reality demands it.
+  const [otpPaxId, setOtpPaxId] = useState<string | null>(null);
 
   const pax = data?.pax ?? [];
   const escortRequired = data?.escortRequired ?? false;
@@ -142,19 +149,27 @@ export default function DriverTrip({
   // done, navStops becomes the per-employee home drops as before.
   const navStops = phase === "pickup" && !isLogin ? [] : phase === "pickup" ? remainingPickups : remainingDrops;
 
+  // The passenger whose OTP dialog is open, and which OTP they need next.
+  const otpPax = pax.find((p) => p.id === otpPaxId) ?? null;
+  const otpPaxPhase = otpPax
+    ? (isLogin ? getPaxPhase(otpPax) : getLogoutPhase(otpPax))
+    : null;
+
   const submitOtp = () => {
-    if (!current) return;
+    if (!otpPax) return;
     if (otp.length < 4) { toast.error("Enter the 4-digit OTP"); return; }
-    const args = { rideId, paxId: current.id, otp };
-    const clear = () => setOtp("");
-    if (phase === "pickup") {
-      verifyPickup.mutate(args, {
-        onSuccess: () => { toast.success(isLogin ? `${current.name} picked up ✓` : `${current.name} boarded ✓`); clear(); },
+    const args = { rideId, paxId: otpPax.id, otp };
+    const done = () => { setOtp(""); setOtpPaxId(null); };
+
+    // Drop if they're already on board, otherwise board/pick up.
+    if (otpPaxPhase === "awaiting_drop") {
+      verifyDrop.mutate(args, {
+        onSuccess: () => { toast.success(`${otpPax.name} dropped off ✓`); done(); },
         onError: (e: any) => toast.error(e?.message ?? "Wrong OTP"),
       });
     } else {
-      verifyDrop.mutate(args, {
-        onSuccess: () => { toast.success(`${current.name} dropped off ✓`); clear(); },
+      verifyPickup.mutate(args, {
+        onSuccess: () => { toast.success(isLogin ? `${otpPax.name} picked up ✓` : `${otpPax.name} boarded ✓`); done(); },
         onError: (e: any) => toast.error(e?.message ?? "Wrong OTP"),
       });
     }
@@ -283,28 +298,22 @@ export default function DriverTrip({
           No passengers boarded.
         </div>
       ) : current ? (
-        /* Active stop card */
-        <div className="rounded-lg border border-gold/50 bg-gold/5 p-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs uppercase tracking-wider text-gold-dark font-semibold flex items-center gap-1.5">
-              {phase === "pickup" && isLogin ? (
-                <><LogIn className="h-3.5 w-3.5" /> Pickup · stop {current.seq + 1}/{pax.length}</>
-              ) : phase === "pickup" && !isLogin ? (
-                <><LogIn className="h-3.5 w-3.5" /> Boarding · {current.seq + 1}/{pax.length}</>
-              ) : (
-                <><LogOut className="h-3.5 w-3.5" /> Drop · stop {current.seq + 1}/{pax.length}</>
-              )}
+        /* Next stop — navigation only. The OTP entry lives in a dialog opened
+           from the passenger list below, so this card stays short enough that
+           "Complete trip" remains reachable without scrolling on a phone. */
+        <div className="rounded-lg border border-gold/50 bg-gold/5 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs uppercase tracking-wider text-gold-dark font-semibold flex items-center gap-1.5 min-w-0">
+              {phase === "pickup" ? <LogIn className="h-3.5 w-3.5 shrink-0" /> : <LogOut className="h-3.5 w-3.5 shrink-0" />}
+              <span className="truncate">
+                {phase === "pickup" ? (isLogin ? "Next pickup" : "Boarding") : "Next drop"} · {current.name}
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              {phase === "pickup" && current.scheduledPickupTime && (
-                <span className="text-xs font-mono bg-gold/10 text-gold-dark px-2 py-0.5 rounded border border-gold/20">
-                  🕐 {current.scheduledPickupTime}
-                </span>
-              )}
-              <Badge variant="outline" className="border-gold/40 text-gold">
-                {current.name}
-              </Badge>
-            </div>
+            {phase === "pickup" && current.scheduledPickupTime && (
+              <span className="text-[10px] font-mono text-gold-dark shrink-0">
+                🕐 {current.scheduledPickupTime}
+              </span>
+            )}
           </div>
 
           {/* Logout boarding has no "navigate" link — the driver is already
@@ -321,106 +330,119 @@ export default function DriverTrip({
               {phase === "pickup" ? "Go to pickup" : "Go to drop-off"} — open maps
             </a>
           )}
-
-          {current.contactPhone && (
-            <a
-              href={`tel:${current.contactPhone}`}
-              className="flex items-center justify-center gap-2 w-full rounded-md border py-2 text-sm"
-            >
-              <Phone className="h-4 w-4" />
-              Call {current.contactLabel} · {current.contactPhone}
-            </a>
-          )}
-
-          <div className="flex gap-2">
-            <Input
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              placeholder={phase === "pickup" ? (isLogin ? "Pickup OTP" : "Boarding OTP") : "Drop OTP"}
-              inputMode="numeric"
-              className="tracking-[0.3em] text-center"
-            />
-            <Button
-              className="bg-gold text-gold-foreground hover:bg-gold/90 shrink-0"
-              disabled={verifyPickup.isPending || verifyDrop.isPending}
-              onClick={submitOtp}
-            >
-              <Check className="h-4 w-4" /> Verify
-            </Button>
-          </div>
-
-          {phase === "pickup" && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full text-muted-foreground"
-              disabled={noShow.isPending}
-              onClick={() =>
-                noShow.mutate(
-                  { rideId, paxId: current.id },
-                  {
-                    onSuccess: () => toast("Marked no-show"),
-                    onError: (e: any) => toast.error(e?.message ?? "Failed"),
-                  },
-                )
-              }
-            >
-              <UserX className="h-3.5 w-3.5" /> No-show (didn't board)
-            </Button>
-          )}
         </div>
       ) : null}
 
-      {/* Passenger list */}
+      {/* Passenger list — tap a row to verify that passenger's OTP */}
       <div className="space-y-1.5">
         {pax.map((p) => {
           const ph = isLogin ? getPaxPhase(p) : (getLogoutPhase(p) as PaxPhase);
           const isCurrent = current?.id === p.id;
+          const done = ph === "completed" || ph === "no_show";
           return (
-            <div
+            <button
               key={p.id}
-              className={`flex items-center gap-2 text-xs p-2 rounded border ${
-                isCurrent ? "border-gold/50 bg-gold/5" : "border-border"
+              type="button"
+              disabled={done}
+              onClick={() => { setOtpPaxId(p.id); setOtp(""); }}
+              className={`w-full flex items-center gap-2 text-sm px-3 py-2.5 rounded-md border text-left transition-colors ${
+                ph === "no_show" ? "border-destructive/30 bg-destructive/5"
+                : ph === "completed" ? "border-success/30 bg-success/5"
+                : isCurrent ? "border-gold/50 bg-gold/5 active:bg-gold/10"
+                : "border-border active:bg-muted/50"
               }`}
             >
-              <MapPin
-                className={`h-3.5 w-3.5 shrink-0 ${
-                  ph === "no_show" ? "text-destructive"
-                  : ph === "completed" ? "text-success"
-                  : ph === "awaiting_drop" ? "text-gold"
-                  : "text-muted-foreground"
-                }`}
-              />
               <span className="font-medium flex-1 min-w-0 truncate">
                 {p.seq + 1}. {p.name}
               </span>
-              {/* Scheduled pickup time badge */}
+
               {isLogin && p.scheduledPickupTime && getPaxPhase(p) === "awaiting_pickup" && (
                 <span className="text-[10px] font-mono text-muted-foreground shrink-0">
                   🕐 {p.scheduledPickupTime}
                 </span>
               )}
 
-              <div className="flex items-center gap-1 shrink-0">
-                <span className={`text-[10px] px-1.5 py-0 rounded border ${
-                  p.pickedAt ? "border-success/40 text-success"
-                  : p.noShow ? "border-destructive/40 text-destructive"
-                  : "border-border text-muted-foreground"
-                }`}>
-                  {p.pickedAt ? "↑ in" : p.noShow ? "↑ skip" : "↑ wait"}
-                </span>
-                <span className={`text-[10px] px-1.5 py-0 rounded border ${
-                  p.droppedAt ? "border-success/40 text-success"
-                  : p.pickedAt ? "border-gold/50 text-gold-dark"
-                  : "border-border text-muted-foreground"
-                }`}>
-                  {p.droppedAt ? "↓ out" : p.pickedAt ? "↓ pend" : "↓ —"}
-                </span>
-              </div>
-            </div>
+              {ph === "no_show" ? (
+                <span className="text-[10px] text-destructive shrink-0">no-show</span>
+              ) : ph === "completed" ? (
+                <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+              ) : (
+                <>
+                  <span className="text-[10px] text-gold-dark shrink-0">
+                    {ph === "awaiting_drop" ? "Drop" : "Board"}
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-gold-dark shrink-0" />
+                </>
+              )}
+            </button>
           );
         })}
       </div>
+
+      {/* OTP dialog — one passenger at a time, opened from the list above */}
+      <Dialog open={!!otpPax} onOpenChange={(o) => { if (!o) { setOtpPaxId(null); setOtp(""); } }}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {otpPax
+                ? `${otpPaxPhase === "awaiting_drop" ? "Drop" : "Board"} ${otpPax.name}`
+                : "Verify passenger"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {otpPax?.contactPhone && (
+              <a
+                href={`tel:${otpPax.contactPhone}`}
+                className="flex items-center justify-center gap-2 w-full rounded-md border py-2 text-sm"
+              >
+                <Phone className="h-4 w-4" />
+                Call {otpPax.contactLabel}
+              </a>
+            )}
+
+            <Input
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder={otpPaxPhase === "awaiting_drop" ? "Drop OTP" : isLogin ? "Pickup OTP" : "Boarding OTP"}
+              inputMode="numeric"
+              autoFocus
+              className="tracking-[0.3em] text-center text-lg"
+            />
+
+            <Button
+              className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
+              disabled={verifyPickup.isPending || verifyDrop.isPending}
+              onClick={submitOtp}
+            >
+              <Check className="h-4 w-4" /> Verify
+            </Button>
+
+            {/* No-show only applies before boarding — a passenger already in the
+                cab cannot be marked as never having boarded. */}
+            {otpPaxPhase !== "awaiting_drop" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-muted-foreground"
+                disabled={noShow.isPending}
+                onClick={() => {
+                  if (!otpPax) return;
+                  noShow.mutate(
+                    { rideId, paxId: otpPax.id },
+                    {
+                      onSuccess: () => { toast(`${otpPax.name} marked no-show`); setOtpPaxId(null); setOtp(""); },
+                      onError: (e: any) => toast.error(e?.message ?? "Failed"),
+                    },
+                  );
+                }}
+              >
+                <UserX className="h-3.5 w-3.5" /> No-show (didn't board)
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Final destination card */}
       {dropAddress && (
