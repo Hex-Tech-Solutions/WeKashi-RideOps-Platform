@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,13 +6,20 @@ import { Switch } from "@/components/ui/switch";
 import {
   useDriverMe, useDriverOffers, useDriverRides,
   useGoOnline, useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
-  useRide, useMarkDriverArrived,
+  useRide, useMarkDriverArrived, useRouteMatrix,
   type RideRow,
 } from "@/lib/queries";
 import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield, Navigation, Timer } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
+import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
+
+/**
+ * How long a driver→pickup distance stays fresh. Offers refresh every 8s; without
+ * this the batched matrix call would fire on every one of those polls.
+ */
+const APPROACH_TTL_MS = 120_000;
 import { getDevicePosition, watchDevicePosition } from "@/lib/deviceLocation";
 import { CompletedRideDetailSheet } from "@/components/CompletedRideDetailSheet";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
@@ -51,6 +58,68 @@ export default function DriverHome() {
 
   // Fetch full ride detail for the active ride so we have drop lat/lng.
   const { data: activeRideFull } = useRide(active?.id);
+
+  // ── Driver → pickup distance for every offer, in ONE API call ──────────────
+  // computeRouteMatrix takes one origin (the driver) and many destinations (each
+  // offer's pickup), so the whole list costs a single billable request rather
+  // than one per card. Recomputed only when the set of offers changes, and at
+  // most once per APPROACH_TTL_MS — a driver idling in one place while offers
+  // refresh every 8s must not trigger a call each time.
+  const [approaches, setApproaches] = useState<Record<string, ApproachInfo>>({});
+  const routeMatrix = useRouteMatrix();
+  const lastApproachAt = useRef(0);
+  const lastOfferKey = useRef("");
+
+  const offerKey = offers.map((o) => o.id).sort().join(",");
+
+  useEffect(() => {
+    if (!online || offers.length === 0) return;
+
+    const withCoords = offers.filter((o) => o.pickupLat != null && o.pickupLng != null);
+    if (withCoords.length === 0) return;
+
+    // Skip if neither the offer set nor the TTL warrants a refresh.
+    const now = Date.now();
+    const offersChanged = offerKey !== lastOfferKey.current;
+    if (!offersChanged && now - lastApproachAt.current < APPROACH_TTL_MS) return;
+
+    let cancelled = false;
+    getDevicePosition()
+      .then((pos) => {
+        if (cancelled) return;
+        lastApproachAt.current = Date.now();
+        lastOfferKey.current = offerKey;
+
+        routeMatrix.mutate(
+          {
+            origins: [{ lat: pos.lat, lng: pos.lng }],
+            destinations: withCoords.map((o) => ({ lat: o.pickupLat!, lng: o.pickupLng! })),
+          },
+          {
+            onSuccess: (res) => {
+              if (cancelled) return;
+              const next: Record<string, ApproachInfo> = {};
+              res.elements.forEach((el) => {
+                // destinationIndex maps back to withCoords order.
+                const ride = withCoords[el.destinationIndex ?? 0];
+                if (!ride) return;
+                next[ride.id] = {
+                  km: el.distanceMeters != null ? Math.round((el.distanceMeters / 1000) * 10) / 10 : null,
+                  min: el.durationSeconds != null ? Math.max(1, Math.round(el.durationSeconds / 60)) : null,
+                };
+              });
+              setApproaches((prev) => ({ ...prev, ...next }));
+            },
+            // Leave the cards showing "—" rather than a wrong number.
+            onError: () => {},
+          },
+        );
+      })
+      .catch(() => {/* no GPS permission — cards just show "—" */});
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, offerKey]);
 
   // While online, watch the device GPS and push live location to the server.
   useEffect(() => {
@@ -233,23 +302,20 @@ export default function DriverHome() {
           ) : offers.length === 0 ? (
             <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No broadcasts right now. Waiting…</CardContent></Card>
           ) : (
-            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-0.5">
+            <div className="space-y-3 max-h-[560px] overflow-y-auto pr-0.5">
               {offers.map((o) => (
-                <Card key={o.id} className="border-gold/30">
-                  <CardContent className="p-4 space-y-3">
-                    <RideSummary ride={o} />
-                    <div className="flex gap-2">
-                      <Button className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90" disabled={accept.isPending || !!active}
-                        onClick={() => accept.mutate(o.id, { onSuccess: () => toast.success("Ride accepted!"), onError: (e: any) => toast.error(e?.message ?? "Ride already taken") })}>
-                        <Check className="h-4 w-4" /> Accept
-                      </Button>
-                      <Button variant="outline" className="flex-1" disabled={reject.isPending}
-                        onClick={() => reject.mutate(o.id, { onSuccess: () => toast("Declined"), onError: (e: any) => toast.error(e?.message ?? "Failed") })}>
-                        <X className="h-4 w-4" /> Decline
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <DriverOfferCard
+                  key={o.id}
+                  ride={o}
+                  approach={approaches[o.id]}
+                  countdown={
+                    o.broadcastExpiresAt ? <OfferCountdown expiresAt={o.broadcastExpiresAt} /> : undefined
+                  }
+                  acceptDisabled={accept.isPending || !!active}
+                  declineDisabled={reject.isPending}
+                  onAccept={() => accept.mutate(o.id, { onSuccess: () => toast.success("Ride accepted!"), onError: (e: any) => toast.error(e?.message ?? "Ride already taken") })}
+                  onDecline={() => reject.mutate(o.id, { onSuccess: () => toast("Declined"), onError: (e: any) => toast.error(e?.message ?? "Failed") })}
+                />
               ))}
             </div>
           )}

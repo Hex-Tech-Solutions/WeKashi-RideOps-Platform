@@ -331,7 +331,7 @@ export interface RideRow {
   /** Extracted from PostGIS drop_point — present on GET /rides/:id responses */
   dropLat?: number | null;
   dropLng?: number | null;
-  /** Extracted from PostGIS pickup_point — present on GET /rides/:id responses */
+  /** Extracted from PostGIS pickup_point — present on GET /rides/:id and /driver/offers */
   pickupLat?: number | null;
   pickupLng?: number | null;
   supervisor?: { fullName: string; email: string };

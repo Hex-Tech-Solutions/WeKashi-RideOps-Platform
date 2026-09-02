@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { NotFoundError, ForbiddenError, NearbyDriver } from '../types';
 import { logger } from '../lib/logger';
@@ -248,7 +249,25 @@ export async function listDriverOffers(driverId: string) {
     },
     orderBy: { ride: { broadcastExpiresAt: 'asc' } },
   });
-  return offers.map((o) => o.ride);
+  if (offers.length === 0) return [];
+
+  // Pickup coordinates so the app can show how far the driver is from each
+  // pickup. Prisma can't select PostGIS geography columns, hence the raw query.
+  const ids = offers.map((o) => o.ride.id);
+  const coords = await prisma.$queryRaw<Array<{ id: string; pickup_lat: number; pickup_lng: number }>>`
+    SELECT id,
+           ST_Y(pickup_point::geometry) AS pickup_lat,
+           ST_X(pickup_point::geometry) AS pickup_lng
+    FROM rides
+    WHERE id IN (${Prisma.join(ids)})
+  `;
+  const byId = new Map(coords.map((c) => [c.id, c]));
+
+  return offers.map((o) => ({
+    ...o.ride,
+    pickupLat: byId.get(o.ride.id)?.pickup_lat ?? null,
+    pickupLng: byId.get(o.ride.id)?.pickup_lng ?? null,
+  }));
 }
 
 // Total count of pending offers for this driver — used to show "N available"
