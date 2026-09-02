@@ -9,6 +9,13 @@ RUN npm ci --no-audit --no-fund
 
 # Copy source and build TypeScript
 COPY . .
+
+# Generate the Prisma client BEFORE tsc runs. Without this, @prisma/client is
+# an unpopulated stub: Prisma.InputJsonValue doesn't exist, transaction clients
+# are untyped, and the build dies with ~55 TS2694/TS7006 errors that look like
+# unrelated "implicitly has an 'any' type" problems.
+RUN npx prisma generate
+
 RUN npm run build
 
 # Prune dev dependencies — only keep production deps in the next stage
