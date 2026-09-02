@@ -3,6 +3,11 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
+# Prisma needs OpenSSL to pick the right query engine for the platform;
+# without it, it warns and falls back to an openssl-1.1.x binary that may not
+# match the image.
+RUN apk add --no-cache openssl
+
 # Install dependencies first (cached layer unless package.json changes)
 COPY package*.json ./
 RUN npm ci --no-audit --no-fund
@@ -18,7 +23,14 @@ RUN npx prisma generate
 
 RUN npm run build
 
-# Prune dev dependencies — only keep production deps in the next stage
+# Prune dev dependencies — only keep production deps in the next stage.
+#
+# NOTE: `prisma` (the CLI) is intentionally a runtime dependency in
+# package.json, not a devDependency, so it survives this prune. The container
+# runs `npx prisma migrate deploy` on every boot (see the compose `command:`),
+# and if the CLI were pruned, npx would try to DOWNLOAD it into node_modules at
+# runtime — which fails, because the runtime stage runs as a non-root user that
+# cannot write to /app/node_modules.
 RUN npm prune --production
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
@@ -35,8 +47,9 @@ COPY --from=build /app/node_modules   ./node_modules
 COPY --from=build /app/package.json   ./package.json
 COPY --from=build /app/prisma         ./prisma
 
-# Install curl for health checks (minimal)
-RUN apk add --no-cache curl
+# curl for the healthcheck; openssl so the Prisma query engine loads correctly
+# when `prisma migrate deploy` runs at container startup.
+RUN apk add --no-cache curl openssl
 
 # Switch to non-root user
 USER appuser
