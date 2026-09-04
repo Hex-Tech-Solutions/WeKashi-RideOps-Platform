@@ -1,22 +1,25 @@
 /**
- * MadeInIndiaWatermark — a small, fixed, non-interactive badge shown on every
- * page: "Proudly Made in India · Karnataka" with a softly waving 3D Indian
- * flag.
+ * MadeInIndiaWatermark — "Proudly Made in India · Karnataka" with a softly
+ * waving 3D Indian flag.
  *
- * Mounted once at the app root (inside BrowserRouter in App.tsx) so it appears
- * across all roles and public pages. `pointer-events-none` guarantees it never
- * intercepts clicks, and it sits in the bottom-right corner clear of most
- * primary actions.
- *
- * Modern look: frosted glass pill, tricolour hairline border, gradient text,
- * and a gently animated waving flag (respects prefers-reduced-motion).
+ * Inline (NOT fixed) — embedded inside the dark sidebar footer of RoleLayout
+ * (supervisor/vendor/admin) and the driver account panel's rail. When
+ * `collapsed` is true it shows just the waving flag (centered), to fit the
+ * narrow collapsed rail. Styled for a dark background.
  */
-
-export function MadeInIndiaWatermark() {
+export function MadeInIndiaWatermark({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <div
       aria-hidden="true"
-      className="fixed top-[72px] right-3 z-[60] pointer-events-none select-none"
+      className={
+        "select-none flex items-center gap-2 rounded-lg px-2 py-1.5 " +
+        (collapsed ? "justify-center" : "")
+      }
+      style={{
+        background: "rgba(255,255,255,0.05)",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
+      title="Proudly Made in India · Karnataka"
     >
       {/* Keyframes scoped to this component. */}
       <style>{`
@@ -26,76 +29,32 @@ export function MadeInIndiaWatermark() {
           50%     { transform: skewY(0deg) translateY(0.4px); }
           75%     { transform: skewY(1.4deg) translateY(-0.4px); }
         }
-        @keyframes wm-shine {
-          0%   { transform: translateX(-120%); }
-          60%  { transform: translateX(220%); }
-          100% { transform: translateX(220%); }
-        }
         .wm-flag-cloth { transform-origin: left center; animation: wm-wave 4.5s ease-in-out infinite; }
-        .wm-shine { animation: wm-shine 6s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) {
-          .wm-flag-cloth, .wm-shine { animation: none; }
+          .wm-flag-cloth { animation: none; }
         }
       `}</style>
 
-      <div
-        className="relative flex items-center gap-2.5 overflow-hidden rounded-2xl px-3 py-1.5"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.62) 100%)",
-          backdropFilter: "blur(14px) saturate(160%)",
-          WebkitBackdropFilter: "blur(14px) saturate(160%)",
-          border: "1px solid rgba(255,255,255,0.6)",
-          boxShadow:
-            "0 8px 24px -8px rgba(16,24,40,0.28), 0 2px 6px -2px rgba(16,24,40,0.16), inset 0 1px 0 rgba(255,255,255,0.9)",
-        }}
-      >
-        {/* Tricolour accent bar down the left edge. */}
-        <span
-          className="absolute inset-y-0 left-0 w-[3px]"
-          style={{
-            background:
-              "linear-gradient(180deg,#FF9933 0%,#FF9933 33%,#ffffff 33%,#ffffff 66%,#138808 66%,#138808 100%)",
-          }}
-        />
-        {/* Sweeping shine highlight. */}
-        <span
-          className="wm-shine pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 skew-x-[-18deg]"
-          style={{
-            background:
-              "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.55) 50%, rgba(255,255,255,0) 100%)",
-          }}
-        />
+      <FlagWaving3D />
 
-        <FlagWaving3D />
-
-        <div className="relative leading-tight pl-0.5">
+      {!collapsed && (
+        <div className="leading-tight min-w-0">
+          <div className="text-[10px] font-bold tracking-tight text-white/90 truncate">
+            Proudly Made in India
+          </div>
           <div
-            className="text-[10px] font-bold tracking-tight"
+            className="text-[8px] font-extrabold uppercase tracking-[0.22em]"
             style={{
-              background: "linear-gradient(180deg,#0f172a 0%,#334155 100%)",
+              background: "linear-gradient(90deg,#FF9933 0%,#ffffff 50%,#3fbf5f 100%)",
               WebkitBackgroundClip: "text",
               backgroundClip: "text",
               color: "transparent",
             }}
           >
-            Proudly Made in India
-          </div>
-          <div className="flex items-center gap-1">
-            <span
-              className="text-[8px] font-extrabold uppercase tracking-[0.22em]"
-              style={{
-                background: "linear-gradient(90deg,#FF9933 0%,#e11d48 45%,#138808 100%)",
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                color: "transparent",
-              }}
-            >
-              Karnataka
-            </span>
+            Karnataka
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

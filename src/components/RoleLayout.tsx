@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
+import { MadeInIndiaWatermark } from "@/components/MadeInIndiaWatermark";
 import { toast } from "sonner";
 
 const SIDEBAR_COLLAPSED_KEY = "rideops:sidebarCollapsed";
@@ -115,6 +116,7 @@ export function RoleLayout({ role, user, nav, children }: RoleLayoutProps) {
         </nav>
 
         <div className="px-3 py-3 border-t border-sidebar-border space-y-1">
+          <MadeInIndiaWatermark collapsed={collapsed} />
           <button
             onClick={() => setCollapsed((c) => !c)}
             className={cn(
