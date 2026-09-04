@@ -13,8 +13,18 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Check, X, Users, Shield, Timer } from "lucide-react";
+import { Check, X, Users, Shield, Timer, LogIn, MapPin } from "lucide-react";
 import type { RideRow } from "@/lib/queries";
+
+/** Format an ISO datetime (or an HH:MM string) to HH:MM for display. */
+function fmtTime(v?: string | null): string | null {
+  if (!v) return null;
+  // Already HH:MM
+  if (/^\d{2}:\d{2}$/.test(v)) return v;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
 
 export interface ApproachInfo {
   km: number | null;
@@ -41,6 +51,8 @@ export function DriverOfferCard({
   // Driver keeps the fare plus any escort charge.
   const earnings = (ride.price ?? 0) + (ride.escortCharge ?? 0);
   const isLogin = ride.type !== "logout";
+  const loginTime = fmtTime(ride.plannedStartTime);
+  const firstPickup = fmtTime(ride.firstPickupTime);
 
   return (
     <Card className="overflow-hidden border-gold/30">
@@ -98,6 +110,27 @@ export function DriverOfferCard({
             </div>
           </div>
         </div>
+
+        {/* Times row — employee login/shift time and the first pickup time so
+            the driver knows the schedule before accepting. */}
+        {(loginTime || firstPickup) && (
+          <div className="flex items-center gap-3 text-[11px] rounded-md bg-muted/50 px-2 py-1.5">
+            {loginTime && (
+              <span className="flex items-center gap-1">
+                <LogIn className="h-3 w-3 text-gold-dark" />
+                <span className="text-muted-foreground">{isLogin ? "Login" : "Logout"}</span>
+                <span className="font-semibold text-foreground font-mono">{loginTime}</span>
+              </span>
+            )}
+            {firstPickup && (
+              <span className="flex items-center gap-1">
+                <MapPin className="h-3 w-3 text-gold-dark" />
+                <span className="text-muted-foreground">1st pickup</span>
+                <span className="font-semibold text-foreground font-mono">{firstPickup}</span>
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Meta row */}
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">

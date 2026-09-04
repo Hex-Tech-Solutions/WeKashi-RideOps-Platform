@@ -325,6 +325,10 @@ export interface RideRow {
   createdAt: string;
   scheduledFor: string | null;
   broadcastExpiresAt?: string | null;
+  /** Planned departure / employee login time (ISO) — shown on the offer card. */
+  plannedStartTime?: string | null;
+  /** First stop's supervisor-set pickup time (HH:MM) — shown on the offer card. */
+  firstPickupTime?: string | null;
   claimedAt?: string | null;
   driverId: string | null;
   vendorId: string | null;

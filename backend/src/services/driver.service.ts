@@ -243,6 +243,7 @@ export async function listDriverOffers(driverId: string) {
           escortName: true,
           distanceKm: true,
           broadcastExpiresAt: true,
+          plannedStartTime: true,
           createdAt: true,
         },
       },
@@ -263,10 +264,26 @@ export async function listDriverOffers(driverId: string) {
   `;
   const byId = new Map(coords.map((c) => [c.id, c]));
 
+  // First pickup's scheduled time — the earliest stop (lowest seq) that has a
+  // supervisor-set pickup time. Shown on the offer card so the driver knows
+  // when the first employee expects to be collected.
+  const firstPickups = await prisma.ridePax.findMany({
+    where: { rideId: { in: ids }, scheduledPickupTime: { not: null } },
+    orderBy: { seq: 'asc' },
+    select: { rideId: true, scheduledPickupTime: true },
+  });
+  const firstPickupByRide = new Map<string, string>();
+  for (const p of firstPickups) {
+    if (!firstPickupByRide.has(p.rideId) && p.scheduledPickupTime) {
+      firstPickupByRide.set(p.rideId, p.scheduledPickupTime);
+    }
+  }
+
   return offers.map((o) => ({
     ...o.ride,
     pickupLat: byId.get(o.ride.id)?.pickup_lat ?? null,
     pickupLng: byId.get(o.ride.id)?.pickup_lng ?? null,
+    firstPickupTime: firstPickupByRide.get(o.ride.id) ?? null,
   }));
 }
 

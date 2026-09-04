@@ -171,7 +171,7 @@ export async function createRide(
       ${escort > 0 ? escort : null},
       ${escortOtp},
       NOW(),
-      NOW() + INTERVAL '3 minutes',
+      NOW() + INTERVAL '1 minute',
       NOW()
     )
     RETURNING id
@@ -453,7 +453,7 @@ export async function rebroadcastRide(
     SET status = 'broadcasting',
         driver_id = NULL,
         broadcast_started_at = NOW(),
-        broadcast_expires_at = NOW() + INTERVAL '3 minutes'
+        broadcast_expires_at = NOW() + INTERVAL '1 minute'
     WHERE id = ${rideId}
   `;
 
@@ -532,7 +532,7 @@ export async function driverCancelAssignedRide(
           vendor_id = NULL,
           driver_reporting_time = NULL,
           broadcast_started_at = NOW(),
-          broadcast_expires_at = NOW() + INTERVAL '3 minutes'
+          broadcast_expires_at = NOW() + INTERVAL '1 minute'
       WHERE id = ${rideId}
     `;
     await tx.rideOffer.deleteMany({ where: { rideId } });

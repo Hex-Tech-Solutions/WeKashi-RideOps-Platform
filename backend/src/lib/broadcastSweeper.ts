@@ -85,5 +85,7 @@ async function sweepExpiredBroadcasts(): Promise<void> {
  * Start a broadcast for a ride: set Redis TTL key and expiry in DB.
  */
 export async function startRideBroadcast(rideId: string): Promise<void> {
-  await redis.set(`ride:broadcast:${rideId}`, '1', 'EX', 180);
+  // Broadcast auction window is 1 minute (matches broadcast_expires_at INTERVAL
+  // '1 minute' on the ride row). Keep these two in sync.
+  await redis.set(`ride:broadcast:${rideId}`, '1', 'EX', 60);
 }

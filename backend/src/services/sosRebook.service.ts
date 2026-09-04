@@ -191,7 +191,7 @@ export async function sosRebook(
       ${paxCount},
       ${capacity},
       NOW(),
-      NOW() + INTERVAL '3 minutes',
+      NOW() + INTERVAL '1 minute',
       NOW()
     )
     RETURNING id
