@@ -221,12 +221,13 @@ export function EditGroupDialog({
             <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-gold" /></div>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5" /> {selected.length} employee{selected.length === 1 ? "" : "s"} in this group
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5 min-w-0">
+                  <Users className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{selected.length} employee{selected.length === 1 ? "" : "s"} in this group</span>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
-                  <Plus className="h-3.5 w-3.5" /> Add / remove people
+                <Button size="sm" variant="outline" className="shrink-0" onClick={() => setAddOpen(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Add / remove
                 </Button>
               </div>
 
@@ -246,6 +247,7 @@ export function EditGroupDialog({
           <DialogFooter className="gap-2 sm:justify-between">
             <Button
               variant="outline"
+              className="w-full sm:w-auto"
               disabled={!dirty || updateTemplate.isPending}
               onClick={() => saveChanges()}
             >
@@ -253,7 +255,7 @@ export function EditGroupDialog({
               Save changes
             </Button>
             <Button
-              className="bg-gold text-gold-foreground hover:bg-gold/90"
+              className="w-full sm:w-auto bg-gold text-gold-foreground hover:bg-gold/90"
               onClick={handleBookClick}
             >
               Book this ride <ArrowRight className="h-4 w-4" />
