@@ -3,15 +3,15 @@ import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, type 
 import DriverHome from "./DriverHome";
 import DriverScheduled from "./DriverScheduled";
 import DriverDocuments from "./DriverDocuments";
-import DriverAccount from "./DriverAccount";
+import { DriverAccountPanel } from "./DriverAccountPanel";
 import { SosModal } from "@/components/SosModal";
 import { DriverChat } from "@/components/DriverChat";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Car, CalendarClock, FileText, User, AlertTriangle } from "lucide-react";
 
-type Tab = "rides" | "scheduled" | "documents" | "account";
+type Tab = "rides" | "scheduled" | "documents";
 
-const TABS: { key: Tab; label: string; Icon: typeof Car }[] = [
+const TABS: { key: Tab | "account"; label: string; Icon: typeof Car }[] = [
   { key: "rides",     label: "Rides",     Icon: Car },
   { key: "scheduled", label: "Scheduled", Icon: CalendarClock },
   { key: "documents", label: "Documents", Icon: FileText },
@@ -20,6 +20,7 @@ const TABS: { key: Tab; label: string; Icon: typeof Car }[] = [
 
 export default function DriverShell() {
   const [tab, setTab]       = useState<Tab>("rides");
+  const [accountOpen, setAccountOpen] = useState(false);
   const { data: me }        = useDriverMe();
   const { data: ridesData } = useDriverRides();
   const { data: sosData }   = useDriverSosIssues();
@@ -96,7 +97,6 @@ export default function DriverShell() {
           {tab === "rides"     && <DriverHome />}
           {tab === "scheduled" && <DriverScheduled />}
           {tab === "documents" && <DriverDocuments />}
-          {tab === "account"   && <DriverAccount />}
         </div>
 
         {/* Bottom nav */}
@@ -105,9 +105,9 @@ export default function DriverShell() {
             {TABS.map(({ key, label, Icon }) => (
               <button
                 key={key}
-                onClick={() => setTab(key)}
+                onClick={() => (key === "account" ? setAccountOpen(true) : setTab(key as Tab))}
                 className={`relative flex flex-col items-center gap-1 py-2.5 text-xs transition-colors ${
-                  tab === key ? "text-gold" : "text-muted-foreground"
+                  (key === "account" ? accountOpen : tab === key) ? "text-gold" : "text-muted-foreground"
                 }`}
               >
                 <span className="relative">
@@ -124,6 +124,9 @@ export default function DriverShell() {
           </div>
         </div>
       </div>
+
+      {/* Account side panel — Profile / Vehicle / Wallet / Recent trips */}
+      <DriverAccountPanel open={accountOpen} onOpenChange={setAccountOpen} />
 
       {/* SOS modal — issue type selector */}
       <SosModal

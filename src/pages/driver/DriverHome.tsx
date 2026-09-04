@@ -11,7 +11,7 @@ import {
 } from "@/lib/queries";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronRight, ChevronsRight, Shield, Navigation, Timer } from "lucide-react";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
@@ -23,7 +23,6 @@ import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
  */
 const APPROACH_TTL_MS = 120_000;
 import { getDevicePosition, watchDevicePosition } from "@/lib/deviceLocation";
-import { CompletedRideDetailSheet } from "@/components/CompletedRideDetailSheet";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
 
 export default function DriverHome() {
@@ -42,7 +41,6 @@ export default function DriverHome() {
   const offers = offersData?.offers ?? [];
   const rides = ridesData?.rides ?? [];
   const active = rides.find((r) => r.status === "assigned" || r.status === "in_progress");
-  const history = rides.filter((r) => ["completed", "cancelled"].includes(r.status)).slice(0, 8);
 
   // Gate: all boarded passengers must have their drop OTP verified before
   // the driver can complete the trip. Starts as false; DriverTrip reports up.
@@ -54,9 +52,6 @@ export default function DriverHome() {
 
   // Track which assigned rides the driver has already confirmed arrival for
   const [arrivedRideIds, setArrivedRideIds] = useState<Set<string>>(new Set());
-
-  // Completed-ride detail sheet
-  const [detailRideId, setDetailRideId] = useState<string | undefined>(undefined);
 
   // "Can't take this ride" dialog
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -339,32 +334,7 @@ export default function DriverHome() {
           )}
         </div>
 
-        {/* History */}
-        {history.length > 0 && (
-          <div className="px-4 pb-8">
-            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2 mt-2">Recent trips</div>
-            <div className="space-y-2">
-              {history.map((r) => (
-                <Card
-                  key={r.id}
-                  className="cursor-pointer hover:border-gold/50 transition-colors"
-                  onClick={() => setDetailRideId(r.id)}
-                >
-                  <CardContent className="p-3 flex items-center justify-between text-sm">
-                    <div className="min-w-0">
-                      <div className="truncate">{r.pickupAddress} → {r.dropAddress}</div>
-                      <div className="text-xs text-muted-foreground capitalize">{r.status}</div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-semibold">{r.price != null ? `₹${r.price}` : "—"}</span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Recent trips moved into the account side panel ("Recent trips"). */}
       </div>
 
       {/* Drop-ride dialog — a reason is required so the supervisor and support
@@ -433,11 +403,6 @@ export default function DriverHome() {
         </DialogContent>
       </Dialog>
 
-      {/* Completed ride detail sheet */}
-      <CompletedRideDetailSheet
-        rideId={detailRideId}
-        onClose={() => setDetailRideId(undefined)}
-      />
     </div>
   );
 }

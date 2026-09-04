@@ -23,13 +23,35 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 
-export default function DriverAccount() {
-  const { session, logout } = useDriverAuth();
-  const { data: me }         = useDriverMe();
-  const { data: walletData } = useDriverWallet();
+/**
+ * KYC warning banner — reused across the panel sections.
+ */
+export function KycExpiredBanner({ kycExpired }: { kycExpired: boolean }) {
+  if (!kycExpired) return null;
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4">
+      <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+      <div>
+        <div className="font-semibold text-sm text-destructive">KYC documents expired</div>
+        <div className="text-xs text-destructive/80 mt-0.5">
+          You're not receiving ride broadcasts. Re-upload expired documents in the Documents tab.
+        </div>
+      </div>
+    </div>
+  );
+}
 
+/**
+ * Avatar + name + status header, and the phone/vendor/rating/KYC rows.
+ */
+export function ProfileSummaryCard({
+  me,
+  fullName,
+}: {
+  me: ReturnType<typeof useDriverMe>["data"];
+  fullName?: string | null;
+}) {
   const kycExpired = me?.kycStatus === "expired";
-
   const profileRows = [
     { Icon: Phone,      label: "Phone",       value: me?.phone ?? "—" },
     { Icon: Building2,  label: "Vendor",      value: me?.vendor?.name ?? "—" },
@@ -41,32 +63,17 @@ export default function DriverAccount() {
   ];
 
   return (
-    <div className="px-4 py-4 space-y-4 pb-10">
-      {/* KYC expired warning */}
-      {kycExpired && (
-        <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4">
-          <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
-          <div>
-            <div className="font-semibold text-sm text-destructive">KYC documents expired</div>
-            <div className="text-xs text-destructive/80 mt-0.5">
-              You're not receiving ride broadcasts. Re-upload expired documents in the Documents tab.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Avatar + name */}
+    <>
       <div className="flex flex-col items-center text-center py-4">
         <div className="h-20 w-20 rounded-full bg-foreground text-background flex items-center justify-center text-2xl font-bold mb-3">
-          {(session?.fullName ?? "D").split(" ").map((n) => n[0]).join("").slice(0, 2)}
+          {(fullName ?? "D").split(" ").map((n) => n[0]).join("").slice(0, 2)}
         </div>
-        <div className="font-semibold text-lg">{session?.fullName ?? "Driver"}</div>
+        <div className="font-semibold text-lg">{fullName ?? "Driver"}</div>
         <Badge variant="outline" className={`mt-1 capitalize ${me?.status === "active" ? "border-success/40 text-success" : "border-warning/40 text-warning"}`}>
           {me?.status ?? "—"}
         </Badge>
       </div>
 
-      {/* Profile rows */}
       <Card>
         <CardContent className="p-2">
           {profileRows.map((r) => (
@@ -80,35 +87,63 @@ export default function DriverAccount() {
           ))}
         </CardContent>
       </Card>
+    </>
+  );
+}
 
-      {/* Personal details (DL, Gov ID, alt phone) */}
+/**
+ * Wallet + earnings section, composed so the side panel can drop it into its
+ * "Wallet & Ride Earnings" page. Fetches its own wallet data.
+ */
+export function WalletSection() {
+  const { data: me }         = useDriverMe();
+  const { data: walletData } = useDriverWallet();
+  return (
+    <WalletCard
+      balance={walletData?.walletBalance ?? me?.walletBalance ?? 0}
+      maxWithdrawable={walletData?.maxWithdrawable ?? 0}
+      payoutFee={walletData?.payoutFee ?? 5.90}
+      payments={walletData?.payments ?? []}
+    />
+  );
+}
+
+/**
+ * Sign-out button — reused in the panel footer.
+ */
+export function SignOutButton() {
+  const { logout } = useDriverAuth();
+  return (
+    <Button
+      variant="outline"
+      className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+      onClick={() => logout()}
+    >
+      <LogOut className="h-4 w-4" /> Sign out
+    </Button>
+  );
+}
+
+export default function DriverAccount() {
+  const { session } = useDriverAuth();
+  const { data: me } = useDriverMe();
+  const kycExpired = me?.kycStatus === "expired";
+
+  return (
+    <div className="px-4 py-4 space-y-4 pb-10">
+      <KycExpiredBanner kycExpired={kycExpired} />
+      <ProfileSummaryCard me={me} fullName={session?.fullName} />
       <ProfileDetailsCard me={me} />
-
-      {/* Vehicle */}
-      <VehicleCard currentType={me?.vehicleType} currentSeats={me?.seats} />
-
-      {/* Wallet */}
-      <WalletCard
-        balance={walletData?.walletBalance ?? me?.walletBalance ?? 0}
-        maxWithdrawable={walletData?.maxWithdrawable ?? 0}
-        payoutFee={walletData?.payoutFee ?? 5.90}
-        payments={walletData?.payments ?? []}
-      />
-
-      <Button
-        variant="outline"
-        className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
-        onClick={() => logout()}
-      >
-        <LogOut className="h-4 w-4" /> Sign out
-      </Button>
+      <VehicleCard currentType={me?.vehicleType} currentSeats={me?.seats} driverId={me?.id ?? session?.id} />
+      <WalletSection />
+      <SignOutButton />
     </div>
   );
 }
 
 // ─── Personal / Licence details card ─────────────────────────────────────────
 
-function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>["data"] }) {
+export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>["data"] }) {
   const update = useUpdateDriverProfile();
   const [fullName,    setFullName]    = useState(me?.fullName ?? "");
   const [altPhone,    setAltPhone]    = useState(me?.altPhone ?? "");
@@ -199,7 +234,7 @@ function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>["data"]
 
 // ─── Wallet card ──────────────────────────────────────────────────────────────
 
-function WalletCard({
+export function WalletCard({
   balance,
   maxWithdrawable,
   payoutFee,
@@ -510,10 +545,36 @@ function PayoutHistory() {
 
 // ─── Vehicle card ─────────────────────────────────────────────────────────────
 
-function VehicleCard({ currentType, currentSeats }: { currentType?: string | null; currentSeats?: number | null }) {
+// Remembered vehicle selection — persisted locally so the app instantly shows
+// the driver's last saved vehicle on every login, before (and even if) the
+// server `me` payload has loaded. The server remains the source of truth; this
+// is just a fast, sticky default that survives logout/login until the driver
+// changes it. Keyed by driver id so a shared device doesn't leak selections.
+const VEHICLE_PREF_KEY = "rideops_driver_vehicle";
+
+export function readVehiclePref(driverId?: string | null): { type: VehicleType; seats: string } | null {
+  try {
+    const raw = localStorage.getItem(VEHICLE_PREF_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (driverId && obj.driverId && obj.driverId !== driverId) return null;
+    if (!obj.type) return null;
+    return { type: obj.type as VehicleType, seats: String(obj.seats ?? "4") };
+  } catch { return null; }
+}
+
+function writeVehiclePref(driverId: string | null | undefined, type: VehicleType, seats: string) {
+  try { localStorage.setItem(VEHICLE_PREF_KEY, JSON.stringify({ driverId: driverId ?? null, type, seats })); }
+  catch { /* ignore */ }
+}
+
+export function VehicleCard({ currentType, currentSeats, driverId }: { currentType?: string | null; currentSeats?: number | null; driverId?: string | null }) {
   const save = useSetDriverVehicle();
-  const [type, setType]   = useState<VehicleType>((currentType as VehicleType) || "sedan");
-  const [seats, setSeats] = useState<string>(currentSeats ? String(currentSeats) : "4");
+  // Seed from the server value if present, else the remembered local pref, else
+  // sensible defaults — so the selection is never blank on a fresh login.
+  const pref = readVehiclePref(driverId);
+  const [type, setType]   = useState<VehicleType>((currentType as VehicleType) || pref?.type || "sedan");
+  const [seats, setSeats] = useState<string>(currentSeats ? String(currentSeats) : pref?.seats ?? "4");
 
   useEffect(() => { if (currentType) setType(currentType as VehicleType); }, [currentType]);
   useEffect(() => { if (currentSeats) setSeats(String(currentSeats)); }, [currentSeats]);
@@ -522,7 +583,7 @@ function VehicleCard({ currentType, currentSeats }: { currentType?: string | nul
     const s = Number(seats);
     if (!(s >= 1 && s <= 20)) { toast.error("Enter valid seats (incl. driver)"); return; }
     save.mutate({ vehicleType: type, seats: s }, {
-      onSuccess: () => toast.success("Vehicle saved"),
+      onSuccess: () => { writeVehiclePref(driverId, type, seats); toast.success("Vehicle saved"); },
       onError: (e: any) => toast.error(e?.message ?? "Failed"),
     });
   };
