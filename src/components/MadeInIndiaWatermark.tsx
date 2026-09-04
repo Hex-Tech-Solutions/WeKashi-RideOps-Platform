@@ -16,7 +16,7 @@ export function MadeInIndiaWatermark() {
   return (
     <div
       aria-hidden="true"
-      className="fixed bottom-3 right-3 z-[60] pointer-events-none select-none"
+      className="fixed top-[72px] right-3 z-[60] pointer-events-none select-none"
     >
       {/* Keyframes scoped to this component. */}
       <style>{`
