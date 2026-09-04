@@ -8,13 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   useEmployees, useCreateRide, useVehicleOptions, useSupervisorOffice,
-  useOfficeLocations, useRouteTemplates, useOptimizeRoute,
-  type CreateRidePayload, type OfficeLocationRow, type RouteTemplateRow,
+  useOfficeLocations, useOptimizeRoute,
+  type CreateRidePayload, type OfficeLocationRow,
 } from "@/lib/queries";
 import { optimizeStops, buildResult, coordPoint, getPoint, DROP, type RouteStop, type RouteResult, type GeoPoint } from "@/lib/geo";
 import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS, type VehicleType } from "@/lib/pricing";
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Shield, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck, IndianRupee } from "lucide-react";
 import { GoogleRouteMap } from "@/components/GoogleRouteMap";
@@ -30,7 +30,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-interface UIEmployee {
+export interface UIEmployee {
   id: string; name: string; gender: "M" | "F"; pickup: string; loginTime: string; logoutTime: string;
   companyLabel?: string | null;
   pickupLat?: number | null; pickupLng?: number | null; dropLat?: number | null; dropLng?: number | null;
@@ -60,10 +60,9 @@ export default function RoutesPage() {
   const { data: officeData } = useSupervisorOffice();
   const pendingCancellationFee = officeData?.pendingCancellationFee ?? 0;
   const { data: locationsData } = useOfficeLocations();
-  const { data: templatesData } = useRouteTemplates();
   const createRide = useCreateRide();
   const nav = useNavigate();
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   const offices = locationsData?.offices ?? [];
   // Default to the office marked isDefault; fall back to first available.
@@ -121,19 +120,36 @@ export default function RoutesPage() {
   // ── Escort policy state ───────────────────────────────────────────────────
   const [escortName, setEscortName] = useState("");
 
-  const templates = templatesData?.templates ?? [];
+  // Auto-load a preset handed off from EditGroupDialog ("Load group" in Saved
+  // Groups). Unlike the raw saved template, this carries the CURRENT stop
+  // order/membership — which may have been edited in that dialog and not yet
+  // saved back to the group — so it's applied as-is rather than re-reading
+  // orderedEmployeeIds from the template.
+  const presetState = location.state as {
+    presetEmployeeIds?: string[];
+    presetType?: "login" | "logout";
+    presetVehicleType?: string;
+    presetOfficeLocationId?: string;
+  } | null;
 
-  // Auto-load a template when navigated from the Saved Groups page (?loadGroup=id)
   useEffect(() => {
-    const loadId = searchParams.get("loadGroup");
-    if (!loadId || !templates.length) return;
-    const t = templates.find((x) => x.id === loadId);
-    if (t) {
-      loadTemplate(t);
-      nav("/supervisor/routes", { replace: true });
-    }
+    if (!presetState?.presetEmployeeIds?.length) return;
+    setSelectedIds(presetState.presetEmployeeIds);
+    if (presetState.presetType) setType(presetState.presetType);
+    setCustomStops(undefined);
+    setOfficeOverride(null);
+    setPickupTimes({});
+    setFareAdjustment(null);
+    setPlannedPickupTime("");
+    lastAutoFilled.current = null;
+    if (presetState.presetOfficeLocationId) setSelectedOfficeId(presetState.presetOfficeLocationId);
+    if (presetState.presetVehicleType) setVehicleType(presetState.presetVehicleType as VehicleType);
+    setStep(2);
+    // Clear the router state so a page refresh or back-navigation doesn't
+    // silently reapply a stale preset.
+    nav("/supervisor/routes", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.get("loadGroup"), templates.length]);
+  }, []);
 
   const selected = visibleEmployees.filter((e) => selectedIds.includes(e.id));
 
@@ -318,21 +334,6 @@ export default function RoutesPage() {
     setStep(1);
   };
 
-  // Load a saved template — navigated from Saved Groups page via query param
-  const loadTemplate = (t: RouteTemplateRow) => {
-    const ids = t.orderedEmployeeIds as string[];
-    setSelectedIds(ids);
-    setType(t.rideType);
-    setCustomStops(undefined);
-    setOfficeOverride(null);
-    setPickupTimes({});
-    setFareAdjustment(null);
-    setPlannedPickupTime("");
-    lastAutoFilled.current = null;
-    if (t.officeLocationId) setSelectedOfficeId(t.officeLocationId);
-    if (t.vehicleType) setVehicleType(t.vehicleType as VehicleType);
-    setStep(2);
-  };
   const reorderStops = (from: number, to: number) => {
     const arr = [...route.stops];
     const [moved] = arr.splice(from, 1);
@@ -1015,7 +1016,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="flex items-center justify-between"><span className="text-muted-foreground">{label}</span><span className="font-medium">{value}</span></div>;
 }
 
-function EmployeeList({ employees, selectedIds, onToggle, type }: {
+export function EmployeeList({ employees, selectedIds, onToggle, type }: {
   employees: UIEmployee[];
   selectedIds: string[];
   onToggle: (id: string) => void;

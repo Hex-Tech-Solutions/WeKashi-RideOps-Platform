@@ -10,7 +10,6 @@ import {
   useSavedGroupsReport,
   type RouteTemplateRow,
 } from "@/lib/queries";
-import { useNavigate } from "react-router-dom";
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
 } from "@/components/ui/tabs";
@@ -25,6 +24,7 @@ import {
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { EditGroupDialog } from "@/components/EditGroupDialog";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -55,7 +55,6 @@ function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function SavedGroups() {
-  const nav = useNavigate();
   const { data: templatesData } = useRouteTemplates();
   const { data: reportData } = useSavedGroupsReport();
   const updateTemplate = useUpdateRouteTemplate();
@@ -65,16 +64,10 @@ export default function SavedGroups() {
   const templates = templatesData?.templates ?? [];
   const report = reportData?.report ?? [];
 
-  // Load a template into the booking flow
-  const loadTemplate = (t: RouteTemplateRow) => {
-    updateTemplate.mutate({ id: t.id, markUsed: true } as any, {
-      onSuccess: () => {
-        // Navigate to routes page — the Routes page reads templates on mount
-        // Pass the template id via query param so Routes.tsx can auto-load it
-        nav(`/supervisor/routes?loadGroup=${t.id}`);
-      },
-    });
-  };
+  // "Load group" now opens an editable preview instead of jumping straight
+  // into the booking flow — the supervisor can add/remove people and see the
+  // route on a map before committing.
+  const [editingTemplate, setEditingTemplate] = useState<RouteTemplateRow | null>(null);
 
   return (
     <div className="max-w-5xl">
@@ -196,8 +189,7 @@ export default function SavedGroups() {
 
                       <Button
                         className="w-full bg-gold text-gold-foreground hover:bg-gold/90 mt-auto"
-                        onClick={() => loadTemplate(t)}
-                        disabled={updateTemplate.isPending}
+                        onClick={() => setEditingTemplate(t)}
                       >
                         Load group <ArrowRight className="h-3.5 w-3.5" />
                       </Button>
@@ -329,6 +321,12 @@ export default function SavedGroups() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditGroupDialog
+        template={editingTemplate}
+        open={!!editingTemplate}
+        onOpenChange={(o) => !o && setEditingTemplate(null)}
+      />
     </div>
   );
 }
