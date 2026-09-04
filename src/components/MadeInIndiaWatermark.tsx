@@ -1,50 +1,98 @@
 /**
  * MadeInIndiaWatermark — a small, fixed, non-interactive badge shown on every
- * page: "Proudly Made in INDIA · KARNATAKA" with a 3D-styled Indian flag.
+ * page: "Proudly Made in India · Karnataka" with a softly waving 3D Indian
+ * flag.
  *
  * Mounted once at the app root (inside BrowserRouter in App.tsx) so it appears
  * across all roles and public pages. `pointer-events-none` guarantees it never
  * intercepts clicks, and it sits in the bottom-right corner clear of most
  * primary actions.
+ *
+ * Modern look: frosted glass pill, tricolour hairline border, gradient text,
+ * and a gently animated waving flag (respects prefers-reduced-motion).
  */
 
 export function MadeInIndiaWatermark() {
   return (
     <div
       aria-hidden="true"
-      className="fixed bottom-2 right-2 z-[60] pointer-events-none select-none"
+      className="fixed bottom-3 right-3 z-[60] pointer-events-none select-none"
     >
+      {/* Keyframes scoped to this component. */}
+      <style>{`
+        @keyframes wm-wave {
+          0%,100% { transform: skewY(0deg) translateY(0); }
+          25%     { transform: skewY(-1.4deg) translateY(-0.4px); }
+          50%     { transform: skewY(0deg) translateY(0.4px); }
+          75%     { transform: skewY(1.4deg) translateY(-0.4px); }
+        }
+        @keyframes wm-shine {
+          0%   { transform: translateX(-120%); }
+          60%  { transform: translateX(220%); }
+          100% { transform: translateX(220%); }
+        }
+        .wm-flag-cloth { transform-origin: left center; animation: wm-wave 4.5s ease-in-out infinite; }
+        .wm-shine { animation: wm-shine 6s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .wm-flag-cloth, .wm-shine { animation: none; }
+        }
+      `}</style>
+
       <div
-        className="flex items-center gap-2 rounded-full border border-white/40 bg-white/70 px-3 py-1.5 backdrop-blur-md"
+        className="relative flex items-center gap-2.5 overflow-hidden rounded-2xl px-3 py-1.5"
         style={{
+          background:
+            "linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.62) 100%)",
+          backdropFilter: "blur(14px) saturate(160%)",
+          WebkitBackdropFilter: "blur(14px) saturate(160%)",
+          border: "1px solid rgba(255,255,255,0.6)",
           boxShadow:
-            "0 2px 4px rgba(0,0,0,0.12), 0 6px 16px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.9)",
+            "0 8px 24px -8px rgba(16,24,40,0.28), 0 2px 6px -2px rgba(16,24,40,0.16), inset 0 1px 0 rgba(255,255,255,0.9)",
         }}
       >
-        <IndianFlag3D />
-        <div className="leading-tight">
+        {/* Tricolour accent bar down the left edge. */}
+        <span
+          className="absolute inset-y-0 left-0 w-[3px]"
+          style={{
+            background:
+              "linear-gradient(180deg,#FF9933 0%,#FF9933 33%,#ffffff 33%,#ffffff 66%,#138808 66%,#138808 100%)",
+          }}
+        />
+        {/* Sweeping shine highlight. */}
+        <span
+          className="wm-shine pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 skew-x-[-18deg]"
+          style={{
+            background:
+              "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.55) 50%, rgba(255,255,255,0) 100%)",
+          }}
+        />
+
+        <FlagWaving3D />
+
+        <div className="relative leading-tight pl-0.5">
           <div
-            className="text-[10px] font-semibold uppercase tracking-wide"
+            className="text-[10px] font-bold tracking-tight"
             style={{
-              background: "linear-gradient(180deg,#111 0%,#333 60%,#555 100%)",
+              background: "linear-gradient(180deg,#0f172a 0%,#334155 100%)",
               WebkitBackgroundClip: "text",
               backgroundClip: "text",
               color: "transparent",
-              textShadow: "0 1px 0 rgba(255,255,255,0.6)",
             }}
           >
             Proudly Made in India
           </div>
-          <div
-            className="text-[8px] font-bold uppercase tracking-[0.18em]"
-            style={{
-              background: "linear-gradient(90deg,#FF9933 0%,#0a7d2c 100%)",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            Karnataka
+          <div className="flex items-center gap-1">
+            <span
+              className="text-[8px] font-extrabold uppercase tracking-[0.22em]"
+              style={{
+                background: "linear-gradient(90deg,#FF9933 0%,#e11d48 45%,#138808 100%)",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+              }}
+            >
+              Karnataka
+            </span>
           </div>
         </div>
       </div>
@@ -53,84 +101,95 @@ export function MadeInIndiaWatermark() {
 }
 
 /**
- * A tiny 3D-looking Indian tricolour flag on a pole, drawn with inline SVG so
- * it needs no image asset and stays crisp at any DPI. The gradients + drop
- * shadow give it a subtle waving, raised feel.
+ * A softly waving 3D Indian tricolour, inline SVG (no asset, crisp at any DPI).
+ * The cloth path uses smooth curves so the trailing edge ripples; band
+ * gradients + a diagonal sheen give it depth, and the whole cloth animates via
+ * the `.wm-flag-cloth` skew keyframes above.
  */
-function IndianFlag3D() {
+function FlagWaving3D() {
   return (
     <svg
-      width="26"
-      height="22"
-      viewBox="0 0 52 44"
+      width="30"
+      height="24"
+      viewBox="0 0 60 48"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className="shrink-0"
-      style={{ filter: "drop-shadow(0 2px 2px rgba(0,0,0,0.25))" }}
+      className="relative shrink-0"
+      style={{ filter: "drop-shadow(0 3px 3px rgba(16,24,40,0.28))" }}
     >
       <defs>
-        {/* Vertical light-to-shade sheen shared across the three bands to give
-            the cloth a rounded, 3D bulge. */}
-        <linearGradient id="wm-saffron" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#FFB866" />
+        <linearGradient id="wm2-saffron" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#FFC38A" />
           <stop offset="45%" stopColor="#FF9933" />
-          <stop offset="100%" stopColor="#E6801A" />
+          <stop offset="100%" stopColor="#E97C12" />
         </linearGradient>
-        <linearGradient id="wm-white" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="wm2-white" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#FFFFFF" />
-          <stop offset="55%" stopColor="#F3F3F3" />
-          <stop offset="100%" stopColor="#DDDDDD" />
+          <stop offset="55%" stopColor="#F5F5F5" />
+          <stop offset="100%" stopColor="#E3E3E3" />
         </linearGradient>
-        <linearGradient id="wm-green" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1F9E4A" />
-          <stop offset="55%" stopColor="#0A7D2C" />
-          <stop offset="100%" stopColor="#075E20" />
+        <linearGradient id="wm2-green" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#2BB55C" />
+          <stop offset="55%" stopColor="#138808" />
+          <stop offset="100%" stopColor="#0C6606" />
         </linearGradient>
-        {/* A soft horizontal wave highlight overlaid on the whole flag. */}
-        <linearGradient id="wm-sheen" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="rgba(255,255,255,0.55)" />
-          <stop offset="35%" stopColor="rgba(255,255,255,0)" />
-          <stop offset="70%" stopColor="rgba(0,0,0,0.10)" />
-          <stop offset="100%" stopColor="rgba(255,255,255,0.25)" />
+        <linearGradient id="wm2-sheen" x1="0" y1="0" x2="1" y2="0.4">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.5)" />
+          <stop offset="40%" stopColor="rgba(255,255,255,0)" />
+          <stop offset="75%" stopColor="rgba(0,0,0,0.08)" />
+          <stop offset="100%" stopColor="rgba(255,255,255,0.22)" />
         </linearGradient>
-        <linearGradient id="wm-pole" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#c9a24a" />
-          <stop offset="50%" stopColor="#f4d98b" />
-          <stop offset="100%" stopColor="#a67c22" />
+        <linearGradient id="wm2-pole" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#b8b8c0" />
+          <stop offset="45%" stopColor="#f2f2f7" />
+          <stop offset="100%" stopColor="#8f8f99" />
         </linearGradient>
+        {/* Clip so the chakra + sheen stay inside the waving cloth shape. */}
+        <clipPath id="wm2-cloth">
+          <path d="M8,4 C20,1 34,7 52,3 L52,33 C34,37 20,31 8,34 Z" />
+        </clipPath>
       </defs>
 
       {/* Pole */}
-      <rect x="2" y="2" width="3.2" height="40" rx="1.6" fill="url(#wm-pole)" />
-      <circle cx="3.6" cy="2.4" r="2.4" fill="#f4d98b" stroke="#a67c22" strokeWidth="0.5" />
+      <rect x="4" y="3" width="3.4" height="42" rx="1.7" fill="url(#wm2-pole)" />
+      <circle cx="5.7" cy="3" r="2.6" fill="#f2f2f7" stroke="#8f8f99" strokeWidth="0.5" />
 
-      {/* Flag cloth — a gentle wave via a single rounded rect group skewed by
-          the band paths. Three stacked bands + Ashoka Chakra. */}
-      <g transform="translate(6.5,4)">
-        <rect x="0" y="0" width="43" height="11" fill="url(#wm-saffron)" />
-        <rect x="0" y="11" width="43" height="11" fill="url(#wm-white)" />
-        <rect x="0" y="22" width="43" height="11" fill="url(#wm-green)" />
+      {/* Waving cloth group (animated) */}
+      <g className="wm-flag-cloth">
+        <g clipPath="url(#wm2-cloth)">
+          {/* Three bands sized to the cloth bbox (y 1..37 → ~12 each) */}
+          <rect x="8" y="0" width="44" height="13" fill="url(#wm2-saffron)" />
+          <rect x="8" y="13" width="44" height="12" fill="url(#wm2-white)" />
+          <rect x="8" y="25" width="44" height="13" fill="url(#wm2-green)" />
 
-        {/* Ashoka Chakra */}
-        <g transform="translate(21.5,16.5)" stroke="#0a3d91" strokeWidth="0.7" fill="none">
-          <circle r="4.4" />
-          <circle r="0.9" fill="#0a3d91" stroke="none" />
-          {Array.from({ length: 24 }).map((_, i) => {
-            const a = (i * Math.PI * 2) / 24;
-            return (
-              <line
-                key={i}
-                x1={Math.cos(a) * 0.9}
-                y1={Math.sin(a) * 0.9}
-                x2={Math.cos(a) * 4.4}
-                y2={Math.sin(a) * 4.4}
-              />
-            );
-          })}
+          {/* Ashoka Chakra */}
+          <g transform="translate(30,18.5)" stroke="#0a3d91" strokeWidth="0.7" fill="none">
+            <circle r="4.6" />
+            <circle r="1" fill="#0a3d91" stroke="none" />
+            {Array.from({ length: 24 }).map((_, i) => {
+              const a = (i * Math.PI * 2) / 24;
+              return (
+                <line
+                  key={i}
+                  x1={Math.cos(a) * 1}
+                  y1={Math.sin(a) * 1}
+                  x2={Math.cos(a) * 4.6}
+                  y2={Math.sin(a) * 4.6}
+                />
+              );
+            })}
+          </g>
+
+          {/* Diagonal sheen for the 3D feel */}
+          <rect x="8" y="0" width="44" height="38" fill="url(#wm2-sheen)" />
         </g>
-
-        {/* Sheen overlay for the 3D sheen/wave feel */}
-        <rect x="0" y="0" width="43" height="33" fill="url(#wm-sheen)" />
+        {/* Subtle outline on the cloth edge */}
+        <path
+          d="M8,4 C20,1 34,7 52,3 L52,33 C34,37 20,31 8,34 Z"
+          fill="none"
+          stroke="rgba(16,24,40,0.12)"
+          strokeWidth="0.6"
+        />
       </g>
     </svg>
   );
