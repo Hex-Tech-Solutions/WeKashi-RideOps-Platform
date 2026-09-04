@@ -53,6 +53,7 @@ import Terms from "./pages/legal/Terms";
 
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { MadeInIndiaWatermark } from "@/components/MadeInIndiaWatermark";
 
 const queryClient = new QueryClient();
 
@@ -117,6 +118,8 @@ const App = () => (
 
             <Route path="*" element={<NotFound />} />
           </Routes>
+          {/* Global watermark — renders on every page across all roles. */}
+          <MadeInIndiaWatermark />
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
