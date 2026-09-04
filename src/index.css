@@ -95,6 +95,15 @@
   }
   html, body {
     font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+    /* Nothing on the page ever needs to scroll horizontally at the document
+       level — every legitimate wide element (tables, the route map, etc.)
+       already scrolls internally. Without this, any descendant anywhere on
+       any page that's even a few pixels wider than the viewport (an unwrapped
+       row, a long address string, a fixed-width child) pushes the WHOLE
+       document wider, which is why popups appeared to render "cut off with a
+       page scrollbar underneath" — the browser was centering fixed-position
+       dialogs against a viewport that had grown past the visible screen. */
+    overflow-x: hidden;
   }
   body {
     @apply bg-background text-foreground;

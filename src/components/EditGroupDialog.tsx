@@ -210,10 +210,10 @@ export function EditGroupDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {template?.name}
-              <Badge variant="outline" className="capitalize text-[10px] py-0">{type}</Badge>
-              {dirty && <Badge className="bg-gold/20 text-gold-dark text-[10px] py-0">unsaved changes</Badge>}
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
+              <span className="truncate">{template?.name}</span>
+              <Badge variant="outline" className="capitalize text-[10px] py-0 shrink-0">{type}</Badge>
+              {dirty && <Badge className="bg-gold/20 text-gold-dark text-[10px] py-0 shrink-0">unsaved changes</Badge>}
             </DialogTitle>
           </DialogHeader>
 
