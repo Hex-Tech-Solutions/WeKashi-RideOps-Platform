@@ -39,7 +39,9 @@ import {
 } from "@/lib/geo";
 import { evaluateEscortPolicy } from "@/lib/escortPolicy";
 import { EmployeeList, type UIEmployee } from "@/pages/supervisor/Routes";
-import { Loader2, Plus, Save, ArrowRight, Trash2, AlertTriangle, ShieldCheck, Shield, Clock } from "lucide-react";
+import { RoutePreviewMap } from "@/components/RoutePreviewMap";
+import type { RouteLeg } from "@/lib/queries";
+import { Loader2, Plus, Save, ArrowRight, Trash2, AlertTriangle, ShieldCheck, Shield, Clock, ChevronUp, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -115,10 +117,15 @@ export function EditGroupDialog({
   }, [selected, customStops, type, dropNode]);
 
   const [serverRoute, setServerRoute] = useState<RouteResult | null>(null);
+  const [serverPolyline, setServerPolyline] = useState<string | null>(null);
+  // Real per-leg driving distance/duration from the backend, keyed by empId —
+  // replaces the Haversine straight-line estimate that was here before.
+  const [legByEmp, setLegByEmp] = useState<Record<string, RouteLeg>>({});
+  const [officeLeg, setOfficeLeg] = useState<RouteLeg | null>(null);
 
   useEffect(() => {
     if (!open || !template) return;
-    if (!selected.length) { setServerRoute(null); return; }
+    if (!selected.length) { setServerRoute(null); setServerPolyline(null); setLegByEmp({}); setOfficeLeg(null); return; }
 
     const manualOrder = customStops && customStops.length ? customStops : null;
     const stopsForRequest = (manualOrder ?? fallbackRoute.stops).map((s) => ({
@@ -136,8 +143,18 @@ export function EditGroupDialog({
           const ordered = result.stops.map((rs) => byId.get(rs.empId)).filter((s): s is RouteStop => !!s);
           const built = buildResult(ordered, dropNode, type);
           setServerRoute({ ...built, totalKm: result.totalDistanceKm || built.totalKm, etaMin: result.etaMin || built.etaMin });
+          setServerPolyline(result.encodedPolyline);
+
+          // Map real per-leg values back to each stop. result.stops and
+          // result.legs are both in final order, so index i lines up.
+          const legMap: Record<string, RouteLeg> = {};
+          result.stops.forEach((rs, i) => {
+            if (result.legs[i]) legMap[rs.empId] = result.legs[i];
+          });
+          setLegByEmp(legMap);
+          setOfficeLeg(result.officeLeg);
         },
-        onError: () => { if (!cancelled) setServerRoute(null); },
+        onError: () => { if (!cancelled) { setServerRoute(null); setServerPolyline(null); setLegByEmp({}); setOfficeLeg(null); } },
       },
     );
     return () => { cancelled = true; };
@@ -155,6 +172,16 @@ export function EditGroupDialog({
     setSelectedIds((ids) => ids.filter((x) => x !== empId));
     setCustomStops((cs) => cs?.filter((s) => s.empId !== empId));
     setPickupTimes((pt) => { const { [empId]: _drop, ...rest } = pt; return rest; });
+  };
+
+  // Manual reorder — locks the current sequence into customStops so the next
+  // optimize call preserves it (optimize:false) rather than re-sorting.
+  const reorderStops = (from: number, to: number) => {
+    if (to < 0 || to >= route.stops.length) return;
+    const arr = [...route.stops];
+    const [moved] = arr.splice(from, 1);
+    arr.splice(to, 0, moved);
+    setCustomStops(arr);
   };
 
   // ── Same validation Routes.tsx Step 1→2 and Step 2→3 gate on ────────────────
@@ -292,33 +319,68 @@ export function EditGroupDialog({
                 </div>
               )}
 
-              {/* ── Dense table — this replaces the map + stop-list combo ──── */}
+              {/* Live route map — redraws on every reorder / add / remove. */}
+              {route.stops.length > 0 && (
+                <RoutePreviewMap route={route} type={type} polyline={serverPolyline} />
+              )}
+
+              {/* ── Dense table — this replaces the stacked stop-list cards ── */}
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/50 text-[10px] uppercase tracking-wide text-muted-foreground">
                     <tr>
-                      <th className="text-left font-medium px-2 py-1.5 w-6">#</th>
+                      <th className="text-left font-medium px-1 py-1.5 w-10">#</th>
                       <th className="text-left font-medium px-2 py-1.5">Employee</th>
-                      <th className="text-left font-medium px-2 py-1.5 w-14">Gender</th>
+                      <th className="text-left font-medium px-2 py-1.5 w-12">Gen</th>
                       <th className="text-left font-medium px-2 py-1.5">Pickup point</th>
                       <th className="text-left font-medium px-2 py-1.5 w-24">
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Time</span>
                       </th>
-                      <th className="text-right font-medium px-2 py-1.5 w-14">KM</th>
+                      <th className="text-right font-medium px-2 py-1.5 w-12">KM</th>
                       <th className="w-8" />
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {route.stops.map((s, i) => {
-                      const prevPoint = i === 0 ? dropNode.point : route.stops[i - 1].point;
-                      const legKm = Math.round(distanceKm(prevPoint, s.point) * 10) / 10;
+                      // Real driving distance for the leg reaching this stop,
+                      // from the backend Routes API. Falls back to Haversine
+                      // only while that result is still loading, so the column
+                      // is never blank.
+                      const realLeg = legByEmp[s.empId];
+                      const legKm = realLeg
+                        ? realLeg.distanceKm
+                        : Math.round(distanceKm(i === 0 ? dropNode.point : route.stops[i - 1].point, s.point) * 10) / 10;
                       const outside = pickupTimeWindow && pickupTimes[s.empId]
                         ? !isWithinPickupWindow(pickupTimes[s.empId], pickupTimeWindow)
                         : false;
                       return (
                         <tr key={s.empId} className="hover:bg-muted/30">
-                          <td className="px-2 py-1.5 text-muted-foreground">{i + 1}</td>
-                          <td className="px-2 py-1.5 font-medium max-w-[140px] truncate">{s.name}</td>
+                          <td className="px-1 py-1.5">
+                            <div className="flex items-center gap-0.5">
+                              <div className="flex flex-col">
+                                <button
+                                  type="button"
+                                  disabled={i === 0}
+                                  onClick={() => reorderStops(i, i - 1)}
+                                  className="text-muted-foreground hover:text-gold-dark disabled:opacity-25 leading-none"
+                                  aria-label="Move up"
+                                >
+                                  <ChevronUp className="h-3 w-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={i === route.stops.length - 1}
+                                  onClick={() => reorderStops(i, i + 1)}
+                                  className="text-muted-foreground hover:text-gold-dark disabled:opacity-25 leading-none"
+                                  aria-label="Move down"
+                                >
+                                  <ChevronDown className="h-3 w-3" />
+                                </button>
+                              </div>
+                              <span className="text-muted-foreground">{i + 1}</span>
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5 font-medium max-w-[130px] truncate">{s.name}</td>
                           <td className="px-2 py-1.5">
                             {s.gender === "F" ? (
                               <Badge variant="outline" className="border-gold/40 bg-gold-soft text-gold-dark text-[10px] py-0">F</Badge>
@@ -326,7 +388,7 @@ export function EditGroupDialog({
                               <span className="text-muted-foreground">M</span>
                             )}
                           </td>
-                          <td className="px-2 py-1.5 text-muted-foreground max-w-[220px] truncate" title={s.location}>
+                          <td className="px-2 py-1.5 text-muted-foreground max-w-[200px] truncate" title={s.location}>
                             {s.location}
                           </td>
                           <td className="px-2 py-1.5">
@@ -364,13 +426,17 @@ export function EditGroupDialog({
                   {route.stops.length > 0 && (
                     <tfoot className="bg-foreground/5 border-t-2 border-foreground/20">
                       <tr>
-                        <td className="px-2 py-1.5" />
+                        <td className="px-1 py-1.5" />
                         <td className="px-2 py-1.5 font-semibold" colSpan={3}>
-                          Drop: {dropNode.name}
+                          {type === "logout" ? "Start" : "Drop"}: {dropNode.name}
                         </td>
                         <td className="px-2 py-1.5" />
                         <td className="px-2 py-1.5 text-right font-semibold whitespace-nowrap">
-                          {Math.round(distanceKm(route.stops[route.stops.length - 1].point, dropNode.point) * 10) / 10}
+                          {officeLeg
+                            ? officeLeg.distanceKm
+                            : type === "login"
+                            ? Math.round(distanceKm(route.stops[route.stops.length - 1].point, dropNode.point) * 10) / 10
+                            : "—"}
                         </td>
                         <td />
                       </tr>

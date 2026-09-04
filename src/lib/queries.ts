@@ -403,11 +403,22 @@ export interface OptimizedStop extends OptimizeRouteStopInput {
   seq: number;
 }
 
+export interface RouteLeg {
+  /** Real driving distance for the leg reaching this stop, in km. */
+  distanceKm: number;
+  /** Traffic-aware duration for the leg reaching this stop, in minutes. */
+  durationMin: number;
+}
+
 export interface OptimizeRouteResult {
   stops: OptimizedStop[];
   totalDistanceKm: number;
   etaMin: number;
   encodedPolyline: string | null;
+  /** Per-leg real driving distance/duration, one entry per stop in final order. */
+  legs: RouteLeg[];
+  /** Drive into the office (login only; null for logout). */
+  officeLeg: RouteLeg | null;
 }
 
 /**

@@ -30,12 +30,31 @@ export interface OptimizedStop extends OptimizeStopInput {
   seq: number;
 }
 
+export interface RouteLeg {
+  /** Real driving distance for this leg, in km (1 decimal). */
+  distanceKm: number;
+  /** Traffic-aware duration for this leg, in minutes. */
+  durationMin: number;
+}
+
 export interface OptimizeRouteResult {
   stops: OptimizedStop[];
   totalDistanceKm: number;
   /** Traffic-aware total duration, in minutes. */
   etaMin: number;
   encodedPolyline: string | null;
+  /**
+   * Per-leg real driving distance/duration, one entry per stop in FINAL
+   * order — the drive that REACHES stops[i]. For login, stops[0] is the start
+   * so its leg is 0. Empty if the Routes API call failed.
+   */
+  legs: RouteLeg[];
+  /**
+   * The drive INTO the office. Present for login (office is the final
+   * destination); null for logout (office is the start, so nothing drives
+   * into it). Lets the caller show the final "→ office" distance.
+   */
+  officeLeg: RouteLeg | null;
 }
 
 /**
@@ -89,7 +108,7 @@ export async function optimizeRouteOrder(
   optimize = true,
 ): Promise<OptimizeRouteResult> {
   if (stops.length === 0) {
-    return { stops: [], totalDistanceKm: 0, etaMin: 0, encodedPolyline: null };
+    return { stops: [], totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null };
   }
 
   if (!optimize) {
@@ -118,7 +137,7 @@ export async function optimizeRouteOrder(
     logger.error({ err }, 'computeRouteMatrix failed — falling back to submitted order');
     // Fail-safe: keep the order the caller submitted rather than blocking booking entirely.
     const fallbackOrdered = stops.map((s, i) => ({ ...s, seq: i }));
-    return { stops: fallbackOrdered, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null };
+    return { stops: fallbackOrdered, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null };
   }
 
   // ── Step 2: nearest-neighbour ordering using real durations ──────────────
@@ -159,14 +178,46 @@ async function computeFixedOrderRoute(
       destination: { location: destination },
       intermediates: intermediates.map((p) => ({ location: p })),
     });
+
+    // Map Google's legs (in origin→…→destination order) to one entry per
+    // ordered stop — "the drive that reaches this stop".
+    //
+    // Logout: origin is the OFFICE, so route.legs[i] arrives at
+    //   orderedStops[i]. Direct 1:1 mapping.
+    // Login:  origin is the FIRST home (orderedStops[0]) and the office is the
+    //   final destination, so route.legs[0] arrives at orderedStops[1], and
+    //   the last leg arrives at the office. orderedStops[0] has no inbound
+    //   leg (it's the start), so its distance is 0.
+    const legsRaw = route.legs ?? [];
+    const toLeg = (l: { distanceMeters: number; durationSeconds: number } | undefined): RouteLeg =>
+      l ? { distanceKm: Math.round((l.distanceMeters / 1000) * 10) / 10, durationMin: Math.round(l.durationSeconds / 60) }
+        : { distanceKm: 0, durationMin: 0 };
+
+    let legs: RouteLeg[];
+    let officeLeg: RouteLeg | null;
+    if (type === 'logout') {
+      // Office is the start. legsRaw[i] reaches orderedStops[i]. No drive into
+      // the office (it's where we started).
+      legs = orderedStops.map((_, i) => toLeg(legsRaw[i]));
+      officeLeg = null;
+    } else {
+      // Login: legsRaw = [home0→home1, …, homeN-1→office]. Stop 0 is the start
+      // (no inbound leg); stop i (i≥1) is reached by legsRaw[i-1]; the final
+      // raw leg drives into the office.
+      legs = orderedStops.map((_, i) => (i === 0 ? toLeg(undefined) : toLeg(legsRaw[i - 1])));
+      officeLeg = legsRaw.length ? toLeg(legsRaw[legsRaw.length - 1]) : null;
+    }
+
     return {
       stops: orderedStops,
       totalDistanceKm: Math.round((route.distanceMeters / 1000) * 10) / 10,
       etaMin: Math.round(route.durationSeconds / 60),
       encodedPolyline: route.encodedPolyline,
+      legs,
+      officeLeg,
     };
   } catch (err) {
     logger.error({ err }, 'computeRoute (fixed order) failed — returning order without distance/polyline');
-    return { stops: orderedStops, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null };
+    return { stops: orderedStops, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null };
   }
 }
