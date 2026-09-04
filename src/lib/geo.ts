@@ -179,4 +179,51 @@ export function buildResult(ordered: RouteStop[], drop: { name: string; point: G
   };
 }
 
+// ─── Shift-time / pickup-time-window helpers ──────────────────────────────────
+// Shared between Routes.tsx (Step 2) and EditGroupDialog, so the women's-safety
+// time-window check can never drift between the two places it's enforced.
+
+// Shift times are HH:MM strings — compare as minutes-since-midnight.
+export function toMinutes(hhmm: string): number | null {
+  if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/** Add/subtract minutes from an HH:MM string, wrapping around midnight. */
+export function addMinutes(hhmm: string, delta: number): string {
+  const base = toMinutes(hhmm) ?? 0;
+  const total = ((base + delta) % 1440 + 1440) % 1440;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+export interface PickupTimeWindow { min: string; max: string }
+
+/**
+ * Login:  stop pickup time must be within 3 hours BEFORE the shift start time.
+ * Logout: stop pickup time (driver picks everyone up AT the office) must be AT
+ *         or up to 1 hour AFTER the shift end time.
+ */
+export function computePickupTimeWindow(
+  groupShiftTime: string | null,
+  type: "login" | "logout",
+): PickupTimeWindow | null {
+  if (!groupShiftTime) return null;
+  return type === "logout"
+    ? { min: groupShiftTime, max: addMinutes(groupShiftTime, 60) }
+    : { min: addMinutes(groupShiftTime, -180), max: groupShiftTime };
+}
+
+export function isWithinPickupWindow(hhmm: string | null | undefined, window: PickupTimeWindow | null): boolean {
+  if (!hhmm || !window) return true; // no shift time known yet — can't validate
+  const t = toMinutes(hhmm);
+  const min = toMinutes(window.min);
+  const max = toMinutes(window.max);
+  if (t == null || min == null || max == null) return true;
+  if (min <= max) return t >= min && t <= max;
+  return t >= min || t <= max; // window wraps past midnight
+}
+
 // Note: suggestPrice and listPickupOptions removed — use computeFare() from pricing.ts instead.

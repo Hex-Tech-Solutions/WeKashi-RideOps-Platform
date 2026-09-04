@@ -11,7 +11,11 @@ import {
   useOfficeLocations, useOptimizeRoute,
   type CreateRidePayload, type OfficeLocationRow,
 } from "@/lib/queries";
-import { optimizeStops, buildResult, coordPoint, getPoint, DROP, type RouteStop, type RouteResult, type GeoPoint } from "@/lib/geo";
+import {
+  optimizeStops, buildResult, coordPoint, getPoint, DROP,
+  toMinutes, addMinutes, computePickupTimeWindow, isWithinPickupWindow,
+  type RouteStop, type RouteResult, type GeoPoint,
+} from "@/lib/geo";
 import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS, type VehicleType } from "@/lib/pricing";
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -35,22 +39,6 @@ export interface UIEmployee {
   companyLabel?: string | null;
   pickupLat?: number | null; pickupLng?: number | null; dropLat?: number | null; dropLng?: number | null;
 }
-
-// Shift times are HH:MM strings — compare as minutes-since-midnight.
-const toMinutes = (hhmm: string): number | null => {
-  if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
-  const [h, m] = hhmm.split(":").map(Number);
-  return h * 60 + m;
-};
-
-/** Add/subtract minutes from an HH:MM string, wrapping around midnight. */
-const addMinutes = (hhmm: string, delta: number): string => {
-  const base = toMinutes(hhmm) ?? 0;
-  const total = ((base + delta) % 1440 + 1440) % 1440;
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-};
 
 const pt = (p: GeoPoint) => ({ lat: p.lat, lng: p.lng });
 const capFor = (n: number) => (n <= 4 ? 4 : n <= 6 ? 6 : 7);
@@ -130,6 +118,13 @@ export default function RoutesPage() {
     presetType?: "login" | "logout";
     presetVehicleType?: string;
     presetOfficeLocationId?: string;
+    /** Per-stop pickup times already set in EditGroupDialog — carried over so
+     *  the women's-safety window check doesn't have to be redone here. */
+    presetPickupTimes?: Record<string, string>;
+    /** EditGroupDialog already ran the same shift-mismatch / time-window /
+     *  escort validation before allowing hand-off, so it's safe to land
+     *  directly on Step 3 (vehicle + fare + broadcast) instead of Step 2. */
+    presetStep?: 1 | 2 | 3;
   } | null;
 
   useEffect(() => {
@@ -138,13 +133,13 @@ export default function RoutesPage() {
     if (presetState.presetType) setType(presetState.presetType);
     setCustomStops(undefined);
     setOfficeOverride(null);
-    setPickupTimes({});
+    setPickupTimes(presetState.presetPickupTimes ?? {});
     setFareAdjustment(null);
     setPlannedPickupTime("");
     lastAutoFilled.current = null;
     if (presetState.presetOfficeLocationId) setSelectedOfficeId(presetState.presetOfficeLocationId);
     if (presetState.presetVehicleType) setVehicleType(presetState.presetVehicleType as VehicleType);
-    setStep(2);
+    setStep(presetState.presetStep ?? 2);
     // Clear the router state so a page refresh or back-navigation doesn't
     // silently reapply a stale preset.
     nav("/supervisor/routes", { replace: true });
@@ -471,27 +466,13 @@ export default function RoutesPage() {
   // Logout: stop pickup time (driver picks everyone up AT the office) must be
   //         AT or up to 1 hour AFTER the shift end time (e.g. shift 18:30 ->
   //         window 18:30–19:30) — can't leave before the shift has ended.
-  const pickupTimeWindow = useMemo(() => {
-    if (!groupShiftTime) return null;
-    return type === "logout"
-      ? { min: groupShiftTime, max: addMinutes(groupShiftTime, 60) }
-      : { min: addMinutes(groupShiftTime, -180), max: groupShiftTime };
-  }, [groupShiftTime, type]);
-
-  const isWithinPickupWindow = (hhmm: string | null | undefined): boolean => {
-    if (!hhmm || !pickupTimeWindow) return true; // no shift time known yet — can't validate
-    const t = toMinutes(hhmm);
-    const min = toMinutes(pickupTimeWindow.min);
-    const max = toMinutes(pickupTimeWindow.max);
-    if (t == null || min == null || max == null) return true;
-    // Window can wrap past midnight (e.g. login shift 06:00 -> window 02:00-03:00 same day, fine;
-    // but a shift at 01:00 -> window 21:00-22:00 the PREVIOUS day — handle wraparound).
-    if (min <= max) return t >= min && t <= max;
-    return t >= min || t <= max; // wrapped window
-  };
+  const pickupTimeWindow = useMemo(
+    () => computePickupTimeWindow(groupShiftTime, type),
+    [groupShiftTime, type],
+  );
 
   const stopsOutsideWindow = pickupTimeWindow
-    ? route.stops.filter((s) => pickupTimes[s.empId] && !isWithinPickupWindow(pickupTimes[s.empId]))
+    ? route.stops.filter((s) => pickupTimes[s.empId] && !isWithinPickupWindow(pickupTimes[s.empId], pickupTimeWindow))
     : [];
   const timeOutsideWindow = stopsOutsideWindow.length > 0;
 
@@ -508,7 +489,11 @@ export default function RoutesPage() {
   // last value we auto-filled — that counts as an intentional override.
   const lastAutoFilled = useRef<string | null>(null);
   useEffect(() => {
-    if (step !== 2 || !groupShiftTime) return;
+    // Runs on Step 2 or 3 — EditGroupDialog can hand off directly to Step 3
+    // (skipping the route-review screen), and this auto-fill must still run
+    // there, or "Shift / pickup time" is left showing "Not set" with a
+    // "go back to Step 2" hint that no longer makes sense.
+    if (step < 2 || !groupShiftTime) return;
     const wasAutoFilled = plannedPickupTime === "" || plannedPickupTime === lastAutoFilled.current;
     if (wasAutoFilled && plannedPickupTime !== groupShiftTime) {
       setPlannedPickupTime(groupShiftTime);
