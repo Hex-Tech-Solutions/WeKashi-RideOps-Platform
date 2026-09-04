@@ -346,8 +346,18 @@ export function EditGroupDialog({
                       // from the backend Routes API. Falls back to Haversine
                       // only while that result is still loading, so the column
                       // is never blank.
+                      //
+                      // For a LOGIN ride the first pickup is the route's start
+                      // point — nothing drives to it — so its leg distance is
+                      // genuinely 0. Rendering "0" there looks like a bug, so
+                      // show a "start" marker instead. Logout rides start at
+                      // the office, so stop 0 has a real inbound distance and
+                      // is shown normally.
+                      const isLoginStart = type === "login" && i === 0;
                       const realLeg = legByEmp[s.empId];
-                      const legKm = realLeg
+                      const legKm = isLoginStart
+                        ? null
+                        : realLeg
                         ? realLeg.distanceKm
                         : Math.round(distanceKm(i === 0 ? dropNode.point : route.stops[i - 1].point, s.point) * 10) / 10;
                       const outside = pickupTimeWindow && pickupTimes[s.empId]
@@ -401,7 +411,13 @@ export function EditGroupDialog({
                               )}
                             />
                           </td>
-                          <td className="px-2 py-1.5 text-right whitespace-nowrap">{legKm}</td>
+                          <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                            {legKm === null ? (
+                              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">start</span>
+                            ) : (
+                              legKm
+                            )}
+                          </td>
                           <td className="px-1 py-1.5 text-center">
                             <button
                               type="button"
