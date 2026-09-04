@@ -41,7 +41,9 @@ export function DriverAccountPanel({
   onOpenChange: (o: boolean) => void;
 }) {
   const [section, setSection] = useState<Section>("profile");
-  const [collapsed, setCollapsed] = useState(false);
+  // Default to the icon rail so the content pane gets the width — matters on a
+  // phone where the drawer is only ~max-w-md wide. Driver can expand for labels.
+  const [collapsed, setCollapsed] = useState(true);
   const { session } = useDriverAuth();
   const { data: me } = useDriverMe();
   const kycExpired = me?.kycStatus === "expired";
@@ -52,17 +54,23 @@ export function DriverAccountPanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="left"
-        className="p-0 w-full max-w-md sm:max-w-md flex flex-row gap-0"
+        className={cn(
+          "p-0 w-full flex flex-row gap-0 transition-[max-width] duration-200",
+          collapsed ? "max-w-md" : "max-w-xl",
+        )}
       >
         {/* Left rail — collapsible nav */}
         <div
           className={cn(
             "bg-sidebar text-sidebar-foreground flex flex-col border-r border-sidebar-border shrink-0 transition-[width] duration-200",
-            collapsed ? "w-[64px]" : "w-40",
+            collapsed ? "w-[60px]" : "w-44",
           )}
         >
           <div className={cn("h-14 flex items-center border-b border-sidebar-border", collapsed ? "justify-center px-0" : "px-4")}>
-            {!collapsed && <span className="font-semibold text-white text-sm">Account</span>}
+            <div className="h-8 w-8 rounded-lg bg-gold flex items-center justify-center shrink-0">
+              <User className="h-4 w-4 text-gold-foreground" />
+            </div>
+            {!collapsed && <span className="font-semibold text-white text-sm ml-2 truncate">Account</span>}
           </div>
 
           <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
