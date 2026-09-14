@@ -44,9 +44,6 @@ export const AC_SURCHARGE = 100;
 /** Manual fare top-up options the supervisor can pick at booking time (₹). */
 export const FARE_ADJUSTMENT_OPTIONS = [50, 75, 100, 125, 150] as const;
 
-/** Platform fee added on top of driver fare — shown to supervisor, kept by platform */
-export const PLATFORM_FEE = 20;
-
 /** Minimum fare floor — no ride is priced below this regardless of distance */
 export const MINIMUM_FARE = 500;
 
@@ -60,58 +57,9 @@ export function escortCharge(driverFare: number): number {
   return Math.round(driverFare * ESCORT_CHARGE_RATE * 100) / 100;
 }
 
-// ── Driver scheduled-ride release policy ──────────────────────────────────────
-//
-// The fine is based on how much NOTICE the driver gives before the scheduled
-// pickup — not how long they held the ride. Releasing a ride 3 days out costs
-// nothing however long it was held; bailing an hour before pickup is what
-// actually hurts, because there's no time to re-fill the slot.
-
-/** Release this many hours (or more) before the scheduled pickup — no fine. */
-export const RELEASE_FREE_NOTICE_HOURS = 24;
-
-/** Released inside the free-notice window, but before the ride time. */
-export const RELEASE_LATE_FINE = 100;
-
-/** Released after the scheduled pickup time has already passed. */
-export const RELEASE_AFTER_START_FINE = 200;
-
-/** Driver held the ride and never showed — swept by sweepStaleScheduledRides. */
-export const SCHEDULED_NO_SHOW_FINE = 300;
-
-/**
- * Driver dropped an already-accepted immediate ride AFTER confirming arrival.
- *
- * Dropping before arrival is free: an early, honest release lets the ride be
- * re-broadcast while there is still time to fill it. Once the driver has marked
- * themselves at the pickup, the supervisor believes the cab is there and has
- * stopped looking for alternatives, so bailing then is what causes real harm.
- */
-export const DRIVER_DROP_AFTER_ARRIVAL_FINE = 150;
-
-export type ReleaseFineOutcome = {
-  fine: number;
-  /** Machine-readable bucket, also used as the DriverFine.reason value. */
-  bucket: 'free_notice' | 'late_notice' | 'after_start';
-  hoursNotice: number;
-};
-
-/**
- * Work out the fine for releasing a claimed scheduled ride.
- * `scheduledFor` is the ride's pickup time; `now` is injectable for tests.
- */
-export function releaseFine(scheduledFor: Date, now: Date = new Date()): ReleaseFineOutcome {
-  const msNotice = scheduledFor.getTime() - now.getTime();
-  const hoursNotice = Math.round((msNotice / 3_600_000) * 10) / 10;
-
-  if (msNotice < 0) {
-    return { fine: RELEASE_AFTER_START_FINE, bucket: 'after_start', hoursNotice };
-  }
-  if (msNotice >= RELEASE_FREE_NOTICE_HOURS * 3_600_000) {
-    return { fine: 0, bucket: 'free_notice', hoursNotice };
-  }
-  return { fine: RELEASE_LATE_FINE, bucket: 'late_notice', hoursNotice };
-}
+// Driver fine policy removed: releasing/dropping/no-showing a ride no longer
+// incurs any penalty. Broadcast eligibility is now gated by ride credits
+// instead (see creditPack.service.ts).
 
 /**
  * Base distance fare: whole distance billed at the slab rate it falls into.

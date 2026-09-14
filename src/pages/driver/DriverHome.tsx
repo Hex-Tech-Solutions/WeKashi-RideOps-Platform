@@ -338,8 +338,7 @@ export default function DriverHome() {
       </div>
 
       {/* Drop-ride dialog — a reason is required so the supervisor and support
-          have something concrete on record, and the fine (if any) is stated
-          plainly before the driver commits. */}
+          have something concrete on record before the driver commits. */}
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
@@ -349,20 +348,8 @@ export default function DriverHome() {
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground leading-relaxed">
               The ride goes back to other drivers nearby, so the employees still get
-              picked up.
+              picked up. There's no penalty for releasing a ride.
             </p>
-
-            {active && arrivedRideIds.has(active.id) ? (
-              <div className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[11px] text-destructive leading-relaxed">
-                You've already confirmed arrival, so a <strong>₹150 fine</strong> applies —
-                the supervisor was expecting the cab to be there.
-              </div>
-            ) : (
-              <div className="rounded-md border border-success/40 bg-success/5 px-2.5 py-2 text-[11px] text-success leading-relaxed">
-                No fine — you haven't confirmed arrival yet, so there's still time to
-                find another driver.
-              </div>
-            )}
 
             <Input
               value={cancelReason}
@@ -380,12 +367,8 @@ export default function DriverHome() {
                 driverCancel.mutate(
                   { rideId: active.id, reason: cancelReason.trim() },
                   {
-                    onSuccess: (r) => {
-                      toast.success(
-                        r.fine > 0
-                          ? `Ride released. ₹${r.fine} fine applied.`
-                          : "Ride released — no fine.",
-                      );
+                    onSuccess: () => {
+                      toast.success("Ride released");
                       setCancelOpen(false);
                       setAllBoarded(false);
                     },

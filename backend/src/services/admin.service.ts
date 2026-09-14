@@ -235,3 +235,53 @@ export async function reviewRegistrationRequest(
   logger.info({ id, role: req.role, email: req.email }, 'Registration request approved — account created');
   return { status: 'approved', email: req.email };
 }
+
+// ─── Pack sales (revenue visibility) ─────────────────────────────────────────
+
+/**
+ * Pack-sales report over an optional date range (Req 15). Returns each paid
+ * pack purchase (driver, pack, amount, Razorpay order id, timestamp) plus
+ * aggregate revenue and count for the period.
+ */
+export async function packSalesReport(from?: Date, to?: Date) {
+  const where: {
+    status: string;
+    paidAt?: { gte?: Date; lte?: Date };
+  } = { status: 'paid' };
+  if (from || to) {
+    where.paidAt = {};
+    if (from) where.paidAt.gte = from;
+    if (to) where.paidAt.lte = to;
+  }
+
+  const orders = await prisma.packOrder.findMany({
+    where,
+    orderBy: { paidAt: 'desc' },
+    include: { driver: { select: { id: true, fullName: true, phone: true } } },
+  });
+
+  const rows = orders.map((o) => ({
+    id: o.id,
+    driverId: o.driverId,
+    driverName: o.driver?.fullName ?? null,
+    driverPhone: o.driver?.phone ?? null,
+    packKey: o.packKey,
+    credits: o.credits,
+    amount: o.amount,
+    razorpayOrderId: o.razorpayOrderId,
+    razorpayPaymentId: o.razorpayPaymentId,
+    paidAt: o.paidAt,
+  }));
+
+  const totalRevenue = rows.reduce((sum, r) => sum + r.amount, 0);
+
+  return {
+    rows,
+    aggregates: {
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      packCount: rows.length,
+      from: from ?? null,
+      to: to ?? null,
+    },
+  };
+}

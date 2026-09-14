@@ -5,20 +5,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { usePendingPayments, type PendingPaymentRide } from "@/lib/queries";
 import { PayRideDialog } from "@/components/PayRideDialog";
-import { IndianRupee, Wallet, CheckCircle2, Loader2, Car } from "lucide-react";
+import { IndianRupee, CheckCircle2, Loader2, Car } from "lucide-react";
 
 export default function SupervisorPayments() {
   const { data, isLoading } = usePendingPayments();
   const [payRide, setPayRide] = useState<PendingPaymentRide | null>(null);
 
   const rides = data?.rides ?? [];
-  const total = rides.reduce((s, r) => s + (r.price ?? 0), 0);
+  const total = rides.reduce((s, r) => s + (r.amount ?? (r.price ?? 0) + (r.escortCharge ?? 0)), 0);
 
   return (
     <div>
       <PageHeader
         title="Payments"
-        description="Pay drivers for completed rides. Payments are processed via Razorpay."
+        description="Pay drivers directly for completed rides by scanning their UPI QR."
       />
 
       {isLoading && (
@@ -66,8 +66,8 @@ export default function SupervisorPayments() {
 
 function PaymentCard({ ride, onPay }: { ride: PendingPaymentRide; onPay: () => void }) {
   const driverFare  = ride.price ?? 0;
-  const platformFee = ride.platformFee ?? 20;
-  const totalAmount = ride.totalAmount ?? (driverFare + platformFee);
+  const escortFee   = ride.escortCharge ?? 0;
+  const totalAmount = ride.amount ?? ride.totalAmount ?? (driverFare + escortFee);
 
   return (
     <Card className="shadow-card border-warning/20 hover:border-warning/50 transition-colors">
@@ -99,9 +99,9 @@ function PaymentCard({ ride, onPay }: { ride: PendingPaymentRide; onPay: () => v
             </div>
             <div className="flex-1 min-w-0">
               <div className="font-medium truncate">{ride.driver.fullName}</div>
-              <div className={`flex items-center gap-1 mt-0.5 ${ride.driver.bankDetail?.upiId || ride.driver.bankDetail?.accountNo ? "text-success" : "text-warning"}`}>
+              <div className={`flex items-center gap-1 mt-0.5 ${ride.driver.upiVerified ? "text-success" : "text-warning"}`}>
                 <Car className="h-3 w-3 shrink-0" />
-                {ride.driver.bankDetail?.upiId || ride.driver.bankDetail?.accountNo ? "Bank details on file" : "No bank details — driver needs to add UPI/bank"}
+                {ride.driver.upiVerified ? "UPI on file" : "No payable UPI — driver needs to add one"}
               </div>
             </div>
           </div>
@@ -113,10 +113,12 @@ function PaymentCard({ ride, onPay }: { ride: PendingPaymentRide; onPay: () => v
             <span>Driver fare</span>
             <span>₹{driverFare.toLocaleString()}</span>
           </div>
-          <div className="flex justify-between text-muted-foreground">
-            <span>Platform fee</span>
-            <span>₹{platformFee.toLocaleString()}</span>
-          </div>
+          {escortFee > 0 && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>Escort charge</span>
+              <span>₹{escortFee.toLocaleString()}</span>
+            </div>
+          )}
           <div className="flex justify-between font-semibold border-t pt-1.5 text-sm">
             <span>You pay</span>
             <span className="flex items-center gap-0.5">

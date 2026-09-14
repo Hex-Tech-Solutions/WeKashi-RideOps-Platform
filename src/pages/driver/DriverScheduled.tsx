@@ -1,27 +1,19 @@
-import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useScheduledRides, useDriverRides, useClaimRide, useReleaseRide, type RideRow } from "@/lib/queries";
-import { MapPin, Users, IndianRupee, Calendar, Clock } from "lucide-react";
+import { MapPin, Users, IndianRupee, Calendar } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
-
-const GRACE_MS = 3 * 60 * 60 * 1000;
 
 export default function DriverScheduled() {
   const { data: mkt } = useScheduledRides();
   const { data: mine } = useDriverRides();
   const claim = useClaimRide();
   const release = useReleaseRide();
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t); }, []);
 
   const marketplace = mkt?.scheduled ?? [];
   const upcoming = (mine?.rides ?? []).filter((r) => r.status === "assigned" && r.scheduledFor);
-
-  const graceLeft = (r: RideRow) => (r.claimedAt ? r.claimedAt.length ? new Date(r.claimedAt).getTime() + GRACE_MS - now : 0 : 0);
-  const fmt = (ms: number) => { const m = Math.max(0, Math.floor(ms / 60000)); return `${Math.floor(m / 60)}h ${m % 60}m`; };
 
   return (
     <div className="px-4 py-4 space-y-5">
@@ -31,28 +23,20 @@ export default function DriverScheduled() {
           <Card><CardContent className="p-5 text-center text-sm text-muted-foreground">No upcoming scheduled rides.</CardContent></Card>
         ) : (
           <div className="space-y-3">
-            {upcoming.map((r) => {
-              const left = graceLeft(r);
-              const free = left > 0;
-              return (
-                <Card key={r.id} className="border-gold/40">
-                  <CardContent className="p-4 space-y-3">
-                    <SchedSummary ride={r} />
-                    <div className={`flex items-center gap-1.5 text-xs ${free ? "text-success" : "text-warning"}`}>
-                      <Clock className="h-3.5 w-3.5" />
-                      {free ? `Free cancellation: ${fmt(left)} left` : "Free window over — cancelling now costs ₹100"}
-                    </div>
-                    <Button variant="outline" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40" disabled={release.isPending}
-                      onClick={() => release.mutate(r.id, {
-                        onSuccess: (res: any) => (res?.fine ? toast.error(`Cancelled · ₹${res.fine} fine applied`) : toast.success("Cancelled — no fine (within free window)")),
-                        onError: (e: any) => toast.error(e?.message ?? "Failed"),
-                      })}>
-                      {free ? "Cancel ride (free)" : "Cancel ride (₹100 fine)"}
-                    </Button>
-                  </CardContent>
-                </Card>
-              );
-            })}
+            {upcoming.map((r) => (
+              <Card key={r.id} className="border-gold/40">
+                <CardContent className="p-4 space-y-3">
+                  <SchedSummary ride={r} />
+                  <Button variant="outline" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40" disabled={release.isPending}
+                    onClick={() => release.mutate(r.id, {
+                      onSuccess: () => toast.success("Ride released"),
+                      onError: (e: any) => toast.error(e?.message ?? "Failed"),
+                    })}>
+                    Release ride
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
       </section>

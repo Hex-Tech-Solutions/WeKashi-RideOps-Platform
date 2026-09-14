@@ -53,7 +53,7 @@ export function createApp(io: IoServer): express.Application {
   // does not reliably reproduce the exact bytes Razorpay signed. These two
   // paths are excluded from the global JSON parser; the payments router
   // applies express.raw() itself for those routes only.
-  const WEBHOOK_PATHS = new Set(['/api/payments/webhook', '/api/payments/payout-webhook']);
+  const WEBHOOK_PATHS = new Set(['/api/payments/webhook']);
   app.use((req, res, next) => {
     if (WEBHOOK_PATHS.has(req.path)) { next(); return; }
     express.json({ limit: '1mb' })(req, res, next);

@@ -10,10 +10,10 @@ import {
 } from '../types';
 import { logger } from '../lib/logger';
 import {
-  computeFare, type VehicleType, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS,
-  releaseFine, SCHEDULED_NO_SHOW_FINE, DRIVER_DROP_AFTER_ARRIVAL_FINE,
+  computeFare, type VehicleType, escortCharge, FARE_ADJUSTMENT_OPTIONS,
 } from '../lib/pricing';
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
+import { availableCredits, consumeOneCredit } from './creditPack.service';
 import { randomInt } from 'crypto';
 import type { Server as IoServer } from 'socket.io';
 
@@ -63,13 +63,9 @@ export async function createRide(
     : null;
   const escort = input.escortRequired && price != null ? escortCharge(price) : 0;
 
-  // Fetch supervisor's pending cancellation fee to roll into this booking
-  const supervisor = await prisma.user.findUnique({
-    where: { id: input.supervisorId },
-    select: { pendingCancellationFee: true },
-  });
-  const pendingCancellationFee = supervisor?.pendingCancellationFee ?? 0;
-  const totalAmount = price != null ? price + PLATFORM_FEE + escort + pendingCancellationFee : null;
+  // Supervisor total is now just fare + escort — no platform fee, no
+  // cancellation fee (both removed in the subscription-payments overhaul).
+  const totalAmount = price != null ? price + escort : null;
 
   // Escort return-drop OTP — LOGOUT rides only (per product decision: login
   // escorts are out of scope for the return-drop flow). Escort boards at the
@@ -90,7 +86,7 @@ export async function createRide(
       INSERT INTO rides (
         id, type, status, supervisor_id,
         pickup_point, drop_point, pickup_address, drop_address,
-        distance_km, price, fare_adjustment, platform_fee, total_amount, vehicle_type,
+        distance_km, price, fare_adjustment, total_amount, vehicle_type,
         pax_count, capacity, scheduled_for, planned_start_time,
         escort_required, escort_name, escort_charge, escort_otp,
         created_at
@@ -106,7 +102,6 @@ export async function createRide(
         ${input.distanceKm ?? null},
         ${price},
         ${fareAdjustment},
-        ${PLATFORM_FEE},
         ${totalAmount},
         ${input.vehicleType ?? null},
         ${input.employeeIds.length},
@@ -122,10 +117,6 @@ export async function createRide(
       RETURNING id
     `;
     const scheduledId = rows[0].id;
-    // Clear pending cancellation fee
-    if (pendingCancellationFee > 0) {
-      await prisma.user.update({ where: { id: input.supervisorId }, data: { pendingCancellationFee: 0 } });
-    }
     if (input.employeeIds.length > 0) {
       await prisma.rideEmployee.createMany({
         data: input.employeeIds.map((employeeId) => ({ rideId: scheduledId, employeeId })),
@@ -141,7 +132,7 @@ export async function createRide(
     INSERT INTO rides (
       id, type, status, supervisor_id, vendor_id,
       pickup_point, drop_point, pickup_address, drop_address,
-      distance_km, price, fare_adjustment, platform_fee, total_amount, vehicle_type,
+      distance_km, price, fare_adjustment, total_amount, vehicle_type,
       pax_count, capacity, scheduled_for,
       planned_start_time,
       escort_required, escort_name, escort_charge, escort_otp,
@@ -159,7 +150,6 @@ export async function createRide(
       ${input.distanceKm ?? null},
       ${price},
       ${fareAdjustment},
-      ${PLATFORM_FEE},
       ${totalAmount},
       ${input.vehicleType ?? null},
       ${input.employeeIds.length},
@@ -190,15 +180,6 @@ export async function createRide(
 
   // Start broadcast Redis key
   await startRideBroadcast(rideId);
-
-  // Clear supervisor's pending cancellation fee — it's now baked into this ride's totalAmount
-  if (pendingCancellationFee > 0) {
-    await prisma.user.update({
-      where: { id: input.supervisorId },
-      data: { pendingCancellationFee: 0 },
-    });
-    logger.info({ rideId, pendingCancellationFee }, 'Pending cancellation fee baked into new ride totalAmount');
-  }
 
   // Find nearby drivers (of the requested vehicle type) and broadcast
   const nearbyDrivers = await findNearbyDrivers(
@@ -259,6 +240,13 @@ export async function acceptRide(rideId: string, driverId: string): Promise<void
       throw new ConflictError('Ride already taken, expired, or not available');
     }
 
+    // Credit gate: a driver must hold at least one available ride credit to
+    // accept a new broadcast. Assigned/in-progress rides are unaffected.
+    const credits = await availableCredits(driverId);
+    if (credits < 1) {
+      throw new ForbiddenError('No ride credits left — buy a pack to continue');
+    }
+
     // Assign driver and update status atomically
     await tx.$executeRaw`
       UPDATE rides
@@ -314,8 +302,6 @@ export async function rejectRide(rideId: string, driverId: string): Promise<void
   });
 }
 
-export const CANCELLATION_FEE_RATE = 0.05; // 5% of ride fare
-
 export async function cancelRide(
   rideId: string,
   requestorId: string,
@@ -339,42 +325,15 @@ export async function cancelRide(
     throw new ForbiddenError('Cannot cancel a scheduled ride within 3 hours of it');
   }
 
-  // ── Compute cancellation fee (supervisor only, not force-cancel) ──────────
-  // Charged when: driver was assigned (status = 'assigned' or 'in_progress')
-  // AND the requestor is a supervisor AND not an SOS force-cancel.
-  let cancellationFee: number | null = null;
-  const driverWasAssigned = ['assigned', 'in_progress'].includes(ride.status);
-
-  if (!force && requestorRole === 'supervisor' && driverWasAssigned && ride.price) {
-    cancellationFee = Math.round(ride.price * CANCELLATION_FEE_RATE * 100) / 100; // 5%, 2dp
-  }
-
-  const ops: any[] = [
-    prisma.ride.update({
-      where: { id: rideId },
-      data: {
-        status: 'cancelled',
-        ...(cancellationFee != null ? { cancellationFee } : {}),
-      },
-    }),
-  ];
-
-  // Add fee to supervisor's pending balance
-  if (cancellationFee != null) {
-    ops.push(
-      prisma.user.update({
-        where: { id: ride.supervisorId },
-        data: { pendingCancellationFee: { increment: cancellationFee } },
-      }),
-    );
-    logger.info({ rideId, supervisorId: ride.supervisorId, cancellationFee },
-      'Cancellation fee applied to supervisor pending balance');
-  }
-
-  await prisma.$transaction(ops);
+  // Cancellation fee removed: a supervisor cancel no longer accrues any pending
+  // fee against them.
+  await prisma.ride.update({
+    where: { id: rideId },
+    data: { status: 'cancelled' },
+  });
   await redis.del(`ride:broadcast:${rideId}`);
 
-  return { cancellationFee };
+  return { cancellationFee: null };
 }
 
 export async function advanceRideStatus(
@@ -421,6 +380,19 @@ export async function advanceRideStatus(
   }
   if (newStatus === 'completed') {
     updateData.completedAt = new Date();
+  }
+
+  // On completion, burn exactly one ride credit (oldest-expiring pack first)
+  // in the same transaction that stamps completion, so the state is consistent
+  // and the burn is idempotent. No credit is consumed for any other status.
+  if (newStatus === 'completed' && ride.driverId) {
+    const driverId = ride.driverId;
+    const updated = await prisma.$transaction(async (tx) => {
+      const r = await tx.ride.update({ where: { id: rideId }, data: updateData });
+      await consumeOneCredit(tx, driverId, rideId);
+      return r;
+    });
+    return { id: updated.id, status: updated.status };
   }
 
   const updated = await prisma.ride.update({
@@ -520,7 +492,8 @@ export async function driverCancelAssignedRide(
     throw new ValidationError('Use release for scheduled rides');
   }
 
-  const fine = ride.driverReportingTime ? DRIVER_DROP_AFTER_ARRIVAL_FINE : 0;
+  // Fine removed: dropping an assigned ride no longer costs the driver anything.
+  const fine = 0;
 
   await prisma.$transaction(async (tx) => {
     // Back to the marketplace, driver detached, offers cleared so the previous
@@ -536,22 +509,6 @@ export async function driverCancelAssignedRide(
       WHERE id = ${rideId}
     `;
     await tx.rideOffer.deleteMany({ where: { rideId } });
-
-    if (fine > 0) {
-      await tx.driver.update({
-        where: { id: driverId },
-        data: { walletBalance: { decrement: fine } },
-      });
-      await tx.driverFine.create({
-        data: {
-          driverId,
-          rideId,
-          amount: fine,
-          reason: 'assigned_drop_after_arrival',
-          notes: `Dropped an accepted ride after confirming arrival. Reason given: ${reason}`,
-        },
-      });
-    }
   });
 
   // Register the broadcast window in Redis and push the offer to nearby
@@ -613,9 +570,10 @@ export async function claimScheduledRide(rideId: string, driverId: string): Prom
  * long the driver held the ride. The previous rule (free if released within 3h
  * of *claiming*) had it backwards: it fined a driver who released 3 days early
  * after holding the ride overnight, but let someone off free for claiming 2h
- * before pickup and bailing 30 minutes later — the far more damaging case.
+ * before pickup and bailing 30 minutes later.
  *
- * See releaseFine() in lib/pricing.ts for the bands.
+ * Fines have been removed — releasing a claimed scheduled ride is now free
+ * regardless of notice given.
  */
 export async function driverReleaseScheduledRide(
   rideId: string,
@@ -631,34 +589,13 @@ export async function driverReleaseScheduledRide(
     throw new ValidationError('Trip already started — contact your supervisor to cancel');
   }
 
-  const { fine, bucket, hoursNotice } = releaseFine(ride.scheduledFor);
+  await prisma.$executeRaw`
+    UPDATE rides SET status = 'scheduled', driver_id = NULL, vendor_id = NULL, claimed_at = NULL
+    WHERE id = ${rideId}
+  `;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      UPDATE rides SET status = 'scheduled', driver_id = NULL, vendor_id = NULL, claimed_at = NULL
-      WHERE id = ${rideId}
-    `;
-    if (fine > 0) {
-      // Wallet debit and its audit record are written together — a fine can
-      // never hit the balance without a matching row explaining it.
-      await tx.driver.update({
-        where: { id: driverId },
-        data: { walletBalance: { decrement: fine } },
-      });
-      await tx.driverFine.create({
-        data: {
-          driverId,
-          rideId,
-          amount: fine,
-          reason: `scheduled_release_${bucket}`,
-          notes: `Released a claimed scheduled ride with ${hoursNotice}h notice before pickup.`,
-        },
-      });
-    }
-  });
-
-  logger.info({ rideId, driverId, fine, bucket, hoursNotice }, 'Driver released scheduled ride');
-  return { fine, hoursNotice, bucket };
+  logger.info({ rideId, driverId }, 'Driver released scheduled ride');
+  return { fine: 0, hoursNotice: 0, bucket: 'no_fine' };
 }
 
 // Drivers near a ride's pickup — for the supervisor's manual-assign popup.
@@ -688,6 +625,14 @@ export async function nearbyDriversForRide(rideId: string, radiusKm: number) {
         SELECT driver_id FROM rides
         WHERE driver_id IS NOT NULL
           AND status IN ('assigned', 'in_progress')
+      )
+      -- Credit gate: only drivers with at least one available ride credit
+      AND EXISTS (
+        SELECT 1 FROM credit_packs cp
+        WHERE cp.driver_id = d.id
+          AND cp.status = 'active'
+          AND cp.credits_remaining > 0
+          AND cp.expires_at > NOW()
       )
     ORDER BY distance_m
     LIMIT 20
@@ -751,51 +696,14 @@ export async function listScheduledRidesForDriver(vehicleType?: string | null) {
 // Expire stale scheduled rides: unclaimed ones past their time, and claimed
 // ones never started more than 1h after their time (driver no-show).
 //
-// Driver no-shows are fined. Without this, simply ghosting the ride was the
-// cheapest option available to a driver — releasing it properly cost ₹100-200,
-// while never turning up cost nothing at all.
+// No-show fines have been removed — the ride is simply expired. No credit is
+// consumed for an expired ride, and no wallet debit or fine record is written.
 export async function sweepStaleScheduledRides(): Promise<void> {
-  // Claimed-but-never-started rides, captured before we expire them so we know
-  // which drivers to charge.
-  const noShows = await prisma.$queryRaw<Array<{ id: string; driver_id: string; scheduled_for: Date }>>`
-    SELECT id, driver_id, scheduled_for
-    FROM rides
-    WHERE status = 'assigned'
-      AND scheduled_for IS NOT NULL
-      AND scheduled_for < NOW() - INTERVAL '1 hour'
-      AND driver_id IS NOT NULL
-  `;
-
   await prisma.$executeRaw`
     UPDATE rides SET status = 'expired'
     WHERE (status = 'scheduled' AND scheduled_for IS NOT NULL AND scheduled_for < NOW())
        OR (status = 'assigned' AND scheduled_for IS NOT NULL AND scheduled_for < NOW() - INTERVAL '1 hour')
   `;
-
-  for (const r of noShows) {
-    try {
-      await prisma.$transaction(async (tx) => {
-        await tx.driver.update({
-          where: { id: r.driver_id },
-          data: { walletBalance: { decrement: SCHEDULED_NO_SHOW_FINE } },
-        });
-        await tx.driverFine.create({
-          data: {
-            driverId: r.driver_id,
-            rideId: r.id,
-            amount: SCHEDULED_NO_SHOW_FINE,
-            reason: 'scheduled_no_show',
-            notes: 'Claimed a scheduled ride and never started it (no-show).',
-          },
-        });
-      });
-      logger.warn({ rideId: r.id, driverId: r.driver_id, fine: SCHEDULED_NO_SHOW_FINE },
-        'Scheduled-ride no-show fine applied');
-    } catch (err) {
-      // One bad driver row shouldn't stop the sweeper expiring the rest.
-      logger.error({ err, rideId: r.id, driverId: r.driver_id }, 'Failed to apply no-show fine');
-    }
-  }
 }
 
 export async function listRides(filters: {

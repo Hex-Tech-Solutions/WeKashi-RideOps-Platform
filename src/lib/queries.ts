@@ -559,7 +559,10 @@ export interface DriverProfile {
   rating: number;
   vehicleType?: string | null;
   seats?: number | null;
-  walletBalance?: number;
+  // Payable UPI (validated via Razorpay VPA API)
+  upiVpa?: string | null;
+  upiVpaName?: string | null;
+  upiVerified?: boolean;
   // Licence / ID details
   dlNumber?: string | null;
   dlExpiry?: string | null;
@@ -1551,20 +1554,24 @@ export interface PendingPaymentRide {
   id: string;
   type: string;
   price: number | null;
-  platformFee: number | null;
   escortCharge: number | null;
   totalAmount: number | null;
+  amount: number;
   distanceKm: number | null;
   pickupAddress: string;
   dropAddress: string;
   completedAt: string | null;
   paymentStatus: string;
+  /** upi://pay intent string, or null if the driver has no verified UPI. */
+  upiIntent: string | null;
+  payeeName: string | null;
   driver: {
     id: string;
     fullName: string;
     phone: string;
-    walletBalance: number;
-    bankDetail: { upiId: string | null; accountNo: string | null; ifsc: string | null; accountName: string | null; verified: boolean } | null;
+    upiVpa: string | null;
+    upiVpaName: string | null;
+    upiVerified: boolean;
   } | null;
 }
 
@@ -1576,140 +1583,101 @@ export function usePendingPayments() {
   });
 }
 
-export interface PaymentInitResult {
-  orderId: string;
+// ─── Supervisor pay-QR (direct UPI, untracked) ────────────────────────────────
+
+export interface RidePayQr {
+  upiIntent: string;
+  payeeName: string;
   amount: number;
-  currency: string;
-  keyId: string;
-  rideId: string;
-  driverFare: number;
-  escortFee: number;
-  platformFee: number;
-  cancellationFee: number;
-  totalAmount: number;
-  fineDeduction: number;
-  driverReceives: number;
-  driverName: string;
-  isMock: boolean;
 }
 
-export function useInitiatePayment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (rideId: string) =>
-      api<PaymentInitResult>(`/payments/rides/${rideId}/initiate`, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["pendingPayments"] }),
-  });
-}
-
-export function useConfirmPayment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ rideId, razorpayPaymentId, razorpaySignature }: {
-      rideId: string;
-      razorpayPaymentId: string;
-      razorpaySignature?: string;
-    }) => api(`/payments/rides/${rideId}/confirm`, {
-      method: "POST",
-      body: JSON.stringify({ razorpayPaymentId, razorpaySignature }),
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pendingPayments"] });
-      qc.invalidateQueries({ queryKey: ["rides"] });
-    },
-  });
-}
-
-// ─── Driver Wallet ────────────────────────────────────────────────────────────
-
-export interface WalletPayment {
-  id: string;
-  price: number | null;
-  escortCharge: number | null;
-  platformFee: number | null;
-  paidAt: string | null;
-  type: string;
-  pickupAddress: string;
-  dropAddress: string;
-  supervisor: { fullName: string; org: string | null } | null;
-}
-
-export function useDriverWallet() {
+export function useRidePayQr(rideId: string | undefined) {
   return useQuery({
-    queryKey: ["driverWallet"],
-    queryFn: () => api<{ walletBalance: number; maxWithdrawable: number; payoutFee: number; payments: WalletPayment[] }>("/payments/wallet"),
+    queryKey: ["ridePayQr", rideId],
+    queryFn: () => api<RidePayQr>(`/rides/${rideId}/pay-qr`),
+    enabled: !!rideId,
+    retry: false,
+  });
+}
+
+// ─── Driver ride credits + pack purchase ──────────────────────────────────────
+
+export interface PackDefinition {
+  key: string;
+  credits: number;
+  price: number;
+  validityDays: number;
+}
+
+export interface CreditPackView {
+  id: string;
+  source: string;
+  creditsRemaining: number;
+  creditsTotal: number;
+  expiresAt: string;
+  status: string;
+}
+
+export function usePackCatalog() {
+  return useQuery({
+    queryKey: ["packCatalog"],
+    queryFn: () => api<{ packs: PackDefinition[] }>("/driver/packs/catalog"),
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useDriverCredits() {
+  return useQuery({
+    queryKey: ["driverCredits"],
+    queryFn: () => api<{ available: number; packs: CreditPackView[] }>("/driver/credits"),
     refetchInterval: 30_000,
   });
 }
 
-export interface DriverBankDetail {
-  upiId: string | null;
-  accountNo: string | null;
-  ifsc: string | null;
-  accountName: string | null;
-  verified: boolean;
+export interface PackOrderResult {
+  orderId: string;
+  amount: number; // paise
+  currency: string;
+  keyId: string;
+  packKey: string;
+  credits: number;
 }
 
-export function useDriverBankDetail() {
-  return useQuery({
-    queryKey: ["driverBankDetail"],
-    queryFn: () => api<{ bankDetail: DriverBankDetail | null }>("/payments/bank-detail"),
+export function useCreatePackOrder() {
+  return useMutation({
+    mutationFn: (packKey: string) =>
+      api<PackOrderResult>("/driver/packs/order", { method: "POST", body: JSON.stringify({ packKey }) }),
   });
 }
 
-export function useSaveDriverBankDetail() {
+export function useVerifyPackPayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (p: { upiId?: string; accountNo?: string; ifsc?: string; accountName?: string }) =>
-      api<{ bankDetail: DriverBankDetail }>("/payments/bank-detail", { method: "POST", body: JSON.stringify(p) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driverBankDetail"] }),
-  });
-}
-
-// ─── Driver Payouts (Razorpay X) ──────────────────────────────────────────────
-
-export interface PayoutTransaction {
-  id:               string;
-  amount:           number;
-  fee:              number;
-  totalDeducted:    number;
-  mode:             string;
-  status:           'processing' | 'processed' | 'failed' | 'reversed';
-  razorpayPayoutId: string | null;
-  utr:              string | null;
-  createdAt:        string;
-}
-
-export interface WithdrawResult {
-  ok:               boolean;
-  amount:           number;
-  fee:              number;
-  totalDeducted:    number;
-  mode:             string;
-  payoutId:         string;
-  status:           string;
-  newWalletBalance: number;
-  isMock?:          boolean;
-}
-
-export function useWithdraw() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (amount: number) =>
-      api<WithdrawResult>("/payments/driver/withdraw", { method: "POST", body: JSON.stringify({ amount }) }),
+    mutationFn: (p: { orderId: string; paymentId: string; signature: string }) =>
+      api<{ activated: boolean; packId?: string; credits: number }>("/driver/packs/verify", {
+        method: "POST",
+        body: JSON.stringify(p),
+      }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["driverWallet"] });
-      qc.invalidateQueries({ queryKey: ["driverPayouts"] });
+      qc.invalidateQueries({ queryKey: ["driverCredits"] });
       qc.invalidateQueries({ queryKey: ["driver"] });
     },
   });
 }
 
-export function useDriverPayouts() {
-  return useQuery({
-    queryKey: ["driverPayouts"],
-    queryFn: () => api<{ payouts: PayoutTransaction[]; payoutFee: number }>("/payments/driver/payouts"),
-    refetchInterval: 30_000,
+// ─── Driver payable UPI (validated) ───────────────────────────────────────────
+
+export function useSaveDriverUpi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vpa: string) =>
+      api<{ upiVpa: string; upiVpaName: string; upiVerified: boolean }>("/driver/upi", {
+        method: "POST",
+        body: JSON.stringify({ vpa }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", "me"] });
+    },
   });
 }
 

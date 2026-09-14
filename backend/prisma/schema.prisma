@@ -22,7 +22,6 @@ model User {
   officeAddress String? @map("office_address")
   facility      String? @map("facility")
   isActive     Boolean  @default(true) @map("is_active")
-  pendingCancellationFee Float @default(0) @map("pending_cancellation_fee")
   createdAt    DateTime @default(now()) @map("created_at")
 
   refreshTokens   RefreshToken[]
@@ -49,7 +48,11 @@ model Driver {
   vehicleId       String?      @map("vehicle_id")
   vehicleType     String?      @map("vehicle_type") // hatchback | sedan | suv
   seats           Int?         // total seats including driver
-  walletBalance   Float        @default(0) @map("wallet_balance")
+  // ── Direct-payment UPI (validated via Razorpay VPA API) ───────────────────
+  upiVpa                String?   @map("upi_vpa")        // verified UPI VPA for direct supervisor payment
+  upiVpaName            String?   @map("upi_vpa_name")   // account-holder name returned by VPA validation
+  upiVerified           Boolean   @default(false) @map("upi_verified")
+  joiningBonusGrantedAt DateTime? @map("joining_bonus_granted_at") // grant-once guard (Req 7.3)
   // ── Additional personal / licence details ─────────────────────────────────
   dlNumber        String?      @map("dl_number")
   dlExpiry        DateTime?    @map("dl_expiry")
@@ -65,13 +68,58 @@ model Driver {
   documents     DriverDocument[]
   issues        DriverIssue[]
   locationLogs  RideLocationLog[]
-  bankDetail    DriverBankDetail?
-  payouts       PayoutTransaction[]
-  fines         DriverFine[]
+  creditPacks   CreditPack[]
+  packOrders    PackOrder[]
 
   @@index([vendorId])
   @@index([isOnline, status])
   @@map("drivers")
+}
+
+/// The Credit_Ledger: one row per pack a driver holds (purchased or bonus).
+/// Total available credits = sum(creditsRemaining) over active, non-expired
+/// packs. Credits are consumed oldest-expiring-first on ride completion.
+model CreditPack {
+  id               String    @id @default(uuid())
+  driverId         String    @map("driver_id")
+  source           String    // purchase | joining_bonus
+  creditsTotal     Int       @map("credits_total")      // 1 (bonus), 5, 10, or 20
+  creditsRemaining Int       @map("credits_remaining")
+  pricePaid        Float     @default(0) @map("price_paid") // 0 for bonus
+  packOrderId      String?   @map("pack_order_id")       // FK to PackOrder for purchases
+  activatedAt      DateTime  @default(now()) @map("activated_at")
+  expiresAt        DateTime  @map("expires_at")          // activatedAt + 365d
+  status           String    @default("active")          // active | exhausted | expired
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  driver    Driver     @relation(fields: [driverId], references: [id])
+  packOrder PackOrder? @relation(fields: [packOrderId], references: [id])
+
+  @@index([driverId, status, expiresAt, createdAt])
+  @@map("credit_packs")
+}
+
+/// Pack_Payment_Service record — one row per Razorpay pack-purchase order.
+/// `activatedPackId` is the idempotency guard: activation runs once per order
+/// whether triggered by the client confirm or the webhook.
+model PackOrder {
+  id                String    @id @default(uuid())
+  driverId          String    @map("driver_id")
+  packKey           String    @map("pack_key")        // p5 | p10 | p20
+  credits           Int
+  amount            Float                              // 100 / 159 / 249
+  razorpayOrderId   String    @unique @map("razorpay_order_id")
+  razorpayPaymentId String?   @map("razorpay_payment_id")
+  status            String    @default("created")     // created | paid | failed
+  activatedPackId   String?   @map("activated_pack_id") // set once CreditPack created
+  createdAt         DateTime  @default(now()) @map("created_at")
+  paidAt            DateTime? @map("paid_at")
+
+  driver     Driver       @relation(fields: [driverId], references: [id])
+  creditPacks CreditPack[]
+
+  @@index([driverId])
+  @@map("pack_orders")
 }
 
 model DriverDocument {
@@ -130,64 +178,6 @@ model IssueMessage {
 
   @@index([issueId])
   @@map("issue_messages")
-}
-
-model DriverBankDetail {
-  id           String   @id @default(uuid())
-  driverId     String   @unique @map("driver_id")
-  upiId        String?  @map("upi_id")
-  accountNo    String?  @map("account_no")
-  ifsc         String?  @map("ifsc")
-  accountName  String?  @map("account_name")
-  verified     Boolean  @default(false)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-
-  driver Driver @relation(fields: [driverId], references: [id])
-
-  @@map("driver_bank_details")
-}
-
-model PayoutTransaction {
-  id               String   @id @default(uuid())
-  driverId         String   @map("driver_id")
-  amount           Float                           // amount sent to driver's bank (after fee deduction)
-  fee              Float    @default(5.90)         // Razorpay payout fee (₹5 + ₹0.90 GST)
-  totalDeducted    Float    @map("total_deducted") // amount + fee — deducted from wallet
-  mode             String                           // UPI | IMPS | NEFT
-  status           String   @default("processing") // processing | processed | failed | reversed
-  razorpayPayoutId String?  @map("razorpay_payout_id") // pout_xxx from Razorpay
-  utr              String?                          // UTR from bank
-  narration        String?                          // shown on driver's bank statement
-  idempotencyKey   String   @unique @map("idempotency_key") // prevent duplicate payouts
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  driver Driver @relation(fields: [driverId], references: [id])
-
-  @@index([driverId])
-  @@index([driverId, status])
-  @@map("payout_transactions")
-}
-
-/// Audit trail for every penalty debited from a driver's wallet.
-/// Previously fines were a bare `walletBalance` decrement with no record, so a
-/// driver disputing a deduction (or finance reconciling accounts) had nothing
-/// to point at. Every wallet debit that isn't a payout should land here.
-model DriverFine {
-  id        String   @id @default(uuid())
-  driverId  String   @map("driver_id")
-  rideId    String?  @map("ride_id")            // null if the ride is later deleted
-  amount    Float                                // positive number, debited from wallet
-  reason    String                               // machine-readable: scheduled_release | scheduled_no_show
-  notes     String?                              // human-readable detail for support/disputes
-  createdAt DateTime @default(now()) @map("created_at")
-
-  driver Driver @relation(fields: [driverId], references: [id])
-
-  @@index([driverId])
-  @@index([driverId, createdAt])
-  @@map("driver_fines")
 }
 
 model DriverOtp {
@@ -350,9 +340,7 @@ model Ride {
   price              Float?
   /// Manual fare top-up the supervisor added at booking time (e.g. +50/+100), already baked into `price`. Kept separately for audit/display.
   fareAdjustment     Float?     @default(0) @map("fare_adjustment")
-  platformFee        Float?   @default(20) @map("platform_fee")
   totalAmount        Float?   @map("total_amount")
-  cancellationFee    Float?   @map("cancellation_fee")
   vehicleType        String?    @map("vehicle_type") // hatchback | sedan | suv
   paxCount           Int        @map("pax_count")
   capacity           Int
@@ -367,6 +355,10 @@ model Ride {
   createdAt          DateTime   @default(now()) @map("created_at")
   completedAt        DateTime?  @map("completed_at")
   paymentStatus      String     @default("unpaid") @map("payment_status") // unpaid | paid
+  /// Idempotency guard for ride-credit consumption — set true when exactly one
+  /// credit has been burned for this completed ride. Prevents double-burn on
+  /// retried/duplicate completion transitions.
+  creditConsumed     Boolean    @default(false) @map("credit_consumed")
   razorpayOrderId    String?    @map("razorpay_order_id")
   razorpayPaymentId  String?    @map("razorpay_payment_id")
   paidAt             DateTime?  @map("paid_at")

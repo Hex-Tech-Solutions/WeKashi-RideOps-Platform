@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { NotFoundError, ForbiddenError, NearbyDriver } from '../types';
 import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
+import { grantJoiningBonus } from './creditPack.service';
 
 export interface CreateDriverInput {
   phone: string;
@@ -12,7 +13,7 @@ export interface CreateDriverInput {
 }
 
 export async function createDriver(input: CreateDriverInput) {
-  return prisma.driver.create({
+  const driver = await prisma.driver.create({
     data: {
       phone: input.phone,
       fullName: input.fullName,
@@ -22,6 +23,10 @@ export async function createDriver(input: CreateDriverInput) {
       kycStatus: 'pending',
     },
   });
+  // Grant the one-time joining-bonus credit so a newly onboarded driver can
+  // start receiving broadcasts before buying a pack (Req 7).
+  await grantJoiningBonus(driver.id);
+  return driver;
 }
 
 export async function listDrivers(filters: {
@@ -70,8 +75,10 @@ export async function getDriver(id: string) {
     select: { type: true },
   });
 
+  // walletBalance is intentionally omitted — the in-app wallet has been removed.
+  const { walletBalance: _walletBalance, ...driverPublic } = driver as typeof driver & { walletBalance?: number };
   return {
-    ...driver,
+    ...driverPublic,
     expiredDocTypes: expiredDocs.map((d) => d.type),
   };
 }
@@ -88,10 +95,18 @@ export async function updateDriverStatus(
     throw new ForbiddenError('You can only update drivers belonging to your vendor');
   }
 
-  return prisma.driver.update({
+  const updated = await prisma.driver.update({
     where: { id },
     data: { status },
   });
+
+  // Ensure the joining-bonus credit exists once a driver is activated (safety
+  // net for drivers onboarded before the bonus existed). Grant-once guarded.
+  if (status === 'active') {
+    await grantJoiningBonus(id);
+  }
+
+  return updated;
 }
 
 export async function updateDriverLocation(
@@ -177,6 +192,14 @@ export async function findNearbyDrivers(
         WHERE driver_id IS NOT NULL
           AND status IN ('assigned', 'in_progress')
       )
+      -- Credit gate: only drivers with at least one available ride credit
+      AND EXISTS (
+        SELECT 1 FROM credit_packs cp
+        WHERE cp.driver_id = drivers.id
+          AND cp.status = 'active'
+          AND cp.credits_remaining > 0
+          AND cp.expires_at > NOW()
+      )
     ORDER BY distance_m
     LIMIT 20
   `;
@@ -202,6 +225,13 @@ export async function vehicleAvailability(
         SELECT driver_id FROM rides
         WHERE driver_id IS NOT NULL
           AND status IN ('assigned', 'in_progress')
+      )
+      AND EXISTS (
+        SELECT 1 FROM credit_packs cp
+        WHERE cp.driver_id = drivers.id
+          AND cp.status = 'active'
+          AND cp.credits_remaining > 0
+          AND cp.expires_at > NOW()
       )
     GROUP BY vehicle_type
   `;

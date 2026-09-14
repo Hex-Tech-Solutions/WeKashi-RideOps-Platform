@@ -20,6 +20,9 @@ import {
 import { getRidePax, verifyPickup, verifyDrop, markNoShow, verifyEscortDrop } from '../services/ridePax.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
+import { prisma } from '../lib/prisma';
+import { buildUpiIntent } from '../lib/upiQr';
+import { ConflictError, NotFoundError, ForbiddenError } from '../types';
 import type { AuthRequest } from '../types';
 import type { Server as IoServer } from 'socket.io';
 
@@ -426,9 +429,45 @@ export function createRidesRouter(io: IoServer): Router {
     }
   });
 
+  // GET /rides/:id/pay-qr — supervisor fetches the driver's UPI QR to pay
+  // directly after a completed ride (Req 14). Returns 409 if the driver has no
+  // verified UPI VPA. This payment is off-platform and never recorded.
+  router.get('/:id/pay-qr', requireRole('supervisor', 'admin'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const ride = await prisma.ride.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true, status: true, supervisorId: true, price: true, escortCharge: true, totalAmount: true,
+          driver: { select: { fullName: true, upiVpa: true, upiVpaName: true, upiVerified: true } },
+        },
+      });
+      if (!ride) throw new NotFoundError('Ride not found');
+      if (req.user!.role === 'supervisor' && ride.supervisorId !== req.user!.id) {
+        throw new ForbiddenError('You can only view your own rides');
+      }
+      if (ride.status !== 'completed') {
+        throw new ConflictError('Ride is not completed yet');
+      }
+      if (!ride.driver?.upiVerified || !ride.driver.upiVpa) {
+        throw new ConflictError("Driver hasn't added a payable UPI ID.");
+      }
+
+      const amount = ride.totalAmount ?? ((ride.price ?? 0) + (ride.escortCharge ?? 0));
+      const payeeName = ride.driver.upiVpaName ?? ride.driver.fullName;
+      const upiIntent = buildUpiIntent({
+        vpa: ride.driver.upiVpa,
+        payeeName,
+        amount,
+        note: `RideOps ${ride.id.slice(-8)}`,
+      });
+      res.json({ upiIntent, payeeName, amount });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /rides/:id/release — driver hands a claimed scheduled ride back to the
-  // marketplace. Allowed any time before the trip starts; the fine depends on
-  // how much notice is given (free at 24h+, see releaseFine in lib/pricing.ts).
+  // marketplace. Allowed any time before the trip starts. No fine is charged.
   router.post('/:id/release', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const result = await driverReleaseScheduledRide(req.params.id, req.driver!.id);
@@ -440,8 +479,7 @@ export function createRidesRouter(io: IoServer): Router {
 
   // POST /rides/:id/driver-cancel — driver drops a ride they already accepted.
   // The ride returns to 'broadcasting' so nearby drivers can claim it, since
-  // the employees still need transport. Fine applies only if the driver had
-  // already confirmed arrival (see driverCancelAssignedRide).
+  // the employees still need transport. No fine is charged.
   router.post('/:id/driver-cancel', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const { reason } = z.object({

@@ -16,7 +16,7 @@ router.get('/office', async (req: AuthRequest, res: Response, next: NextFunction
   try {
     const u = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      select: { org: true, phone: true, officeLat: true, officeLng: true, officeAddress: true, facility: true, pendingCancellationFee: true },
+      select: { org: true, phone: true, officeLat: true, officeLng: true, officeAddress: true, facility: true },
     });
     res.json(u);
   } catch (err) {

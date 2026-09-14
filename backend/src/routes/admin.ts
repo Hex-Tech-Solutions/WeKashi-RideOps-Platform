@@ -9,6 +9,7 @@ import {
   createVendorAccount,
   listRegistrationRequests,
   reviewRegistrationRequest,
+  packSalesReport,
 } from '../services/admin.service';
 import type { AuthRequest } from '../types';
 
@@ -16,6 +17,18 @@ const router = Router();
 
 router.use(authenticate);
 router.use(requireRole('admin'));
+
+// GET /admin/pack-sales?from&to — pack revenue rows + aggregates (Req 15)
+router.get('/pack-sales', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { from, to } = z
+      .object({ from: z.string().datetime().optional(), to: z.string().datetime().optional() })
+      .parse({ from: req.query.from, to: req.query.to });
+    res.json(await packSalesReport(from ? new Date(from) : undefined, to ? new Date(to) : undefined));
+  } catch (err) {
+    next(err);
+  }
+});
 
 const TenantSchema = z.object({
   company: z.string().min(2).max(100),

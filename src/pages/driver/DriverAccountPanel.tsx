@@ -1,14 +1,14 @@
 /**
  * DriverAccountPanel — a left-sliding drawer opened from the "Account" tab.
  *
- * Left rail lists the sections (Profile · Vehicle info · Wallet & Ride Earnings
+ * Left rail lists the sections (Profile · Vehicle info · Ride Credits
  * · Recent trips); the right pane shows the selected section. The rail is
  * collapsible via the chevron button — collapsed it shows just icons, expanded
  * it shows labels. The "Proudly Made in India · Karnataka" watermark lives at
  * the bottom of the rail.
  *
  * Sections reuse the existing cards from DriverAccount (Profile summary +
- * personal/licence details, VehicleCard, WalletSection) and the extracted
+ * personal/licence details, VehicleCard, CreditsSection) and the extracted
  * DriverRecentTrips list — nothing is duplicated, just relocated.
  */
 import { useState } from "react";
@@ -17,20 +17,20 @@ import { cn } from "@/lib/utils";
 import { useDriverMe } from "@/lib/queries";
 import { useDriverAuth } from "./useDriverAuth";
 import {
-  ProfileSummaryCard, ProfileDetailsCard, VehicleCard, WalletSection,
+  ProfileSummaryCard, ProfileDetailsCard, VehicleCard, CreditsSection,
   KycExpiredBanner, SignOutButton,
 } from "./DriverAccount";
 import { DriverRecentTrips } from "./DriverRecentTrips";
 import { MadeInIndiaWatermark } from "@/components/MadeInIndiaWatermark";
-import { User, Car, Wallet, History, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { User, Car, Ticket, History, ChevronsLeft, ChevronsRight } from "lucide-react";
 
-type Section = "profile" | "vehicle" | "wallet" | "trips";
+type Section = "profile" | "vehicle" | "credits" | "trips";
 
 const SECTIONS: { key: Section; label: string; Icon: typeof User }[] = [
-  { key: "profile", label: "Profile",               Icon: User },
-  { key: "vehicle", label: "Vehicle info",          Icon: Car },
-  { key: "wallet",  label: "Wallet & Ride Earnings", Icon: Wallet },
-  { key: "trips",   label: "Recent trips",          Icon: History },
+  { key: "profile", label: "Profile",       Icon: User },
+  { key: "vehicle", label: "Vehicle info",  Icon: Car },
+  { key: "credits", label: "Ride Credits",  Icon: Ticket },
+  { key: "trips",   label: "Recent trips",  Icon: History },
 ];
 
 export function DriverAccountPanel({
@@ -138,7 +138,7 @@ export function DriverAccountPanel({
               />
             )}
 
-            {section === "wallet" && <WalletSection />}
+            {section === "credits" && <CreditsSection />}
 
             {section === "trips" && <DriverRecentTrips />}
           </div>
