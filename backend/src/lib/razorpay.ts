@@ -24,7 +24,20 @@ if (!keyId || !keySecret) {
   logger.warn('RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET not set — pack purchase and VPA validation will fail until configured');
 }
 
-const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+// Construct the SDK client lazily. The Razorpay constructor throws when
+// key_id is empty, so building it at module load would crash the whole API on
+// boot whenever the keys aren't configured yet. Building it on first use keeps
+// the server bootable and surfaces a clean error only to the pack endpoints.
+let client: Razorpay | null = null;
+function getClient(): Razorpay {
+  if (!keyId || !keySecret) {
+    throw new Error('Razorpay is not configured (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET missing)');
+  }
+  if (!client) {
+    client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+  }
+  return client;
+}
 
 export interface PackOrder {
   orderId: string;
@@ -38,7 +51,7 @@ export interface PackOrder {
  * `amountRupees` is the pack price; Razorpay works in paise.
  */
 export async function createPackOrder(amountRupees: number, receipt: string): Promise<PackOrder> {
-  const order = await client.orders.create({
+  const order = await getClient().orders.create({
     amount: Math.round(amountRupees * 100),
     currency: 'INR',
     receipt,
