@@ -111,9 +111,16 @@ export async function validateVpa(vpa: string): Promise<VpaValidationResult> {
     if (data.success) {
       return { valid: true, customerName: data.customer_name };
     }
+    logger.warn({ vpa, data }, 'VPA validation returned non-success');
     return { valid: false };
   } catch (err) {
-    logger.warn({ err }, 'VPA validation request failed');
+    // Surface Razorpay's actual HTTP status + error description so we can tell
+    // a genuinely-invalid VPA apart from an auth / feature-not-enabled error.
+    const ax = err as { response?: { status?: number; data?: unknown }; message?: string };
+    logger.warn(
+      { vpa, status: ax.response?.status, body: ax.response?.data, message: ax.message },
+      'VPA validation request failed',
+    );
     return { valid: false };
   }
 }
