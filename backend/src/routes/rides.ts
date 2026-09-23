@@ -466,6 +466,41 @@ export function createRidesRouter(io: IoServer): Router {
     }
   });
 
+  // POST /rides/:id/mark-paid — supervisor records that they paid the driver
+  // directly by UPI, storing the last 4 digits of the transaction id as a local
+  // audit reference (Req 14.4 — off-platform, untracked; this is bookkeeping).
+  router.post('/:id/mark-paid', requireRole('supervisor', 'admin'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { txnRef } = z
+        .object({ txnRef: z.string().trim().regex(/^\d{4}$/, 'Enter the last 4 digits of the transaction ID') })
+        .parse(req.body);
+
+      const ride = await prisma.ride.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, status: true, supervisorId: true, paymentStatus: true },
+      });
+      if (!ride) throw new NotFoundError('Ride not found');
+      if (req.user!.role === 'supervisor' && ride.supervisorId !== req.user!.id) {
+        throw new ForbiddenError('You can only update your own rides');
+      }
+      if (ride.status !== 'completed') {
+        throw new ConflictError('Ride is not completed yet');
+      }
+      if (ride.paymentStatus === 'paid') {
+        res.json({ ok: true, alreadyPaid: true });
+        return;
+      }
+
+      await prisma.ride.update({
+        where: { id: ride.id },
+        data: { paymentStatus: 'paid', paymentRef: txnRef, paidAt: new Date() },
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /rides/:id/release — driver hands a claimed scheduled ride back to the
   // marketplace. Allowed any time before the trip starts. No fine is charged.
   router.post('/:id/release', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {

@@ -1598,6 +1598,22 @@ export function useRidePayQr(rideId: string | undefined) {
   });
 }
 
+/** Mark a completed ride as paid directly, recording the last 4 txn digits. */
+export function useMarkRidePaid() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rideId, txnRef }: { rideId: string; txnRef: string }) =>
+      api<{ ok: boolean; alreadyPaid?: boolean }>(`/rides/${rideId}/mark-paid`, {
+        method: "POST",
+        body: JSON.stringify({ txnRef }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pendingPayments"] });
+      qc.invalidateQueries({ queryKey: ["rides"] });
+    },
+  });
+}
+
 // ─── Driver ride credits + pack purchase ──────────────────────────────────────
 
 export interface PackDefinition {
