@@ -531,6 +531,67 @@ export async function rebroadcastRide(
 }
 
 /**
+ * Driver releases their QUEUED next ride (Req 4.1). The ride returns to the
+ * marketplace as a fresh broadcast so another driver can take it; the driver's
+ * current active ride is untouched. No penalty. Only valid on a ride that is
+ * this driver's queued ride (assigned + queuedBehindRideId set).
+ */
+export async function releaseQueuedRide(
+  rideId: string,
+  driverId: string,
+  io?: IoServer,
+): Promise<void> {
+  const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+  if (!ride) throw new NotFoundError('Ride not found');
+  if (ride.driverId !== driverId) throw new ForbiddenError('Not your ride');
+  if (!(ride.status === 'assigned' && ride.queuedBehindRideId)) {
+    throw new ValidationError('This is not your queued ride');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      UPDATE rides
+      SET status = 'broadcasting',
+          driver_id = NULL,
+          vendor_id = NULL,
+          queued_behind_ride_id = NULL,
+          broadcast_started_at = NOW(),
+          broadcast_expires_at = NOW() + INTERVAL '1 minute'
+      WHERE id = ${rideId}
+    `;
+    await tx.rideOffer.deleteMany({ where: { rideId } });
+  });
+
+  // Re-broadcast to nearby drivers, and tell the supervisor it's back on the
+  // marketplace, exactly like a fresh broadcast.
+  await startRideBroadcast(rideId);
+
+  if (io) {
+    const ridePayload = await getRidePublicPayload(rideId);
+    const pickupRows = await prisma.$queryRaw<Array<{ lat: number; lng: number }>>`
+      SELECT ST_Y(pickup_point::geometry) as lat, ST_X(pickup_point::geometry) as lng
+      FROM rides WHERE id = ${rideId}
+    `;
+    if (pickupRows.length > 0) {
+      const { lat, lng } = pickupRows[0];
+      const nearby = await findNearbyDrivers(lat, lng, BROADCAST_RADIUS_KM);
+      const drivers = await prisma.driver.findMany({
+        where: { id: { in: nearby.map((d) => d.id).filter((id) => id !== driverId) } },
+        select: { vendorId: true },
+      });
+      for (const vendorId of [...new Set(drivers.map((d) => d.vendorId))]) {
+        io.of('/driver').to(`vendor:${vendorId}`).emit('ride:broadcast', ridePayload);
+      }
+    }
+    io.of('/supervisor').to(`supervisor:${ride.supervisorId}`).emit('ride:status_changed', {
+      rideId, status: 'broadcasting',
+    });
+  }
+
+  logger.info({ rideId, driverId }, 'Driver released queued ride');
+}
+
+/**
  * Driver drops a ride they already accepted (status 'assigned').
  *
  * A driver who breaks down, falls ill, or accepted by mistake needs an honest

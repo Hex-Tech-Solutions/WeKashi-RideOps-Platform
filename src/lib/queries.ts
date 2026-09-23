@@ -625,17 +625,29 @@ export function useMarkDriverArrived() {
 
 /**
  * Driver drops a ride they already accepted (status 'assigned').
- * The ride goes back to broadcasting for other drivers. A fine applies only if
- * the driver had already confirmed arrival — see DRIVER_DROP_AFTER_ARRIVAL_FINE.
+ * The ride goes back to broadcasting for other drivers. No penalty.
  */
 export function useDriverCancelRide() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ rideId, reason }: { rideId: string; reason: string }) =>
-      api<{ fine: number; rebroadcast: boolean }>(`/rides/${rideId}/driver-cancel`, {
+      api<{ rebroadcast: boolean }>(`/rides/${rideId}/driver-cancel`, {
         method: "POST",
         body: JSON.stringify({ reason }),
       }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
+  });
+}
+
+/**
+ * Driver releases their QUEUED next ride — it returns to broadcasting for other
+ * drivers. The driver's current active ride is unaffected. No penalty.
+ */
+export function useReleaseQueuedRide() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rideId: string) =>
+      api<{ ok: boolean }>(`/rides/${rideId}/release-queued`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
   });
 }

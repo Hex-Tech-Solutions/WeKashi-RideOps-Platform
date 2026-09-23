@@ -4,6 +4,7 @@ import {
   acceptRide,
   advanceRideStatus,
   cancelRide,
+  releaseQueuedRide,
 } from '../src/services/ride.service';
 import { findNearbyDrivers } from '../src/services/driver.service';
 
@@ -154,6 +155,36 @@ describe('queued accept + promotion (Req 2, 3)', () => {
     await makeRide('in_progress', driverId);
     const b = await makeRide('broadcasting', null);
     await expect(acceptRide(b, driverId)).rejects.toThrow();
+    await dropDriver(driverId);
+  });
+});
+
+describe('driver releases queued ride (Req 4.1)', () => {
+  it('returns the queued ride to broadcasting and leaves the active ride intact', async () => {
+    const driverId = await makeDriver(NEAR_LNG, NEAR_LAT);
+    const active = await makeRide('in_progress', driverId);
+    const broadcast = await makeRide('broadcasting', null);
+    await acceptRide(broadcast, driverId);
+
+    await releaseQueuedRide(broadcast, driverId);
+
+    const released = await prisma.ride.findUnique({ where: { id: broadcast } });
+    expect(released?.status).toBe('broadcasting');
+    expect(released?.driverId).toBeNull();
+    expect(released?.queuedBehindRideId).toBeNull();
+
+    // The active ride is untouched.
+    const stillActive = await prisma.ride.findUnique({ where: { id: active } });
+    expect(stillActive?.status).toBe('in_progress');
+    expect(stillActive?.driverId).toBe(driverId);
+
+    await dropDriver(driverId);
+  });
+
+  it('rejects releasing a ride that is not the driver\'s queued ride', async () => {
+    const driverId = await makeDriver(NEAR_LNG, NEAR_LAT);
+    const active = await makeRide('in_progress', driverId); // active, not queued
+    await expect(releaseQueuedRide(active, driverId)).rejects.toThrow();
     await dropDriver(driverId);
   });
 });

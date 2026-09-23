@@ -14,6 +14,7 @@ import {
   claimScheduledRide,
   driverReleaseScheduledRide,
   driverCancelAssignedRide,
+  releaseQueuedRide,
   nearbyDriversForRide,
   manualAssignRide,
 } from '../services/ride.service';
@@ -536,6 +537,18 @@ export function createRidesRouter(io: IoServer): Router {
   router.post('/:id/release', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       await driverReleaseScheduledRide(req.params.id, req.driver!.id);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /rides/:id/release-queued — driver gives up their QUEUED next ride.
+  // It goes straight back to broadcasting for other drivers. The driver's
+  // current active ride is unaffected. No reason required, no penalty.
+  router.post('/:id/release-queued', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await releaseQueuedRide(req.params.id, req.driver!.id, io);
       res.json({ ok: true });
     } catch (err) {
       next(err);

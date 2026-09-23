@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   useDriverMe, useDriverOffers, useDriverRides,
   useGoOnline, useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
-  useRide, useMarkDriverArrived, useRouteMatrix, useDriverCancelRide,
+  useRide, useMarkDriverArrived, useRouteMatrix, useDriverCancelRide, useReleaseQueuedRide,
   type RideRow,
 } from "@/lib/queries";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -63,6 +63,7 @@ export default function DriverHome() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const driverCancel = useDriverCancelRide();
+  const releaseQueued = useReleaseQueuedRide();
 
   // Fetch full ride detail for the active ride so we have drop lat/lng.
   const { data: activeRideFull } = useRide(active?.id);
@@ -312,11 +313,12 @@ export default function DriverHome() {
         )}
 
         {/* Queued next ride — shown while the driver is finishing one ride and
-            has lined up the next. It auto-activates when the current ride ends. */}
+            has lined up the next. It auto-activates when the current ride ends.
+            The driver can release it back to the marketplace before then. */}
         {queuedRide && (
           <div className="px-4 pb-2">
             <Card className="border-gold/50 bg-gold/5">
-              <CardContent className="p-3 space-y-1.5">
+              <CardContent className="p-3 space-y-2">
                 <div className="flex items-center gap-2 text-sm font-semibold text-gold-dark">
                   <span className="inline-block h-2 w-2 rounded-full bg-gold animate-pulse" />
                   Next ride queued
@@ -325,6 +327,18 @@ export default function DriverHome() {
                 <div className="text-[11px] text-muted-foreground">
                   Starts automatically once you finish your current ride.
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40"
+                  disabled={releaseQueued.isPending}
+                  onClick={() => releaseQueued.mutate(queuedRide.id, {
+                    onSuccess: () => toast("Queued ride released"),
+                    onError: (e: any) => toast.error(e?.message ?? "Failed to release"),
+                  })}
+                >
+                  Cancel queued ride
+                </Button>
               </CardContent>
             </Card>
           </div>
