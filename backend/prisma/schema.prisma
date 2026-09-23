@@ -355,11 +355,14 @@ model Ride {
   createdAt          DateTime   @default(now()) @map("created_at")
   completedAt        DateTime?  @map("completed_at")
   paymentStatus      String     @default("unpaid") @map("payment_status") // unpaid | paid
-  /// Last 4 digits of the UPI transaction id the supervisor enters when
-  /// marking a direct payment as paid. Local audit reference only — the
-  /// payment itself is off-platform and untracked.
+  /// Last 4 digits of the UPI UTR the supervisor enters when marking a direct
+  /// payment as paid. Local audit reference only — the payment itself is
+  /// off-platform and untracked. Shown to the driver so they can reconcile.
   paymentRef         String?    @map("payment_ref")
   paidAt             DateTime?  @map("paid_at")
+  /// Stamped when the driver confirms they received the payment (matched the
+  /// UTR against their bank credit). Driver-side acknowledgment.
+  paymentReceivedAt  DateTime?  @map("payment_received_at")
   /// Idempotency guard for ride-credit consumption — set true when exactly one
   /// credit has been burned for this completed ride. Prevents double-burn on
   /// retried/duplicate completion transitions.

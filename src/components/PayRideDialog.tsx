@@ -75,7 +75,7 @@ export function PayRideDialog({ ride, onClose }: Props) {
                   </div>
                   {txnRef && (
                     <div className="text-xs text-muted-foreground mt-1">
-                      Txn ref: ••••{txnRef}
+                      UTR ref: ••••{txnRef}
                     </div>
                   )}
                 </div>
@@ -155,9 +155,9 @@ export function PayRideDialog({ ride, onClose }: Props) {
 
                     <Separator />
 
-                    {/* After paying, record the last 4 digits of the UPI txn id */}
+                    {/* After paying, record the last 4 digits of the UPI UTR */}
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Last 4 digits of Transaction ID</Label>
+                      <Label className="text-xs">Last 4 digits of UTR ID</Label>
                       <Input
                         value={txnRef}
                         onChange={(e) => setTxnRef(e.target.value.replace(/\D/g, "").slice(0, 4))}
@@ -167,7 +167,8 @@ export function PayRideDialog({ ride, onClose }: Props) {
                         className="h-10 font-mono tracking-widest text-center"
                       />
                       <p className="text-[11px] text-muted-foreground">
-                        Find it in your UPI app's payment receipt. Kept as a reference for this ride.
+                        Find the UTR in your UPI app's payment receipt. The driver sees it to confirm they
+                        received the payment.
                       </p>
                     </div>
 

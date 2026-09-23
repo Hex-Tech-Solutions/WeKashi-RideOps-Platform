@@ -501,6 +501,33 @@ export function createRidesRouter(io: IoServer): Router {
     }
   });
 
+  // POST /rides/:id/mark-received — driver confirms they received the direct UPI
+  // payment (having matched the supervisor's UTR ref against their bank credit).
+  router.post('/:id/mark-received', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const ride = await prisma.ride.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, driverId: true, paymentStatus: true, paymentReceivedAt: true },
+      });
+      if (!ride) throw new NotFoundError('Ride not found');
+      if (ride.driverId !== req.driver!.id) throw new ForbiddenError('Not your ride');
+      if (ride.paymentStatus !== 'paid') {
+        throw new ConflictError('Payment not marked by the supervisor yet');
+      }
+      if (ride.paymentReceivedAt) {
+        res.json({ ok: true, alreadyReceived: true });
+        return;
+      }
+      await prisma.ride.update({
+        where: { id: ride.id },
+        data: { paymentReceivedAt: new Date() },
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /rides/:id/release — driver hands a claimed scheduled ride back to the
   // marketplace. Allowed any time before the trip starts. No fine is charged.
   router.post('/:id/release', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {

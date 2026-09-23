@@ -317,6 +317,9 @@ export interface RideRow {
   escortCharge?: number | null;
   escortName?: string | null;
   paymentStatus?: string | null;
+  paymentRef?: string | null;          // last 4 of UTR (set by supervisor)
+  paidAt?: string | null;
+  paymentReceivedAt?: string | null;   // driver confirmed receipt
   distanceKm: number | null;
   paxCount: number;
   capacity: number;
@@ -1598,7 +1601,7 @@ export function useRidePayQr(rideId: string | undefined) {
   });
 }
 
-/** Mark a completed ride as paid directly, recording the last 4 txn digits. */
+/** Mark a completed ride as paid directly, recording the last 4 UTR digits. */
 export function useMarkRidePaid() {
   const qc = useQueryClient();
   return useMutation({
@@ -1610,6 +1613,20 @@ export function useMarkRidePaid() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pendingPayments"] });
       qc.invalidateQueries({ queryKey: ["rides"] });
+    },
+  });
+}
+
+/** Driver confirms they received the direct UPI payment (matched the UTR). */
+export function useMarkRideReceived() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rideId: string) =>
+      api<{ ok: boolean; alreadyReceived?: boolean }>(`/rides/${rideId}/mark-received`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", "rides"] });
     },
   });
 }
