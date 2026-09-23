@@ -307,7 +307,7 @@ export async function cancelRide(
   requestorId: string,
   requestorRole: string,
   force = false,
-): Promise<{ cancellationFee: number | null }> {
+): Promise<void> {
   const ride = await prisma.ride.findUnique({ where: { id: rideId } });
   if (!ride) throw new NotFoundError('Ride not found');
 
@@ -325,15 +325,12 @@ export async function cancelRide(
     throw new ForbiddenError('Cannot cancel a scheduled ride within 3 hours of it');
   }
 
-  // Cancellation fee removed: a supervisor cancel no longer accrues any pending
-  // fee against them.
+  // No cancellation fee — a supervisor cancel is free.
   await prisma.ride.update({
     where: { id: rideId },
     data: { status: 'cancelled' },
   });
   await redis.del(`ride:broadcast:${rideId}`);
-
-  return { cancellationFee: null };
 }
 
 export async function advanceRideStatus(
@@ -457,27 +454,18 @@ export async function rebroadcastRide(
 /**
  * Driver drops a ride they already accepted (status 'assigned').
  *
- * Previously there was no way out: a driver who broke down, fell ill, or
- * accepted by mistake had to simply not turn up, and the supervisor absorbed a
- * 5% cancellation fee for a situation the driver caused. This gives them an
- * honest exit while keeping the ride fillable.
- *
- * The ride goes back to 'broadcasting' rather than 'cancelled' so nearby
- * drivers can claim it immediately — the employees still need transport. For a
- * SCHEDULED ride, driverReleaseScheduledRide() is the correct path instead
- * (it returns the ride to the marketplace and applies the notice-based fine).
- *
- * Fine: charged only once the driver has confirmed arrival, since at that point
- * the supervisor believes the cab is at the pickup and has stopped looking for
- * alternatives. Dropping the ride before arriving is free — an early, honest
- * release is the behaviour we want, not something to punish.
+ * A driver who breaks down, falls ill, or accepted by mistake needs an honest
+ * exit that keeps the ride fillable. The ride goes back to 'broadcasting'
+ * rather than 'cancelled' so nearby drivers can claim it immediately — the
+ * employees still need transport. For a SCHEDULED ride,
+ * driverReleaseScheduledRide() is the correct path instead. No penalty applies.
  */
 export async function driverCancelAssignedRide(
   rideId: string,
   driverId: string,
   reason: string,
   io?: IoServer,
-): Promise<{ fine: number; rebroadcast: boolean }> {
+): Promise<{ rebroadcast: boolean }> {
   const ride = await prisma.ride.findUnique({ where: { id: rideId } });
   if (!ride) throw new NotFoundError('Ride not found');
   if (ride.driverId !== driverId) throw new ForbiddenError('Not your ride');
@@ -491,9 +479,6 @@ export async function driverCancelAssignedRide(
   if (ride.scheduledFor) {
     throw new ValidationError('Use release for scheduled rides');
   }
-
-  // Fine removed: dropping an assigned ride no longer costs the driver anything.
-  const fine = 0;
 
   await prisma.$transaction(async (tx) => {
     // Back to the marketplace, driver detached, offers cleared so the previous
@@ -536,8 +521,8 @@ export async function driverCancelAssignedRide(
     }
   }
 
-  logger.warn({ rideId, driverId, fine, reason }, 'Driver dropped an assigned ride');
-  return { fine, rebroadcast: true };
+  logger.warn({ rideId, driverId, reason }, 'Driver dropped an assigned ride');
+  return { rebroadcast: true };
 }
 
 // Scheduled-ride marketplace: a driver claims an unassigned scheduled ride.
@@ -565,20 +550,12 @@ export async function claimScheduledRide(rideId: string, driverId: string): Prom
 
 /**
  * Driver releases a claimed scheduled ride, putting it back on the marketplace.
- *
- * The fine is based on NOTICE GIVEN before the scheduled pickup, not on how
- * long the driver held the ride. The previous rule (free if released within 3h
- * of *claiming*) had it backwards: it fined a driver who released 3 days early
- * after holding the ride overnight, but let someone off free for claiming 2h
- * before pickup and bailing 30 minutes later.
- *
- * Fines have been removed — releasing a claimed scheduled ride is now free
- * regardless of notice given.
+ * No penalty applies — the ride simply returns to the scheduled pool.
  */
 export async function driverReleaseScheduledRide(
   rideId: string,
   driverId: string,
-): Promise<{ fine: number; hoursNotice: number; bucket: string }> {
+): Promise<void> {
   const ride = await prisma.ride.findUnique({ where: { id: rideId } });
   if (!ride) throw new NotFoundError('Ride not found');
   if (ride.driverId !== driverId) throw new ForbiddenError('Not your ride');
@@ -595,7 +572,6 @@ export async function driverReleaseScheduledRide(
   `;
 
   logger.info({ rideId, driverId }, 'Driver released scheduled ride');
-  return { fine: 0, hoursNotice: 0, bucket: 'no_fine' };
 }
 
 // Drivers near a ride's pickup — for the supervisor's manual-assign popup.

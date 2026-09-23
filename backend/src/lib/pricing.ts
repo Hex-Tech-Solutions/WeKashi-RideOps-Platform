@@ -84,7 +84,6 @@ export function computeFare(
   const acCharge = isAc ? AC_SURCHARGE : 0;
   const fare = Math.max(MINIMUM_FARE, base + vehicleSurcharge) + acCharge;
   // Exact to 2 decimal places — no rounding to nearest rupee.
-  // Razorpay receives this × 100 (paise).
   return Math.round(fare * 100) / 100;
 }
 

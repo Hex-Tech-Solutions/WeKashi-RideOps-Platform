@@ -32,7 +32,7 @@ describe('idempotent pack activation (Req 6.6)', () => {
   it('activates exactly once across two webhook deliveries for the same order', async () => {
     const orderId = `order_idem_${Date.now()}`;
     await prisma.packOrder.create({
-      data: { driverId, packKey: 'p5', credits: 5, amount: 100, razorpayOrderId: orderId, status: 'created' },
+      data: { driverId, packKey: 'p5', credits: 5, amount: 100, gatewayOrderId: orderId, status: 'created' },
     });
 
     const first = await activateFromWebhook(orderId, 'pay_1');
@@ -45,7 +45,7 @@ describe('idempotent pack activation (Req 6.6)', () => {
     expect(packs).toHaveLength(1);
     expect(await availableCredits(driverId)).toBe(5);
 
-    const order = await prisma.packOrder.findUnique({ where: { razorpayOrderId: orderId } });
+    const order = await prisma.packOrder.findUnique({ where: { gatewayOrderId: orderId } });
     expect(order?.status).toBe('paid');
     expect(order?.activatedPackId).toBe(packs[0].id);
   });

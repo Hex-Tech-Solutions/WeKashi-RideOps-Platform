@@ -16,7 +16,7 @@ import {
   toMinutes, addMinutes, computePickupTimeWindow, isWithinPickupWindow,
   type RouteStop, type RouteResult, type GeoPoint,
 } from "@/lib/geo";
-import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, PLATFORM_FEE, escortCharge, FARE_ADJUSTMENT_OPTIONS, type VehicleType } from "@/lib/pricing";
+import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, escortCharge, FARE_ADJUSTMENT_OPTIONS, type VehicleType } from "@/lib/pricing";
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -46,7 +46,6 @@ const capFor = (n: number) => (n <= 4 ? 4 : n <= 6 ? 6 : 7);
 export default function RoutesPage() {
   const { data } = useEmployees();
   const { data: officeData } = useSupervisorOffice();
-  const pendingCancellationFee = officeData?.pendingCancellationFee ?? 0;
   const { data: locationsData } = useOfficeLocations();
   const createRide = useCreateRide();
   const nav = useNavigate();
@@ -755,11 +754,10 @@ export default function RoutesPage() {
               {escortPolicy.required && price != null && (
                 <Row label="Escort charge (50%)" value={<span className="text-destructive font-medium">+₹{escortCharge(price)}</span>} />
               )}
-              <Row label="Platform fee" value={<span className="text-muted-foreground">+₹{PLATFORM_FEE}</span>} />
               {price != null && (
                 <Row label="Total you pay" value={
                   <span className="font-bold text-base">
-                    ₹{price + (escortPolicy.required ? escortCharge(price) : 0) + PLATFORM_FEE}
+                    ₹{price + (escortPolicy.required ? escortCharge(price) : 0)}
                   </span>
                 } />
               )}
@@ -845,33 +843,18 @@ export default function RoutesPage() {
                     <span className="font-semibold text-destructive">+₹{escortCharge(price)}</span>
                   </div>
                 )}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Platform fee</span>
-                  <span className="font-semibold">₹{PLATFORM_FEE}</span>
-                </div>
-                {pendingCancellationFee > 0 && (
-                  <div className="flex items-center justify-between text-sm rounded-md bg-warning/10 border border-warning/30 px-2 py-1.5">
-                    <span className="text-warning flex items-center gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      Cancellation penalty
-                    </span>
-                    <span className="font-semibold text-warning">+₹{pendingCancellationFee.toFixed(2)}</span>
-                  </div>
-                )}
                 <div className="h-px bg-border" />
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold">You pay</span>
                   <span className="text-2xl font-bold">
                     {price != null
-                      ? `₹${(price + (escortPolicy.required ? escortCharge(price) : 0) + PLATFORM_FEE + pendingCancellationFee).toFixed(pendingCancellationFee > 0 ? 2 : 0)}`
+                      ? `₹${price + (escortPolicy.required ? escortCharge(price) : 0)}`
                       : <span className="flex items-center gap-1.5 text-muted-foreground text-base"><Loader2 className="h-4 w-4 animate-spin" /> calculating</span>}
                   </span>
                 </div>
                 <div className="text-[11px] text-muted-foreground">
-                  Driver receives ₹{price ?? "—"}
-                  {escortPolicy.required && price != null && ` · ₹${escortCharge(price)} escort charge`}
-                  {` · ₹${PLATFORM_FEE} platform fee`}
-                  {pendingCancellationFee > 0 ? ` · ₹${pendingCancellationFee.toFixed(2)} cancellation penalty` : ""}
+                  You pay the driver directly by UPI after the ride.
+                  {escortPolicy.required && price != null && ` Includes ₹${escortCharge(price)} escort charge.`}
                 </div>
               </div>
               {/* Fare top-up — bump the driver fare to sweeten the offer */}

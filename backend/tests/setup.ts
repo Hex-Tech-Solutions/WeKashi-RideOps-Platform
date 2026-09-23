@@ -15,6 +15,11 @@ process.env.JWT_REFRESH_EXPIRY = '7d';
 process.env.ADMIN_INVITE_TOKEN = 'test-invite-token';
 process.env.DEV_OTP_BYPASS = '123456';
 process.env.LOG_LEVEL = 'silent';
+// Cashfree — a dummy webhook secret so signature-verification unit tests can
+// exercise the positive path. No real Cashfree calls are made in tests.
+process.env.CASHFREE_WEBHOOK_SECRET = process.env.CASHFREE_WEBHOOK_SECRET ?? 'test-cashfree-webhook-secret';
+process.env.CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY ?? 'test-cashfree-secret';
+process.env.CASHFREE_APP_ID = process.env.CASHFREE_APP_ID ?? 'test-cashfree-app-id';
 
 afterAll(async () => {
   await prisma.$disconnect();

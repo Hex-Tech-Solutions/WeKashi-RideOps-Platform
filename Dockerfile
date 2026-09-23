@@ -10,11 +10,10 @@ RUN npm ci --no-audit --no-fund
 # Copy source
 COPY . .
 
-# Vite bakes VITE_* vars at build time — passed as build args from docker-compose
+# Vite bakes VITE_* vars at build time — passed as build args from docker-compose.
+# Cashfree checkout needs no build-time key (the SDK uses a runtime session id).
 ARG VITE_GOOGLE_MAPS_KEY=""
-ARG VITE_RAZORPAY_KEY_ID=""
 ENV VITE_GOOGLE_MAPS_KEY=$VITE_GOOGLE_MAPS_KEY
-ENV VITE_RAZORPAY_KEY_ID=$VITE_RAZORPAY_KEY_ID
 
 RUN npm run build
 

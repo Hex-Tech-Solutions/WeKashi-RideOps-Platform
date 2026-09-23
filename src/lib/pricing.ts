@@ -28,15 +28,13 @@ export const VEHICLE_TYPES: VehicleType[] = ["hatchback", "sedan", "suv"];
 export const AC_SURCHARGE = 100;
 /** Manual fare top-up options the supervisor can pick at booking time (₹). */
 export const FARE_ADJUSTMENT_OPTIONS = [50, 75, 100, 125, 150] as const;
-/** Platform fee added on top of driver fare — shown to supervisor, kept by platform */
-export const PLATFORM_FEE = 20;
 /** Minimum fare floor — no ride is priced below this regardless of distance */
 export const MINIMUM_FARE = 500;
 /** Escort charge rate — 50% of driver fare, added when escort is mandatory */
 export const ESCORT_CHARGE_RATE = 0.5;
 
 /**
- * Escort surcharge = 50% of the driver fare (after minimum floor, before platform fee).
+ * Escort surcharge = 50% of the driver fare (after minimum floor).
  */
 export function escortCharge(driverFare: number): number {
   return Math.round(driverFare * ESCORT_CHARGE_RATE * 100) / 100;

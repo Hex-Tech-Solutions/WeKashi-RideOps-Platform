@@ -79,7 +79,6 @@ services:
       context: .
       args:
         VITE_GOOGLE_MAPS_KEY: ${VITE_GOOGLE_MAPS_KEY:-}
-        VITE_RAZORPAY_KEY_ID: ${VITE_RAZORPAY_KEY_ID:-}
     restart: unless-stopped
     depends_on:
       api:

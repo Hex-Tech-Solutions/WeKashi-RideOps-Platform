@@ -2,13 +2,14 @@
  * DriverCredits — ride-credit balance + pack purchase.
  *
  * Shows total available credits, each active pack's remaining count and expiry,
- * and the three-pack catalog with a Buy button that opens Razorpay Checkout.
+ * and the three-pack catalog with a Buy button that opens Cashfree Checkout.
  * A driver needs at least one credit to receive ride broadcasts.
  */
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { load } from "@cashfreepayments/cashfree-js";
 import {
   useDriverCredits,
   usePackCatalog,
@@ -19,21 +20,6 @@ import {
 import { Ticket, IndianRupee, Loader2, CheckCircle2, CalendarClock } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
-
-declare global {
-  interface Window { Razorpay: any }
-}
-
-function loadRazorpay(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (window.Razorpay) { resolve(true); return; }
-    const s = document.createElement("script");
-    s.src = "https://checkout.razorpay.com/v1/checkout.js";
-    s.onload = () => resolve(true);
-    s.onerror = () => resolve(false);
-    document.body.appendChild(s);
-  });
-}
 
 export function DriverCredits() {
   const { data: creditsData } = useDriverCredits();
@@ -51,28 +37,26 @@ export function DriverCredits() {
     setBuying(pack.key);
     try {
       const order = await createOrder.mutateAsync(pack.key);
-      const loaded = await loadRazorpay();
-      if (!loaded) { toast.error("Could not load payment gateway"); return; }
 
-      const rzp = new window.Razorpay({
-        key: order.keyId,
-        amount: order.amount,
-        currency: order.currency,
-        name: "WeKashi RideOps",
-        description: `${pack.credits} ride credits`,
-        order_id: order.orderId,
-        prefill: {},
-        handler: (resp: { razorpay_payment_id: string; razorpay_signature: string }) => {
-          verify.mutate(
-            { orderId: order.orderId, paymentId: resp.razorpay_payment_id, signature: resp.razorpay_signature },
-            {
-              onSuccess: (r) => toast.success(`${r.credits} credits added`),
-              onError: (e: any) => toast.error(e?.message ?? "Could not verify payment"),
-            },
-          );
-        },
+      const cashfree = await load({ mode: order.env === "production" ? "production" : "sandbox" });
+
+      // Opens the Cashfree checkout modal; resolves once it closes.
+      await cashfree.checkout({
+        paymentSessionId: order.paymentSessionId,
+        redirectTarget: "_modal",
       });
-      rzp.open();
+
+      // Confirm with the backend, which fetches the authoritative order status.
+      verify.mutate(
+        { orderId: order.orderId },
+        {
+          onSuccess: (r) =>
+            r.activated
+              ? toast.success(`${r.credits} credits added`)
+              : toast.message("Payment received — credits will reflect shortly"),
+          onError: (e: any) => toast.error(e?.message ?? "Could not confirm payment"),
+        },
+      );
     } catch (e: any) {
       toast.error(e?.message ?? "Could not start purchase");
     } finally {

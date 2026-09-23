@@ -155,7 +155,7 @@ describe('activatePurchasedPack (Req 6.3 / 8.1)', () => {
     const order = await prisma.packOrder.create({
       data: {
         driverId, packKey: 'p10', credits: 10, amount: 159,
-        razorpayOrderId: `order_test_${Date.now()}`, status: 'created',
+        gatewayOrderId: `order_test_${Date.now()}`, status: 'created',
       },
     });
     const pack = await prisma.$transaction((tx) => activatePurchasedPack(tx, driverId, 'p10', order.id));

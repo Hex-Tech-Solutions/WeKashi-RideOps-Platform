@@ -23,7 +23,7 @@ async function resolveFileUrl(file: Express.Multer.File): Promise<string> {
 import { listRides, listScheduledRidesForDriver } from '../services/ride.service';
 import { listPackCatalog } from '../lib/creditPacks';
 import { availableCredits, listPacks } from '../services/creditPack.service';
-import { createOrder, activateFromPayment } from '../services/packOrder.service';
+import { createOrder, confirmAndActivate } from '../services/packOrder.service';
 import { saveAndValidateVpa } from '../services/vpa.service';
 import type { AuthRequest } from '../types';
 import type { Server as IoServer } from 'socket.io';
@@ -229,7 +229,7 @@ router.get('/credits', async (req: AuthRequest, res: Response, next: NextFunctio
   }
 });
 
-// POST /api/driver/packs/order — create a Razorpay order for a pack (Req 6.1)
+// POST /api/driver/packs/order — create a Cashfree order for a pack (Req 6.1)
 router.post('/packs/order', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { packKey } = z.object({ packKey: z.string().min(1) }).parse(req.body);
@@ -239,13 +239,13 @@ router.post('/packs/order', async (req: AuthRequest, res: Response, next: NextFu
   }
 });
 
-// POST /api/driver/packs/verify — verify checkout signature + activate (Req 6.2-6.4)
+// POST /api/driver/packs/verify — confirm via Cashfree order status + activate
+// (Req 6.2-6.4). No client signature — the server fetches the authoritative
+// order status and only activates when it is PAID.
 router.post('/packs/verify', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { orderId, paymentId, signature } = z
-      .object({ orderId: z.string().min(1), paymentId: z.string().min(1), signature: z.string().min(1) })
-      .parse(req.body);
-    const result = await activateFromPayment({ orderId, paymentId, signature });
+    const { orderId } = z.object({ orderId: z.string().min(1) }).parse(req.body);
+    const result = await confirmAndActivate(orderId);
     res.json(result);
   } catch (err) {
     next(err);

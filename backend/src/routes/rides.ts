@@ -470,8 +470,8 @@ export function createRidesRouter(io: IoServer): Router {
   // marketplace. Allowed any time before the trip starts. No fine is charged.
   router.post('/:id/release', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const result = await driverReleaseScheduledRide(req.params.id, req.driver!.id);
-      res.json(result);
+      await driverReleaseScheduledRide(req.params.id, req.driver!.id);
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }
@@ -518,14 +518,14 @@ export function createRidesRouter(io: IoServer): Router {
       try {
         const requestorId   = req.user!.id;
         const requestorRole = req.user!.role;
-        const { cancellationFee } = await cancelRide(req.params.id, requestorId, requestorRole);
+        await cancelRide(req.params.id, requestorId, requestorRole);
 
         io.of('/admin').to('admin').emit('admin:activity', {
           event: 'ride:cancelled',
           rideId: req.params.id,
         });
 
-        res.json({ message: 'Ride cancelled', cancellationFee });
+        res.json({ message: 'Ride cancelled' });
       } catch (err) {
         next(err);
       }

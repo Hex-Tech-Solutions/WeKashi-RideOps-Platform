@@ -1,9 +1,9 @@
 /**
- * DriverUpiCard — save + validate a payable UPI ID.
+ * DriverUpiCard — save a payable UPI ID.
  *
  * The supervisor pays the driver directly by scanning a UPI QR after a ride, so
- * the driver must register a UPI VPA. It's validated through Razorpay's VPA API;
- * on success the verified account-holder name is shown.
+ * the driver must register a UPI ID. The payer's UPI app confirms the real
+ * account-holder name at scan time.
  */
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,8 +27,8 @@ export function DriverUpiCard() {
     const v = vpa.trim();
     if (!v) { toast.error("Enter your UPI ID"); return; }
     save.mutate(v, {
-      onSuccess: (r) => toast.success(`Verified — ${r.upiVpaName || "UPI ID saved"}`),
-      onError: (e: any) => toast.error(e?.message ?? "Could not verify UPI ID"),
+      onSuccess: () => toast.success("UPI ID saved"),
+      onError: (e: any) => toast.error(e?.message ?? "Could not save UPI ID"),
     });
   };
 
@@ -41,7 +41,7 @@ export function DriverUpiCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Supervisors pay you directly by scanning your UPI QR after a ride. Add and verify your UPI ID.
+          Supervisors pay you directly by scanning your UPI QR after a ride. Add your UPI ID here.
         </p>
 
         {me?.upiVerified && me?.upiVpa && (
@@ -49,7 +49,7 @@ export function DriverUpiCard() {
             <BadgeCheck className="h-4 w-4 text-success shrink-0" />
             <div className="min-w-0">
               <div className="text-xs font-mono truncate">{me.upiVpa}</div>
-              {me.upiVpaName && <div className="text-[11px] text-muted-foreground">{me.upiVpaName}</div>}
+              <div className="text-[11px] text-muted-foreground">Saved · payable</div>
             </div>
           </div>
         )}
@@ -69,8 +69,8 @@ export function DriverUpiCard() {
           disabled={save.isPending}
         >
           {save.isPending
-            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying…</>
-            : <><Check className="h-3.5 w-3.5" /> Validate & Save</>}
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+            : <><Check className="h-3.5 w-3.5" /> Save UPI ID</>}
         </Button>
       </CardContent>
     </Card>

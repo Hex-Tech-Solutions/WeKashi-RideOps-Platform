@@ -6,12 +6,12 @@
  *   - Supervisors pay drivers DIRECTLY via a UPI QR after a ride completes
  *     (untracked, off-platform). See GET /payments/pending and the pay-QR
  *     endpoint on the rides router.
- *   - Drivers pay the PLATFORM for ride-credit packs via Razorpay (tracked).
- *     The pack-purchase webhook lives here so Razorpay has a single endpoint.
+ *   - Drivers pay the PLATFORM for ride-credit packs via Cashfree (tracked).
+ *     The pack-purchase webhook lives here so Cashfree has a single endpoint.
  *
  * Endpoints:
  *   GET  /payments/pending    — supervisor: unpaid completed rides + driver UPI
- *   POST /payments/webhook    — Razorpay webhook (pack payment.captured)
+ *   POST /payments/webhook    — Cashfree webhook (PAYMENT_SUCCESS)
  */
 
 import { Router, Response, NextFunction, Request } from 'express';
@@ -20,7 +20,7 @@ import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
 import { logger } from '../lib/logger';
-import { verifyWebhookSignature } from '../lib/razorpay';
+import { verifyWebhookSignature } from '../lib/cashfree';
 import { activateFromWebhook } from '../services/packOrder.service';
 import { buildUpiIntent } from '../lib/upiQr';
 import type { AuthRequest } from '../types';
@@ -78,30 +78,36 @@ router.get(
   },
 );
 
-// ─── Razorpay webhook (pack purchases) ────────────────────────────────────────
-// Fires on payment.captured. Verifies the webhook signature against the RAW
-// body, then idempotently activates the pack (no-op if /packs/verify already
-// did). Mounted with express.raw() (see app.ts webhook-path exclusion).
+// ─── Cashfree webhook (pack purchases) ────────────────────────────────────────
+// Fires on PAYMENT_SUCCESS. Verifies the signature over `timestamp + rawBody`,
+// then idempotently activates the pack (no-op if /packs/verify already did).
+// Mounted with express.raw() (see app.ts webhook-path exclusion).
 
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body);
-    const sig = req.headers['x-razorpay-signature'] as string | undefined;
-    if (!sig || !verifyWebhookSignature(rawBody, sig)) {
+    const sig = req.headers['x-webhook-signature'] as string | undefined;
+    const ts = req.headers['x-webhook-timestamp'] as string | undefined;
+    if (!sig || !ts || !verifyWebhookSignature(rawBody, sig, ts)) {
       res.status(400).json({ error: 'Invalid signature' });
       return;
     }
 
     const event = JSON.parse(rawBody) as {
-      event?: string;
-      payload?: { payment?: { entity?: { id?: string; order_id?: string } } };
+      type?: string;
+      data?: {
+        order?: { order_id?: string };
+        payment?: { cf_payment_id?: string | number; payment_status?: string };
+      };
     };
 
-    if (event.event === 'payment.captured') {
-      const payment = event.payload?.payment?.entity;
-      if (payment?.order_id) {
-        await activateFromWebhook(payment.order_id, payment.id);
-        logger.info({ orderId: payment.order_id }, 'Webhook: pack payment captured');
+    // Cashfree payment webhooks use type 'PAYMENT_SUCCESS_WEBHOOK'.
+    if (event.type === 'PAYMENT_SUCCESS_WEBHOOK' && event.data?.payment?.payment_status === 'SUCCESS') {
+      const orderId = event.data.order?.order_id;
+      const paymentId = event.data.payment?.cf_payment_id;
+      if (orderId) {
+        await activateFromWebhook(orderId, paymentId != null ? String(paymentId) : undefined);
+        logger.info({ orderId }, 'Webhook: Cashfree pack payment success');
       }
     }
 

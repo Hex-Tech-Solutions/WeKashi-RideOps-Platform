@@ -8,7 +8,7 @@ import {
   packExpiry,
 } from '../src/lib/creditPacks';
 import { buildUpiIntent } from '../src/lib/upiQr';
-import { verifyPaymentSignature } from '../src/lib/razorpay';
+import { verifyWebhookSignature } from '../src/lib/cashfree';
 import crypto from 'crypto';
 
 // These are pure-logic tests — no database or network needed.
@@ -53,20 +53,20 @@ describe('UPI intent (Req 14)', () => {
   });
 });
 
-describe('payment signature verification (Req 6.4)', () => {
-  // verifyPaymentSignature signs with the secret captured at module import.
-  // Recompute the expected signature with that same secret so the positive
-  // case is exercised regardless of what value the env held at import.
-  const secret = process.env.RAZORPAY_KEY_SECRET ?? '';
-  const orderId = 'order_123';
-  const paymentId = 'pay_456';
+describe('Cashfree webhook signature verification (Req 6.6)', () => {
+  // Cashfree signs HMAC-SHA256(timestamp + rawBody) with the webhook secret,
+  // base64-encoded. verifyWebhookSignature uses the secret captured at import
+  // (CASHFREE_WEBHOOK_SECRET, falling back to CASHFREE_SECRET_KEY).
+  const secret = process.env.CASHFREE_WEBHOOK_SECRET ?? process.env.CASHFREE_SECRET_KEY ?? '';
+  const rawBody = '{"type":"PAYMENT_SUCCESS_WEBHOOK","data":{"order":{"order_id":"o1"}}}';
+  const ts = '1700000000';
 
   it('accepts a correctly computed signature', () => {
-    const good = crypto.createHmac('sha256', secret).update(`${orderId}|${paymentId}`).digest('hex');
-    expect(verifyPaymentSignature({ orderId, paymentId, signature: good })).toBe(true);
+    const good = crypto.createHmac('sha256', secret).update(`${ts}${rawBody}`).digest('base64');
+    expect(verifyWebhookSignature(rawBody, good, ts)).toBe(true);
   });
 
   it('rejects a wrong signature', () => {
-    expect(verifyPaymentSignature({ orderId, paymentId, signature: 'deadbeef' })).toBe(false);
+    expect(verifyWebhookSignature(rawBody, 'not-a-valid-signature', ts)).toBe(false);
   });
 });

@@ -240,7 +240,7 @@ export async function reviewRegistrationRequest(
 
 /**
  * Pack-sales report over an optional date range (Req 15). Returns each paid
- * pack purchase (driver, pack, amount, Razorpay order id, timestamp) plus
+ * pack purchase (driver, pack, amount, gateway order id, timestamp) plus
  * aggregate revenue and count for the period.
  */
 export async function packSalesReport(from?: Date, to?: Date) {
@@ -268,8 +268,8 @@ export async function packSalesReport(from?: Date, to?: Date) {
     packKey: o.packKey,
     credits: o.credits,
     amount: o.amount,
-    razorpayOrderId: o.razorpayOrderId,
-    razorpayPaymentId: o.razorpayPaymentId,
+    gatewayOrderId: o.gatewayOrderId,
+    gatewayPaymentId: o.gatewayPaymentId,
     paidAt: o.paidAt,
   }));
 

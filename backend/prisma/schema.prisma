@@ -108,8 +108,8 @@ model PackOrder {
   packKey           String    @map("pack_key")        // p5 | p10 | p20
   credits           Int
   amount            Float                              // 100 / 159 / 249
-  razorpayOrderId   String    @unique @map("razorpay_order_id")
-  razorpayPaymentId String?   @map("razorpay_payment_id")
+  gatewayOrderId    String    @unique @map("gateway_order_id")   // Cashfree order_id
+  gatewayPaymentId  String?   @map("gateway_payment_id")         // Cashfree cf_payment_id
   status            String    @default("created")     // created | paid | failed
   activatedPackId   String?   @map("activated_pack_id") // set once CreditPack created
   createdAt         DateTime  @default(now()) @map("created_at")
@@ -359,9 +359,6 @@ model Ride {
   /// credit has been burned for this completed ride. Prevents double-burn on
   /// retried/duplicate completion transitions.
   creditConsumed     Boolean    @default(false) @map("credit_consumed")
-  razorpayOrderId    String?    @map("razorpay_order_id")
-  razorpayPaymentId  String?    @map("razorpay_payment_id")
-  paidAt             DateTime?  @map("paid_at")
   // ── Women's safety escort ─────────────────────────────────────────────────
   escortRequired     Boolean    @default(false) @map("escort_required")
   escortName         String?    @map("escort_name")

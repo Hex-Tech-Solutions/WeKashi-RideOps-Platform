@@ -1,9 +1,17 @@
-// VPA_Validation_Service — validates a driver's UPI VPA via Razorpay and stores
-// it (with the returned account-holder name) so a supervisor can pay the driver
-// directly. On failure nothing is stored and the driver keeps no verified VPA.
+// UPI save service.
+//
+// Option 1 decision: we do NOT hard-depend on an external VPA validation API
+// (Razorpay's is deprecated; Cashfree Reverse Penny Drop is RBI-restricted to
+// certain industries and unlikely to be approved for a cab platform). Instead
+// we accept a well-formed UPI ID and save it. The actual payment is a direct
+// supervisor→driver UPI transfer, and the supervisor's UPI app shows the real
+// payee name at scan time and rejects an invalid ID — so a working UPI ID is
+// sufficient to be payable.
+//
+// If Cashfree later enables Reverse Penny Drop / Payouts VPA-verify for this
+// account, name lookup can be layered on top without changing this contract.
 
 import { prisma } from '../lib/prisma';
-import { validateVpa } from '../lib/razorpay';
 import { ValidationError } from '../types';
 
 export interface SavedVpa {
@@ -13,28 +21,31 @@ export interface SavedVpa {
 }
 
 /**
- * Validate and persist a driver's payable UPI VPA. (Req 13.1, 13.2, 13.3)
- * Throws a descriptive ValidationError if the VPA fails validation, leaving the
- * driver's existing verified VPA (if any) untouched.
+ * Validate the UPI ID format and save it as the driver's payable VPA.
+ * (Req 13.2 / 13.4 — stored and displayed; 13.3 — a malformed id is rejected.)
  */
 export async function saveAndValidateVpa(driverId: string, vpaRaw: string): Promise<SavedVpa> {
   const vpa = vpaRaw.trim();
+  // UPI VPA format: handle@psp (e.g. name@okaxis, 9876543210@ybl).
   if (!/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/.test(vpa)) {
     throw new ValidationError('Enter a valid UPI ID (e.g. name@bank)');
   }
 
-  const result = await validateVpa(vpa);
-  if (!result.valid) {
-    throw new ValidationError('That UPI ID could not be verified. Check it and try again.');
-  }
+  const existing = await prisma.driver.findUnique({
+    where: { id: driverId },
+    select: { fullName: true },
+  });
 
-  const name = result.customerName ?? '';
+  // Without a name-lookup provider we use the driver's own name as the payee
+  // label; the payer's UPI app will show the bank-registered name on scan.
+  const name = existing?.fullName ?? '';
+
   const driver = await prisma.driver.update({
     where: { id: driverId },
     data: {
       upiVpa: vpa,
       upiVpaName: name,
-      upiVerified: true,
+      upiVerified: true, // "payable" — a well-formed, saved UPI id
     },
     select: { upiVpa: true, upiVpaName: true, upiVerified: true },
   });

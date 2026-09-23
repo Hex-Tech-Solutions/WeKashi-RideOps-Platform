@@ -79,7 +79,6 @@ export interface SupervisorOffice {
   officeLng: number | null;
   officeAddress: string | null;
   facility: string | null;
-  pendingCancellationFee: number;
 }
 
 export interface OfficeLocationRow {
@@ -313,7 +312,6 @@ export interface RideRow {
   pickupAddress: string;
   dropAddress: string;
   price: number | null;
-  platformFee?: number | null;
   totalAmount?: number | null;
   escortRequired?: boolean;
   escortCharge?: number | null;
@@ -559,7 +557,7 @@ export interface DriverProfile {
   rating: number;
   vehicleType?: string | null;
   seats?: number | null;
-  // Payable UPI (validated via Razorpay VPA API)
+  // Payable UPI (saved by the driver for direct supervisor payment)
   upiVpa?: string | null;
   upiVpaName?: string | null;
   upiVerified?: boolean;
@@ -1636,9 +1634,11 @@ export function useDriverCredits() {
 
 export interface PackOrderResult {
   orderId: string;
-  amount: number; // paise
+  paymentSessionId: string; // Cashfree JS checkout session
+  amount: number;           // rupees
   currency: string;
-  keyId: string;
+  appId: string;
+  env: string;              // 'sandbox' | 'production'
   packKey: string;
   credits: number;
 }
@@ -1653,7 +1653,7 @@ export function useCreatePackOrder() {
 export function useVerifyPackPayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (p: { orderId: string; paymentId: string; signature: string }) =>
+    mutationFn: (p: { orderId: string }) =>
       api<{ activated: boolean; packId?: string; credits: number }>("/driver/packs/verify", {
         method: "POST",
         body: JSON.stringify(p),
