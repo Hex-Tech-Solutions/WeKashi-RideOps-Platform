@@ -39,6 +39,12 @@ describe('Ride lifecycle', () => {
     const { driver, accessToken: drvToken } = await createTestDriver(vendorId);
     driverToken = drvToken;
     driverId = driver.id;
+
+    // Grant a ride credit so the driver passes the broadcast eligibility /
+    // accept credit gate (subscription-payments feature).
+    await prisma.$executeRaw`
+      INSERT INTO credit_packs (id, driver_id, source, credits_total, credits_remaining, price_paid, activated_at, expires_at, status, created_at)
+      VALUES (gen_random_uuid(), ${driverId}, 'purchase', 5, 5, 100, NOW(), NOW() + INTERVAL '365 days', 'active', NOW())`;
   });
 
   it('full happy path: driver accepts → in_progress → completed', async () => {
@@ -190,6 +196,7 @@ describe('Ride lifecycle', () => {
       await prisma.ride.deleteMany({ where: { id: { in: rideIds } } });
     }
 
+    await prisma.creditPack.deleteMany({ where: { driverId } });
     await prisma.driver.deleteMany({ where: { id: driverId } });
     await prisma.vendor.deleteMany({ where: { id: vendorId } });
     await prisma.user.deleteMany({ where: { id: supervisorId } });

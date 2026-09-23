@@ -191,7 +191,9 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-mono">{ride.id.slice(0, 8)}</CardTitle>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className={statusColor(ride.status)}>{ride.status.replace("_", " ")}</Badge>
+            {ride.queuedBehindRideId
+              ? <Badge variant="outline" className="border-gold/50 text-gold-dark bg-gold/10">queued</Badge>
+              : <Badge variant="outline" className={statusColor(ride.status)}>{ride.status.replace("_", " ")}</Badge>}
             {showDetailHint && <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-gold transition-colors" />}
           </div>
         </div>
@@ -202,6 +204,14 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
           <div className="font-medium">{ride.pickupAddress}</div>
           <div className="text-muted-foreground text-xs">→ {ride.dropAddress}</div>
         </div>
+
+        {/* Queued next-ride notice — the assigned driver is finishing another
+            ride first; this one activates automatically once they complete it. */}
+        {ride.queuedBehindRideId && (
+          <div className="rounded-lg border border-gold/30 bg-gold/5 px-3 py-2 text-xs text-gold-dark">
+            Driver is finishing another ride first — this ride starts as soon as they complete it.
+          </div>
+        )}
         {ride.driver ? (
           <div className="flex items-center gap-3 p-3 rounded-md bg-secondary">
             <div className="h-9 w-9 rounded-full bg-foreground text-background flex items-center justify-center font-semibold text-xs">{ride.driver.fullName.split(" ").map((n) => n[0]).join("")}</div>

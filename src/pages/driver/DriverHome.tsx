@@ -40,7 +40,13 @@ export default function DriverHome() {
   const online = me?.isOnline ?? false;
   const offers = offersData?.offers ?? [];
   const rides = ridesData?.rides ?? [];
-  const active = rides.find((r) => r.status === "assigned" || r.status === "in_progress");
+  // The ACTIVE ride is the one the driver is serving now: assigned/in_progress
+  // and NOT queued behind another ride. The QUEUED ride (if any) is an
+  // assigned ride with queuedBehindRideId set — held until the active one ends.
+  const active = rides.find(
+    (r) => (r.status === "assigned" || r.status === "in_progress") && !r.queuedBehindRideId,
+  );
+  const queuedRide = rides.find((r) => r.status === "assigned" && !!r.queuedBehindRideId);
 
   // Gate: all boarded passengers must have their drop OTP verified before
   // the driver can complete the trip. Starts as false; DriverTrip reports up.
@@ -305,6 +311,25 @@ export default function DriverHome() {
           </div>
         )}
 
+        {/* Queued next ride — shown while the driver is finishing one ride and
+            has lined up the next. It auto-activates when the current ride ends. */}
+        {queuedRide && (
+          <div className="px-4 pb-2">
+            <Card className="border-gold/50 bg-gold/5">
+              <CardContent className="p-3 space-y-1.5">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gold-dark">
+                  <span className="inline-block h-2 w-2 rounded-full bg-gold animate-pulse" />
+                  Next ride queued
+                </div>
+                <div className="text-sm truncate">{queuedRide.pickupAddress} → {queuedRide.dropAddress}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  Starts automatically once you finish your current ride.
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {/* Offers — scrollable list, no cap. Every eligible pending offer shows up here. */}
         <div className="px-4 pb-2">
           <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
@@ -316,6 +341,11 @@ export default function DriverHome() {
             <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No broadcasts right now. Waiting…</CardContent></Card>
           ) : (
             <div className="space-y-3 max-h-[560px] overflow-y-auto pr-0.5">
+              {active && !queuedRide && (
+                <div className="text-[11px] text-muted-foreground px-1 -mt-1">
+                  You're finishing a ride — accepting one here queues it as your next ride.
+                </div>
+              )}
               {offers.map((o) => (
                 <DriverOfferCard
                   key={o.id}
@@ -324,9 +354,15 @@ export default function DriverHome() {
                   countdown={
                     o.broadcastExpiresAt ? <OfferCountdown expiresAt={o.broadcastExpiresAt} /> : undefined
                   }
-                  acceptDisabled={accept.isPending || !!active}
+                  // Allow accepting when idle, OR when finishing the active ride
+                  // and no queued ride is held yet. The backend enforces the
+                  // "within finishing distance" rule and rejects otherwise.
+                  acceptDisabled={accept.isPending || !!queuedRide}
                   declineDisabled={reject.isPending}
-                  onAccept={() => accept.mutate(o.id, { onSuccess: () => toast.success("Ride accepted!"), onError: (e: any) => toast.error(e?.message ?? "Ride already taken") })}
+                  onAccept={() => accept.mutate(o.id, {
+                    onSuccess: (res) => toast.success(res?.queued ? "Queued as your next ride" : "Ride accepted!"),
+                    onError: (e: any) => toast.error(e?.message ?? "Ride already taken"),
+                  })}
                   onDecline={() => reject.mutate(o.id, { onSuccess: () => toast("Declined"), onError: (e: any) => toast.error(e?.message ?? "Failed") })}
                 />
               ))}

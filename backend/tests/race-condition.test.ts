@@ -29,13 +29,17 @@ describe('Race condition: concurrent ride acceptance', () => {
     const { vendor } = await createTestVendor();
     vendorId = vendor.id;
 
-    // Create 10 drivers
+    // Create 10 drivers, each with a ride credit so they pass the broadcast
+    // eligibility credit gate (subscription-payments feature).
     driverTokens = [];
     driverIds = [];
     for (let i = 0; i < 10; i++) {
       const { driver, accessToken } = await createTestDriver(vendorId);
       driverIds.push(driver.id);
       driverTokens.push(accessToken);
+      await prisma.$executeRaw`
+        INSERT INTO credit_packs (id, driver_id, source, credits_total, credits_remaining, price_paid, activated_at, expires_at, status, created_at)
+        VALUES (gen_random_uuid(), ${driver.id}, 'purchase', 5, 5, 100, NOW(), NOW() + INTERVAL '365 days', 'active', NOW())`;
     }
 
     // Create a broadcasting ride
@@ -52,6 +56,7 @@ describe('Race condition: concurrent ride acceptance', () => {
     // Clean up in dependency order
     await prisma.rideOffer.deleteMany({ where: { rideId } });
     await prisma.ride.deleteMany({ where: { id: rideId } });
+    await prisma.creditPack.deleteMany({ where: { driverId: { in: driverIds } } });
     await prisma.driver.deleteMany({ where: { id: { in: driverIds } } });
     await prisma.vendor.deleteMany({ where: { id: vendorId } });
     await prisma.user.deleteMany({ where: { id: supervisorId } });

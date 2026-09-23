@@ -4,6 +4,8 @@ import { NotFoundError, ForbiddenError, ValidationError, TooManyRequestsError } 
 import { smsSender } from '../lib/sms';
 import { logger } from '../lib/logger';
 import { randomInt } from 'crypto';
+import { consumeOneCredit } from './creditPack.service';
+import { promoteQueuedRide } from '../lib/ridePromotion';
 
 // Use crypto.randomInt for cryptographically secure OTPs
 const gen4 = () => String(randomInt(1000, 10000));
@@ -156,25 +158,39 @@ async function checkPaxOtpRateLimit(paxId: string): Promise<void> {
 async function maybeComplete(rideId: string): Promise<void> {
   const ride = await prisma.ride.findUnique({
     where: { id: rideId },
-    select: { type: true, status: true, escortRequired: true },
+    select: { type: true, status: true, escortRequired: true, driverId: true },
   });
   if (!ride || ride.type !== 'logout') return;
   if (!['assigned', 'in_progress'].includes(ride.status)) return;
 
-  // Atomic: only complete if NO undropped, non-noshow passengers remain,
-  // AND (no escort required OR the escort has been verified dropped).
-  await prisma.$executeRaw`
-    UPDATE rides SET status = 'completed', completed_at = NOW()
-    WHERE id = ${rideId}
-      AND status IN ('assigned', 'in_progress')
-      AND NOT EXISTS (
-        SELECT 1 FROM ride_pax
-        WHERE ride_id = ${rideId}
-          AND no_show = false
-          AND dropped_at IS NULL
-      )
-      AND (escort_required = false OR escort_dropped_at IS NOT NULL)
-  `;
+  // Atomic: only complete if NO undropped, non-noshow passengers remain, AND
+  // (no escort required OR the escort has been verified dropped). If this call
+  // is the one that actually completes the ride, it ALSO burns exactly one
+  // ride credit and promotes any queued next ride — all in one transaction, so
+  // an auto-completed logout ride is treated identically to an explicit
+  // advanceRideStatus('completed').
+  const promotedRideId = await prisma.$transaction(async (tx) => {
+    const completed = await tx.$executeRaw`
+      UPDATE rides SET status = 'completed', completed_at = NOW()
+      WHERE id = ${rideId}
+        AND status IN ('assigned', 'in_progress')
+        AND NOT EXISTS (
+          SELECT 1 FROM ride_pax
+          WHERE ride_id = ${rideId}
+            AND no_show = false
+            AND dropped_at IS NULL
+        )
+        AND (escort_required = false OR escort_dropped_at IS NOT NULL)
+    `;
+    // executeRaw returns the affected row count. 0 → not completed by this call.
+    if (Number(completed) === 0 || !ride.driverId) return null;
+    await consumeOneCredit(tx, ride.driverId, rideId);
+    return promoteQueuedRide(tx, rideId, ride.driverId);
+  });
+
+  if (promotedRideId) {
+    await sendPaxOtpSms(promotedRideId);
+  }
 }
 
 /**

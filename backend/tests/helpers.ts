@@ -61,6 +61,7 @@ export async function createTestVendor() {
       contactPhone: '+919999999999',
       contactEmail: user.email,
       userId: user.id,
+      vendorCode: `VND-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
     },
   });
 

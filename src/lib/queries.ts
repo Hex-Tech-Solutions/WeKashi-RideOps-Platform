@@ -320,6 +320,7 @@ export interface RideRow {
   paymentRef?: string | null;          // last 4 of UTR (set by supervisor)
   paidAt?: string | null;
   paymentReceivedAt?: string | null;   // driver confirmed receipt
+  queuedBehindRideId?: string | null;  // set while this ride is the driver's queued next ride
   distanceKm: number | null;
   paxCount: number;
   capacity: number;
@@ -675,7 +676,8 @@ export function useGoOffline() {
 export function useAcceptOffer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (rideId: string) => api(`/rides/${rideId}/accept`, { method: "POST" }),
+    mutationFn: (rideId: string) =>
+      api<{ message: string; queued: boolean }>(`/rides/${rideId}/accept`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
   });
 }

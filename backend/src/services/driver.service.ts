@@ -5,6 +5,11 @@ import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
 import { grantJoiningBonus } from './creditPack.service';
 
+// Next-ride queueing: a driver whose in-progress ride's drop is within this
+// straight-line distance of their current location is "finishing" and becomes
+// eligible to accept a new broadcast (held as a queued ride). Tunable.
+export const FINISHING_DISTANCE_KM = 3;
+
 export interface CreateDriverInput {
   phone: string;
   fullName: string;
@@ -186,11 +191,30 @@ export async function findNearbyDrivers(
         ST_Point(${lng}, ${lat})::geography,
         ${radiusKm * 1000}
       )
-      -- Exclude drivers already on an active ride
-      AND id NOT IN (
-        SELECT driver_id FROM rides
-        WHERE driver_id IS NOT NULL
-          AND status IN ('assigned', 'in_progress')
+      -- Active-ride gate (next-ride queueing): block drivers on an active ride
+      -- UNLESS they are FINISHING it — i.e. the ride is in_progress and the
+      -- driver is within FINISHING_DISTANCE_KM (straight line) of its drop. A
+      -- not-yet-started ('assigned') active ride never qualifies.
+      AND NOT EXISTS (
+        SELECT 1 FROM rides act
+        WHERE act.driver_id = drivers.id
+          AND act.queued_behind_ride_id IS NULL
+          AND act.status IN ('assigned', 'in_progress')
+          AND NOT (
+            act.status = 'in_progress'
+            AND ST_DWithin(
+              drivers.current_location,
+              act.drop_point,
+              ${FINISHING_DISTANCE_KM * 1000}
+            )
+          )
+      )
+      -- At most one queued ride: block drivers who already hold one.
+      AND NOT EXISTS (
+        SELECT 1 FROM rides q
+        WHERE q.driver_id = drivers.id
+          AND q.status = 'assigned'
+          AND q.queued_behind_ride_id IS NOT NULL
       )
       -- Credit gate: only drivers with at least one available ride credit
       AND EXISTS (

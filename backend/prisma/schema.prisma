@@ -367,6 +367,11 @@ model Ride {
   /// credit has been burned for this completed ride. Prevents double-burn on
   /// retried/duplicate completion transitions.
   creditConsumed     Boolean    @default(false) @map("credit_consumed")
+  /// Next-ride queueing: set when a driver accepted this ride while still
+  /// finishing another ride. While non-null, this ride is the driver's QUEUED
+  /// ride (assigned to them but not yet active); it references the active ride
+  /// it waits behind. Cleared when the ride is promoted to active.
+  queuedBehindRideId String?    @map("queued_behind_ride_id")
   // ── Women's safety escort ─────────────────────────────────────────────────
   escortRequired     Boolean    @default(false) @map("escort_required")
   escortName         String?    @map("escort_name")
@@ -398,6 +403,7 @@ model Ride {
   @@index([status])
   @@index([status, broadcastExpiresAt])
   @@index([supervisorId, paymentStatus])
+  @@index([driverId, queuedBehindRideId])
   @@map("rides")
 }
 

@@ -283,24 +283,27 @@ export function createRidesRouter(io: IoServer): Router {
     requireRole('driver'),
     async (req: AuthRequest, res: Response, next: NextFunction) => {
       try {
-        await acceptRide(req.params.id, req.driver!.id);
+        const { queued } = await acceptRide(req.params.id, req.driver!.id);
 
-        // Notify supervisor
+        // Notify supervisor — flag whether the ride is queued behind the
+        // driver's current ride so the console can show it distinctly.
         const ride = await getRide(req.params.id);
         io.of('/supervisor')
           .to(`supervisor:${ride.supervisorId}`)
           .emit('driver:accepted', {
             rideId: req.params.id,
             driverId: req.driver!.id,
+            queued,
+            queuedBehindRideId: ride.queuedBehindRideId ?? null,
           });
 
         io.of('/admin').to('admin').emit('admin:activity', {
-          event: 'ride:accepted',
+          event: queued ? 'ride:queued' : 'ride:accepted',
           rideId: req.params.id,
           driverId: req.driver!.id,
         });
 
-        res.json({ message: 'Ride accepted successfully' });
+        res.json({ message: queued ? 'Ride queued as your next ride' : 'Ride accepted successfully', queued });
       } catch (err) {
         next(err);
       }
@@ -644,6 +647,16 @@ export function createRidesRouter(io: IoServer): Router {
           rideId: req.params.id,
           status,
         });
+
+        // If completing this ride promoted a driver's queued next ride to
+        // active, tell that ride's supervisor in real time so their console
+        // flips it from "queued" to normal active.
+        if (updated.promotedRideId) {
+          const promoted = await getRide(updated.promotedRideId);
+          io.of('/supervisor')
+            .to(`supervisor:${promoted.supervisorId}`)
+            .emit('ride:status_changed', { rideId: updated.promotedRideId, status: 'assigned', queued: false });
+        }
 
         res.json(updated);
       } catch (err) {

@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
 import { startRideBroadcast } from '../lib/broadcastSweeper';
-import { findNearbyDrivers } from './driver.service';
+import { findNearbyDrivers, FINISHING_DISTANCE_KM } from './driver.service';
 import {
   ConflictError,
   NotFoundError,
@@ -14,6 +14,7 @@ import {
 } from '../lib/pricing';
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import { availableCredits, consumeOneCredit } from './creditPack.service';
+import { promoteQueuedRide } from '../lib/ridePromotion';
 import { randomInt } from 'crypto';
 import type { Server as IoServer } from 'socket.io';
 
@@ -224,9 +225,16 @@ export async function createRide(
 /**
  * ATOMIC ride acceptance using SELECT FOR UPDATE SKIP LOCKED.
  * Only one driver wins when multiple concurrent requests arrive.
+ *
+ * Next-ride queueing: if the accepting driver is currently FINISHING another
+ * ride (active ride in_progress and within FINISHING_DISTANCE_KM of its drop),
+ * the accepted ride becomes a QUEUED ride — assigned to them but held (marked
+ * with queued_behind_ride_id) until the active ride terminates, at which point
+ * it is auto-promoted (see promoteQueuedRide). OTP SMS is deferred to promotion
+ * for queued rides. Returns whether the acceptance was queued.
  */
-export async function acceptRide(rideId: string, driverId: string): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+export async function acceptRide(rideId: string, driverId: string): Promise<{ queued: boolean }> {
+  const queued = await prisma.$transaction(async (tx) => {
     // Lock the ride row — SKIP LOCKED means concurrent transactions won't block,
     // they'll just get an empty result set immediately
     const rows = await tx.$queryRaw<Array<{ id: string; status: string }>>`
@@ -241,32 +249,75 @@ export async function acceptRide(rideId: string, driverId: string): Promise<void
     }
 
     // Credit gate: a driver must hold at least one available ride credit to
-    // accept a new broadcast. Assigned/in-progress rides are unaffected.
+    // accept a new broadcast (applies equally to a normal or queued accept).
     const credits = await availableCredits(driverId);
     if (credits < 1) {
       throw new ForbiddenError('No ride credits left — buy a pack to continue');
     }
 
-    // Assign driver and update status atomically
-    await tx.$executeRaw`
-      UPDATE rides
-      SET status = 'assigned',
-          driver_id = ${driverId},
-          accepted_at = NOW()
-      WHERE id = ${rideId}
+    // ── Next-ride queueing decision ──────────────────────────────────────────
+    // Does the driver already hold a queued ride? At most one is allowed.
+    const existingQueued = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM rides
+      WHERE driver_id = ${driverId}
+        AND status = 'assigned'
+        AND queued_behind_ride_id IS NOT NULL
+      LIMIT 1 FOR UPDATE
     `;
+    if (existingQueued.length > 0) {
+      throw new ConflictError('You already have a queued ride — finish or release it first');
+    }
 
-    // Get driver's vendor
+    // Find and lock the driver's current ACTIVE (non-queued) ride.
+    const activeRows = await tx.$queryRaw<Array<{ id: string; status: string }>>`
+      SELECT id, status
+      FROM rides
+      WHERE driver_id = ${driverId}
+        AND queued_behind_ride_id IS NULL
+        AND status IN ('assigned', 'in_progress')
+      LIMIT 1 FOR UPDATE
+    `;
+    const active = activeRows[0];
+    const isQueued = !!active;
+
+    // If on an active ride, it must be "finishing": in_progress AND the driver
+    // is within FINISHING_DISTANCE_KM (straight line) of that ride's drop.
+    let activeFinishing = false;
+    if (active) {
+      const finRows = await tx.$queryRaw<Array<{ finishing: boolean }>>`
+        SELECT (
+          r.status = 'in_progress'
+          AND d.current_location IS NOT NULL
+          AND ST_DWithin(d.current_location, r.drop_point, ${FINISHING_DISTANCE_KM * 1000})
+        ) AS finishing
+        FROM rides r
+        JOIN drivers d ON d.id = ${driverId}
+        WHERE r.id = ${active.id}
+      `;
+      activeFinishing = finRows[0]?.finishing ?? false;
+    }
+
+    if (active && !activeFinishing) {
+      // Driver is mid-ride but not near the drop — not allowed to take another.
+      throw new ConflictError('Finish your current ride before accepting another');
+    }
+
     const driver = await tx.driver.findUnique({
       where: { id: driverId },
       select: { vendorId: true },
     });
 
-    if (driver) {
-      await tx.$executeRaw`
-        UPDATE rides SET vendor_id = ${driver.vendorId} WHERE id = ${rideId}
-      `;
-    }
+    // Assign driver. For a queued accept, stamp queued_behind_ride_id so it is
+    // held rather than treated as the active ride.
+    await tx.$executeRaw`
+      UPDATE rides
+      SET status = 'assigned',
+          driver_id = ${driverId},
+          vendor_id = ${driver?.vendorId ?? null},
+          accepted_at = NOW(),
+          queued_behind_ride_id = ${isQueued ? active!.id : null}
+      WHERE id = ${rideId}
+    `;
 
     // Upsert offer record
     await tx.rideOffer.upsert({
@@ -275,7 +326,7 @@ export async function acceptRide(rideId: string, driverId: string): Promise<void
       update: { response: 'accepted' },
     });
 
-    // Expire all other pending offers
+    // Expire all other pending offers — the auction has a single winner.
     await tx.$executeRaw`
       UPDATE ride_offers
       SET response = 'expired'
@@ -283,15 +334,22 @@ export async function acceptRide(rideId: string, driverId: string): Promise<void
         AND driver_id != ${driverId}
         AND response = 'pending'
     `;
+
+    return isQueued;
   });
 
   // Clean up Redis broadcast key
   await redis.del(`ride:broadcast:${rideId}`);
 
-  // SMS both OTPs to all passengers now that a driver is confirmed
-  await sendPaxOtpSms(rideId);
+  // For a normal accept, notify passengers now. For a QUEUED accept, defer the
+  // OTP SMS until the ride is promoted to active (see promoteQueuedRide), so
+  // passengers aren't messaged about a ride that hasn't started yet.
+  if (!queued) {
+    await sendPaxOtpSms(rideId);
+  }
 
-  logger.info({ rideId, driverId }, 'Ride accepted');
+  logger.info({ rideId, driverId, queued }, 'Ride accepted');
+  return { queued };
 }
 
 export async function rejectRide(rideId: string, driverId: string): Promise<void> {
@@ -326,11 +384,20 @@ export async function cancelRide(
   }
 
   // No cancellation fee — a supervisor cancel is free.
-  await prisma.ride.update({
-    where: { id: rideId },
-    data: { status: 'cancelled' },
+  // If this ride is itself a queued ride, just clear its marker on cancel. If
+  // it is a driver's ACTIVE ride and they hold a queued ride behind it, promote
+  // that queued ride so the driver isn't left holding an orphaned ride.
+  const promotedRideId = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      UPDATE rides SET status = 'cancelled', queued_behind_ride_id = NULL WHERE id = ${rideId}
+    `;
+    if (ride.driverId) {
+      return promoteQueuedRide(tx, rideId, ride.driverId);
+    }
+    return null;
   });
   await redis.del(`ride:broadcast:${rideId}`);
+  await afterQueuedPromotion(promotedRideId);
 }
 
 export async function advanceRideStatus(
@@ -338,7 +405,7 @@ export async function advanceRideStatus(
   newStatus: string,
   requestorId: string,
   requestorRole: string,
-): Promise<{ id: string; status: string }> {
+): Promise<{ id: string; status: string; promotedRideId: string | null }> {
   const ride = await prisma.ride.findUnique({ where: { id: rideId } });
   if (!ride) throw new NotFoundError('Ride not found');
 
@@ -384,12 +451,14 @@ export async function advanceRideStatus(
   // and the burn is idempotent. No credit is consumed for any other status.
   if (newStatus === 'completed' && ride.driverId) {
     const driverId = ride.driverId;
-    const updated = await prisma.$transaction(async (tx) => {
+    const { updated, promotedRideId } = await prisma.$transaction(async (tx) => {
       const r = await tx.ride.update({ where: { id: rideId }, data: updateData });
       await consumeOneCredit(tx, driverId, rideId);
-      return r;
+      const promoted = await promoteQueuedRide(tx, rideId, driverId);
+      return { updated: r, promotedRideId: promoted };
     });
-    return { id: updated.id, status: updated.status };
+    await afterQueuedPromotion(promotedRideId);
+    return { id: updated.id, status: updated.status, promotedRideId };
   }
 
   const updated = await prisma.ride.update({
@@ -397,7 +466,17 @@ export async function advanceRideStatus(
     data: updateData,
   });
 
-  return { id: updated.id, status: updated.status };
+  return { id: updated.id, status: updated.status, promotedRideId: null };
+}
+
+/**
+ * Side effects to run AFTER a queued ride is promoted and its transaction has
+ * committed: notify passengers (deferred from the queued accept) exactly once.
+ * No-op when nothing was promoted.
+ */
+async function afterQueuedPromotion(promotedRideId: string | null): Promise<void> {
+  if (!promotedRideId) return;
+  await sendPaxOtpSms(promotedRideId);
 }
 
 export async function rebroadcastRide(
@@ -480,21 +559,28 @@ export async function driverCancelAssignedRide(
     throw new ValidationError('Use release for scheduled rides');
   }
 
-  await prisma.$transaction(async (tx) => {
+  const promotedRideId = await prisma.$transaction(async (tx) => {
     // Back to the marketplace, driver detached, offers cleared so the previous
-    // driver isn't re-offered their own dropped ride.
+    // driver isn't re-offered their own dropped ride. Also clear any queued
+    // marker in case this ride was itself the driver's queued ride.
     await tx.$executeRaw`
       UPDATE rides
       SET status = 'broadcasting',
           driver_id = NULL,
           vendor_id = NULL,
           driver_reporting_time = NULL,
+          queued_behind_ride_id = NULL,
           broadcast_started_at = NOW(),
           broadcast_expires_at = NOW() + INTERVAL '1 minute'
       WHERE id = ${rideId}
     `;
     await tx.rideOffer.deleteMany({ where: { rideId } });
+    // If the driver dropped their ACTIVE ride while holding a queued ride,
+    // promote the queued one so they keep it as their new active ride.
+    return promoteQueuedRide(tx, rideId, driverId);
   });
+
+  await afterQueuedPromotion(promotedRideId);
 
   // Register the broadcast window in Redis and push the offer to nearby
   // drivers, exactly as a fresh broadcast would.
@@ -596,11 +682,25 @@ export async function nearbyDriversForRide(rideId: string, radiusKm: number) {
       AND d.kyc_status = 'approved'
       AND d.current_location IS NOT NULL
       AND ST_DWithin(d.current_location, ST_Point(${lng}, ${lat})::geography, ${radiusKm * 1000})
-      -- Only show drivers not currently on an active ride
-      AND d.id NOT IN (
-        SELECT driver_id FROM rides
-        WHERE driver_id IS NOT NULL
-          AND status IN ('assigned', 'in_progress')
+      -- Active-ride gate: block drivers on an active ride unless finishing it
+      -- (in_progress + within FINISHING_DISTANCE_KM of its drop). Mirrors
+      -- findNearbyDrivers so manual-assign candidates match broadcast candidates.
+      AND NOT EXISTS (
+        SELECT 1 FROM rides act
+        WHERE act.driver_id = d.id
+          AND act.queued_behind_ride_id IS NULL
+          AND act.status IN ('assigned', 'in_progress')
+          AND NOT (
+            act.status = 'in_progress'
+            AND ST_DWithin(d.current_location, act.drop_point, ${FINISHING_DISTANCE_KM * 1000})
+          )
+      )
+      -- At most one queued ride
+      AND NOT EXISTS (
+        SELECT 1 FROM rides q
+        WHERE q.driver_id = d.id
+          AND q.status = 'assigned'
+          AND q.queued_behind_ride_id IS NOT NULL
       )
       -- Credit gate: only drivers with at least one available ride credit
       AND EXISTS (
@@ -635,13 +735,65 @@ export async function manualAssignRide(
   }
   const driver = await prisma.driver.findUnique({ where: { id: driverId }, select: { vendorId: true } });
   if (!driver) throw new NotFoundError('Driver not found');
-  await prisma.$executeRaw`
-    UPDATE rides
-    SET status = 'assigned', driver_id = ${driverId}, vendor_id = ${driver.vendorId},
-        price = COALESCE(${price ?? null}, price),
-        accepted_at = NOW()
-    WHERE id = ${rideId}
-  `;
+
+  // Manual assign must respect the one-active-ride invariant exactly like
+  // acceptRide, or it becomes a loophole that double-books a busy driver.
+  const queued = await prisma.$transaction(async (tx) => {
+    // Credit gate — same as an accept.
+    const credits = await availableCredits(driverId);
+    if (credits < 1) {
+      throw new ForbiddenError('Driver has no ride credits');
+    }
+
+    // At most one queued ride.
+    const existingQueued = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM rides
+      WHERE driver_id = ${driverId} AND status = 'assigned' AND queued_behind_ride_id IS NOT NULL
+      LIMIT 1 FOR UPDATE
+    `;
+    if (existingQueued.length > 0) {
+      throw new ConflictError('Driver already has a queued ride');
+    }
+
+    // Current active (non-queued) ride.
+    const activeRows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM rides
+      WHERE driver_id = ${driverId}
+        AND queued_behind_ride_id IS NULL
+        AND status IN ('assigned', 'in_progress')
+      LIMIT 1 FOR UPDATE
+    `;
+    const active = activeRows[0];
+    let activeFinishing = false;
+    if (active) {
+      const finRows = await tx.$queryRaw<Array<{ finishing: boolean }>>`
+        SELECT (
+          r.status = 'in_progress'
+          AND d.current_location IS NOT NULL
+          AND ST_DWithin(d.current_location, r.drop_point, ${FINISHING_DISTANCE_KM * 1000})
+        ) AS finishing
+        FROM rides r
+        JOIN drivers d ON d.id = ${driverId}
+        WHERE r.id = ${active.id}
+      `;
+      activeFinishing = finRows[0]?.finishing ?? false;
+    }
+    if (active && !activeFinishing) {
+      throw new ConflictError('Driver is on a ride and not near its drop yet');
+    }
+    const isQueued = !!active;
+
+    await tx.$executeRaw`
+      UPDATE rides
+      SET status = 'assigned', driver_id = ${driverId}, vendor_id = ${driver.vendorId},
+          price = COALESCE(${price ?? null}, price),
+          accepted_at = NOW(),
+          queued_behind_ride_id = ${isQueued ? active!.id : null}
+      WHERE id = ${rideId}
+    `;
+    return isQueued;
+  });
+
   await redis.del(`ride:broadcast:${rideId}`);
 
   // Ensure per-passenger OTP legs exist (older rides may predate ride_pax).
@@ -651,8 +803,11 @@ export async function manualAssignRide(
     await createRidePax(rideId, emps.map((e) => e.employeeId));
   }
 
-  // SMS both OTPs to all passengers now that a driver is manually assigned
-  await sendPaxOtpSms(rideId);
+  // Notify passengers now for a normal assign; defer to promotion for a queued
+  // one (same rule as acceptRide).
+  if (!queued) {
+    await sendPaxOtpSms(rideId);
+  }
 }
 
 export async function listScheduledRidesForDriver(vehicleType?: string | null) {
