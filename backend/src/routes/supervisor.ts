@@ -329,18 +329,31 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
         ? new Date(plannedStart.getTime() + graceSecs * 1000)
         : null;
 
-      // Delay in minutes: positive = late, negative = early
+      // Delay in minutes: positive = late, negative = early.
+      //
+      // Cause attribution keys off the DRIVER'S reporting (arrival) time, not
+      // passenger sign-in — sign-in is naturally after the planned start on a
+      // logout ride (employees board at the office only once the cab arrives),
+      // so blaming the employee off sign-in alone is wrong. Logic:
+      //   • within grace          → On Time
+      //   • driver reported late  → Driver delay (cab arrived after target)
+      //   • driver on time but the
+      //     trip still started late → Employee delay (slow boarding)
       let delayMin: number | null = null;
       let delayCause = '';
       if (plannedStart && actualStart) {
         delayMin = Math.round((actualStart.getTime() - plannedStart.getTime()) / 60000);
-        if (delayMin <= 0) {
-          delayCause = 'Early';
-        } else if (targetTime && actualStart > targetTime) {
-          // Was the last pax sign-in after planned start? → Employee delay
-          delayCause = lastSignin && lastSignin > plannedStart ? 'Employee' : 'Driver';
+        if (delayMin <= 0 || (targetTime && actualStart <= targetTime)) {
+          delayCause = delayMin <= 0 ? 'Early' : 'On Time';
+        } else if (targetTime && driverReport && driverReport > targetTime) {
+          // Cab itself arrived after the target time → the delay is on the driver.
+          delayCause = 'Driver';
+        } else if (driverReport) {
+          // Driver reported on time, but departure slipped past target → boarding delay.
+          delayCause = 'Employee';
         } else {
-          delayCause = 'On Time';
+          // No driver reporting stamp — can't attribute to boarding, default to Driver.
+          delayCause = 'Driver';
         }
       }
 
@@ -349,8 +362,15 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
       const vendorName = r.vendor?.name ?? '';
       const vehicleLabel = regNo ? `${vendorName} - ${regNo}` : vendorName;
 
-      const fmt = (d: Date | null) => d ? d.toTimeString().slice(0, 5) : '';
-      const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+      // Render times in IST (Asia/Kolkata) — the server may run in UTC, and
+      // toTimeString() would then shift every time −5:30 (e.g. an 18:30 planned
+      // start would print as 13:00), which is what made the OTD report look
+      // broken. The underlying delay math uses raw Date objects and is
+      // timezone-independent; only the display needed fixing.
+      const fmt = (d: Date | null) =>
+        d ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '';
+      const fmtDate = (d: Date) =>
+        d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // en-CA → YYYY-MM-DD
 
       return {
         sNo:                  idx + 1,
@@ -487,24 +507,26 @@ router.get('/dashboard', async (req: AuthRequest, res: Response, next: NextFunct
         plannedStartTime: { not: null },
         startedAt: { not: null },
       },
-      include: {
-        pax: { select: { pickedAt: true, noShow: true } },
-      },
     });
 
     const delayCounts = { early: 0, onTime: 0, employee: 0, driver: 0, noData: 0 };
+    const gracMs = 600_000; // 10 min default
     for (const r of delayRides) {
       const planned = r.plannedStartTime!;
       const actual  = r.startedAt!;
+      const target  = new Date(planned.getTime() + gracMs);
       const delayMs = actual.getTime() - planned.getTime();
-      const gracMs  = 600_000; // 10 min default
       if (delayMs < 0) { delayCounts.early++; continue; }
-      if (delayMs <= gracMs) { delayCounts.onTime++; continue; }
-      // Over grace — was it employee or driver?
-      const lastPaxSignin = r.pax
-        .filter((p) => p.pickedAt && !p.noShow)
-        .reduce((max, p) => p.pickedAt! > max ? p.pickedAt! : max, planned);
-      if (lastPaxSignin > planned) { delayCounts.employee++; } else { delayCounts.driver++; }
+      if (actual <= target) { delayCounts.onTime++; continue; }
+      // Over grace — attribute by driver reporting (arrival) time, not sign-in.
+      const driverReport = r.driverReportingTime;
+      if (driverReport && driverReport > target) {
+        delayCounts.driver++;          // cab arrived after target
+      } else if (driverReport) {
+        delayCounts.employee++;        // cab on time, boarding slipped
+      } else {
+        delayCounts.driver++;          // no arrival stamp → default to driver
+      }
     }
 
     // ── Ride volume by type per day (last 14 days) ────────────────────────────
