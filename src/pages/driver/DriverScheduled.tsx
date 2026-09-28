@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useScheduledRides, useDriverRides, useClaimRide, useReleaseRide, type RideRow } from "@/lib/queries";
-import { MapPin, Users, IndianRupee, Calendar } from "lucide-react";
+import { MapPin, Users, IndianRupee, Calendar, Wind, Shield } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
@@ -67,20 +67,46 @@ export default function DriverScheduled() {
 }
 
 function SchedSummary({ ride }: { ride: RideRow }) {
+  // Driver keeps fare + escort charge — same earning basis as a broadcast offer.
+  const earnings = (ride.price ?? 0) + (ride.escortCharge ?? 0);
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <RideTypeBadge type={ride.type} />
-        {ride.scheduledFor && <span className="text-xs flex items-center gap-1 text-gold"><Calendar className="h-3.5 w-3.5" />{format(new Date(ride.scheduledFor), "EEE d MMM, HH:mm")}</span>}
+      {/* Badges row — type, AC, vehicle, escort — mirrors the broadcast offer card */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <RideTypeBadge type={ride.type} />
+          <Badge className={ride.isAc ? "bg-sky-500 text-white gap-1 text-[10px]" : "bg-muted text-muted-foreground gap-1 text-[10px]"}>
+            <Wind className="h-3 w-3" /> {ride.isAc ? "AC" : "Non-AC"}
+          </Badge>
+          {ride.vehicleType && (
+            <Badge variant="outline" className="capitalize text-[10px]">{ride.vehicleType}</Badge>
+          )}
+          {ride.escortRequired && (
+            <Badge className="bg-amber-500 text-white gap-1 text-[10px]"><Shield className="h-3 w-3" /> Escort</Badge>
+          )}
+        </div>
+        {ride.scheduledFor && <span className="text-xs flex items-center gap-1 text-gold shrink-0"><Calendar className="h-3.5 w-3.5" />{format(new Date(ride.scheduledFor), "EEE d MMM, HH:mm")}</span>}
       </div>
+
       <div className="flex items-start gap-2 text-sm">
         <MapPin className="h-4 w-4 text-gold mt-0.5 shrink-0" />
         <div><div className="font-medium">{ride.pickupAddress}</div><div className="text-muted-foreground text-xs">→ {ride.dropAddress}</div></div>
       </div>
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {ride.paxCount} PAX</span>
-        {ride.distanceKm != null && <span>{ride.distanceKm} km</span>}
-        {ride.price != null && <span className="flex items-center gap-0.5 font-semibold text-foreground"><IndianRupee className="h-3 w-3" />{ride.price}</span>}
+
+      <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+        <span className="flex items-center gap-1 font-medium text-foreground bg-gold/10 rounded px-1.5 py-0.5">
+          <Users className="h-3.5 w-3.5" /> {ride.paxCount} passenger{ride.paxCount === 1 ? "" : "s"}{ride.escortRequired ? " + escort" : ""}
+        </span>
+        {ride.capacity != null && <span>needs {ride.capacity}-seater</span>}
+        {ride.distanceKm != null && <span>· {ride.distanceKm} km trip</span>}
+        {ride.price != null && (
+          <span className="flex items-center gap-0.5 font-semibold text-foreground ml-auto">
+            <IndianRupee className="h-3 w-3" />{earnings}
+            {ride.escortRequired && ride.escortCharge != null && (
+              <span className="text-amber-600 text-[10px] ml-0.5">(+₹{ride.escortCharge} escort)</span>
+            )}
+          </span>
+        )}
       </div>
     </div>
   );

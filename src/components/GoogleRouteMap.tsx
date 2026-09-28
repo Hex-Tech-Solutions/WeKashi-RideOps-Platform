@@ -335,7 +335,7 @@ export function GoogleRouteMap({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, cabsKey]);
+  }, [ready, cabsKey, nearbyCabs]);
 
   // Clean up all cab markers on unmount.
   useEffect(() => {

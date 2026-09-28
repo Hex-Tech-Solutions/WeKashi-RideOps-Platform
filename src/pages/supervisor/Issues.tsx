@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { useRides, useCreateIssue } from "@/lib/queries";
 import { IssuesList } from "@/components/IssuesList";
+import { RideTypeText } from "@/components/RideTypeLabel";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 
@@ -59,7 +60,7 @@ export default function SupervisorIssues() {
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Driver</span><span className="font-medium">{selected.driver?.fullName}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Driver phone</span><span className="font-medium">{selected.driver?.phone ?? "—"}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Route</span><span className="font-medium text-right">{selected.pickupAddress} → {selected.dropAddress}</span></div>
-                <div className="flex items-center justify-between"><span className="text-muted-foreground">Type / PAX</span><span className="font-medium"><span className="capitalize text-green-700">{selected.type}</span> · {selected.paxCount}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Type / PAX</span><span className="font-medium"><RideTypeText type={selected.type} /> · {selected.paxCount}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Distance / Fare</span><span className="font-medium">{selected.distanceKm ?? "—"} km · {selected.price != null ? `₹${selected.price}` : "—"}</span></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">Status</span><Badge variant="outline" className="capitalize">{selected.status.replace("_", " ")}</Badge></div>
                 <div className="flex items-center justify-between"><span className="text-muted-foreground">When</span><span className="font-medium">{formatDistanceToNow(new Date(selected.createdAt), { addSuffix: true })}</span></div>

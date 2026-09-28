@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { statusColor } from "@/lib/rideStatus";
 import { useRides } from "@/lib/queries";
 import { Loader2 } from "lucide-react";
+import { RideTypeText } from "@/components/RideTypeLabel";
 
 export default function VendorRides() {
   const { data, isLoading } = useRides({ limit: 100 });
@@ -34,7 +35,7 @@ export default function VendorRides() {
                 )}
                 {vendorRides.map((r) => (
                   <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
-                    <td className="px-6 py-3"><div className="font-mono text-xs">{r.id.slice(0, 8)}</div><div className="text-xs capitalize mt-0.5 text-green-700 font-medium">{r.type}</div></td>
+                    <td className="px-6 py-3"><div className="font-mono text-xs">{r.id.slice(0, 8)}</div><div className="mt-0.5"><RideTypeText type={r.type} className="text-xs" /></div></td>
                     <td className="px-6 py-3"><div className="font-medium">{r.driver?.fullName ?? "—"}</div><div className="text-xs text-muted-foreground">{r.driver?.phone ?? ""}</div></td>
                     <td className="px-6 py-3 text-muted-foreground">{r.pickupAddress} → {r.dropAddress}</td>
                     <td className="px-6 py-3"><div className="font-medium">{r.supervisor?.fullName ?? "—"}</div></td>
