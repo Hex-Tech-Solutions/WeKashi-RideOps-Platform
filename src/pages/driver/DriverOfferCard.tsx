@@ -13,7 +13,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Check, X, Users, Shield, Timer, LogIn, MapPin } from "lucide-react";
+import { Check, X, Users, Shield, Timer, LogIn, MapPin, Wind } from "lucide-react";
 import type { RideRow } from "@/lib/queries";
 
 /** Format an ISO datetime (or an HH:MM string) to HH:MM for display. */
@@ -56,23 +56,43 @@ export function DriverOfferCard({
 
   return (
     <Card className="overflow-hidden border-gold/30">
-      {/* Fare header */}
-      <div className="bg-foreground text-background px-3 py-2 flex items-center justify-between gap-2">
-        <div className="flex items-baseline gap-1.5 min-w-0">
-          <span className="text-xl font-bold text-gold">₹{earnings}</span>
-          {ride.escortRequired && ride.escortCharge != null && (
-            <span className="text-[10px] text-gold/70">incl. ₹{ride.escortCharge} escort</span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {ride.escortRequired && (
-            <Badge className="bg-amber-500 text-white gap-1 text-[10px] px-1.5 py-0">
-              <Shield className="h-2.5 w-2.5" /> Escort
+      {/* Fare header — big, eye-catching amount */}
+      <div className="bg-foreground text-background px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-widest text-background/50 font-medium">You earn</div>
+            <div className="flex items-baseline gap-1 leading-none">
+              <span className="text-4xl font-extrabold text-gold tracking-tight">₹{earnings}</span>
+            </div>
+            {ride.escortRequired && ride.escortCharge != null && (
+              <div className="text-[11px] text-gold/70 mt-0.5">incl. ₹{ride.escortCharge} escort</div>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[55%]">
+            {/* AC / Non-AC — always shown so the driver knows the duty type */}
+            <Badge
+              className={`gap-1 text-[10px] px-2 py-0.5 font-semibold ${
+                ride.isAc
+                  ? "bg-sky-500 text-white"
+                  : "bg-background/15 text-background border border-background/30"
+              }`}
+            >
+              <Wind className="h-2.5 w-2.5" /> {ride.isAc ? "AC" : "Non-AC"}
             </Badge>
-          )}
-          <Badge variant="outline" className="capitalize text-[10px] px-1.5 py-0 border-background/30 text-background">
-            {ride.type}
-          </Badge>
+            {ride.vehicleType && (
+              <Badge variant="outline" className="capitalize text-[10px] px-2 py-0.5 border-background/30 text-background">
+                {ride.vehicleType}
+              </Badge>
+            )}
+            {ride.escortRequired && (
+              <Badge className="bg-amber-500 text-white gap-1 text-[10px] px-2 py-0.5">
+                <Shield className="h-2.5 w-2.5" /> Escort
+              </Badge>
+            )}
+            <Badge variant="outline" className="capitalize text-[10px] px-2 py-0.5 border-background/30 text-background">
+              {ride.type}
+            </Badge>
+          </div>
         </div>
       </div>
 

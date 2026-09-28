@@ -292,6 +292,8 @@ export async function listDriverOffers(driverId: string) {
           paxCount: true,
           capacity: true,
           price: true,
+          isAc: true,
+          vehicleType: true,
           escortRequired: true,
           escortCharge: true,
           escortName: true,

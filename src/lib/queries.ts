@@ -313,6 +313,8 @@ export interface RideRow {
   dropAddress: string;
   price: number | null;
   totalAmount?: number | null;
+  isAc?: boolean;
+  vehicleType?: string | null;
   escortRequired?: boolean;
   escortCharge?: number | null;
   escortName?: string | null;

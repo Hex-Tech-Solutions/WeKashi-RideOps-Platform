@@ -11,7 +11,7 @@ import {
 } from "@/lib/queries";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer } from "lucide-react";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
@@ -510,6 +510,9 @@ function RideSummary({ ride }: { ride: RideRow }) {
       <div className="flex items-center gap-2 flex-wrap">
         <Badge variant="outline" className="capitalize">{ride.type}</Badge>
         <Badge variant="outline" className="capitalize">{ride.status.replace("_", " ")}</Badge>
+        <Badge className={ride.isAc ? "bg-sky-500 text-white gap-1" : "bg-muted text-muted-foreground gap-1"}>
+          <Wind className="h-3 w-3" /> {ride.isAc ? "AC" : "Non-AC"}
+        </Badge>
         {ride.escortRequired && (
           <Badge className="bg-amber-500 text-white gap-1 text-[11px]">
             <Shield className="h-3 w-3" /> Escort Ride

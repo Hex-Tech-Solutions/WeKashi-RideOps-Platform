@@ -342,6 +342,9 @@ model Ride {
   fareAdjustment     Float?     @default(0) @map("fare_adjustment")
   totalAmount        Float?   @map("total_amount")
   vehicleType        String?    @map("vehicle_type") // hatchback | sedan | suv
+  /// Whether this is an AC duty (₹100 flat surcharge already baked into `price`).
+  /// Surfaced to the driver so they know to run the AC.
+  isAc               Boolean    @default(false) @map("is_ac")
   paxCount           Int        @map("pax_count")
   capacity           Int
   scheduledFor       DateTime?  @map("scheduled_for")

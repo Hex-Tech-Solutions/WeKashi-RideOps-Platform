@@ -88,7 +88,7 @@ export async function createRide(
       INSERT INTO rides (
         id, type, status, supervisor_id,
         pickup_point, drop_point, pickup_address, drop_address,
-        distance_km, price, fare_adjustment, total_amount, vehicle_type,
+        distance_km, price, fare_adjustment, total_amount, vehicle_type, is_ac,
         pax_count, capacity, scheduled_for, planned_start_time,
         escort_required, escort_name, escort_charge, escort_otp,
         created_at
@@ -106,6 +106,7 @@ export async function createRide(
         ${fareAdjustment},
         ${totalAmount},
         ${input.vehicleType ?? null},
+        ${input.isAc ?? false},
         ${input.employeeIds.length},
         ${input.capacity ?? input.employeeIds.length},
         ${input.scheduledFor ?? null},
@@ -134,7 +135,7 @@ export async function createRide(
     INSERT INTO rides (
       id, type, status, supervisor_id, vendor_id,
       pickup_point, drop_point, pickup_address, drop_address,
-      distance_km, price, fare_adjustment, total_amount, vehicle_type,
+      distance_km, price, fare_adjustment, total_amount, vehicle_type, is_ac,
       pax_count, capacity, scheduled_for,
       planned_start_time,
       escort_required, escort_name, escort_charge, escort_otp,
@@ -154,6 +155,7 @@ export async function createRide(
       ${fareAdjustment},
       ${totalAmount},
       ${input.vehicleType ?? null},
+      ${input.isAc ?? false},
       ${input.employeeIds.length},
       ${input.capacity ?? input.employeeIds.length},
       ${input.scheduledFor ?? null},
@@ -989,6 +991,8 @@ async function getRidePublicPayload(rideId: string) {
       capacity: number;
       price: number | null;
       distance_km: number | null;
+      is_ac: boolean;
+      vehicle_type: string | null;
       escort_required: boolean;
       escort_charge: number | null;
       scheduled_for: Date | null;
@@ -999,7 +1003,7 @@ async function getRidePublicPayload(rideId: string) {
   >`
     SELECT
       id, type, status, pickup_address, drop_address, pax_count, capacity,
-      price, distance_km, escort_required, escort_charge,
+      price, distance_km, is_ac, vehicle_type, escort_required, escort_charge,
       scheduled_for, broadcast_expires_at,
       ST_Y(pickup_point::geometry) as pickup_lat,
       ST_X(pickup_point::geometry) as pickup_lng
