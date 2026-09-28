@@ -1679,6 +1679,22 @@ export function useDriverCredits() {
   });
 }
 
+export interface DriverStats {
+  totalEarnings: number;
+  trips: number;
+  creditsLeft: number;
+  totalExpenses: number;
+  profit: number;
+}
+
+export function useDriverStats() {
+  return useQuery({
+    queryKey: ["driver", "stats"],
+    queryFn: () => api<DriverStats>("/driver/stats"),
+    refetchInterval: 60_000,
+  });
+}
+
 export interface PackOrderResult {
   orderId: string;
   paymentSessionId: string; // Cashfree JS checkout session

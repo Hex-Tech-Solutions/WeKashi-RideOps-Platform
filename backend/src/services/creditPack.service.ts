@@ -182,3 +182,45 @@ export async function consumeOneCredit(
     UPDATE rides SET credit_consumed = true WHERE id = ${rideId}
   `;
 }
+
+/**
+ * Driver earnings dashboard (shown on the empty broadcasts screen):
+ *   - totalEarnings  Σ (price + escortCharge) over the driver's COMPLETED rides
+ *   - trips          count of COMPLETED rides
+ *   - creditsLeft    current usable credit balance
+ *   - totalExpenses  Σ amount over PAID pack orders (subscription purchases)
+ *   - profit         totalEarnings − totalExpenses
+ */
+export async function getDriverStats(driverId: string): Promise<{
+  totalEarnings: number;
+  trips: number;
+  creditsLeft: number;
+  totalExpenses: number;
+  profit: number;
+}> {
+  const [rides, paidOrders, creditsLeft] = await Promise.all([
+    prisma.ride.findMany({
+      where: { driverId, status: 'completed' },
+      select: { price: true, escortCharge: true },
+    }),
+    prisma.packOrder.findMany({
+      where: { driverId, status: 'paid' },
+      select: { amount: true },
+    }),
+    availableCredits(driverId),
+  ]);
+
+  const totalEarnings = rides.reduce(
+    (sum, r) => sum + (r.price ?? 0) + (r.escortCharge ?? 0),
+    0,
+  );
+  const totalExpenses = paidOrders.reduce((sum, o) => sum + (o.amount ?? 0), 0);
+
+  return {
+    totalEarnings: Math.round(totalEarnings),
+    trips: rides.length,
+    creditsLeft,
+    totalExpenses: Math.round(totalExpenses),
+    profit: Math.round(totalEarnings - totalExpenses),
+  };
+}

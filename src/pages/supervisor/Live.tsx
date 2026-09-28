@@ -16,6 +16,7 @@ import { DriverApproachBadge } from "@/components/DriverApproachBadge";
 import { Phone, Radio, AlertTriangle, Plus, Route, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { PagedGrid } from "@/components/PagedList";
 
 export default function Live() {
   const { data } = useRides({ limit: 100 });
@@ -63,9 +64,10 @@ export default function Live() {
           {liveList.length === 0 ? (
             <Empty title="No active rides" hint="Create a new booking to get started." />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {liveList.map((r) => <RideCard key={r.id} ride={r} onCancel={() => cancelRide.mutate(r.id, { onSuccess: () => toast.success("Ride cancelled"), onError: (e: any) => toast.error(e?.message ?? "Failed") })} />)}
-            </div>
+            <PagedGrid
+              items={liveList}
+              render={(r) => <RideCard key={r.id} ride={r} onCancel={() => cancelRide.mutate(r.id, { onSuccess: () => toast.success("Ride cancelled"), onError: (e: any) => toast.error(e?.message ?? "Failed") })} />}
+            />
           )}
         </TabsContent>
 
@@ -73,12 +75,13 @@ export default function Live() {
           {scheduledList.length === 0 ? (
             <Empty title="No scheduled rides" hint="Use 'Schedule ride' in a booking to post one for drivers to claim." />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {scheduledList.map((r) => (
+            <PagedGrid
+              items={scheduledList}
+              render={(r) => (
                 <RideCard key={r.id} ride={r}
                   onCancel={() => cancelRide.mutate(r.id, { onSuccess: () => toast.success("Scheduled ride cancelled"), onError: (e: any) => toast.error(e?.message ?? "Failed") })} />
-              ))}
-            </div>
+              )}
+            />
           )}
         </TabsContent>
 
@@ -86,7 +89,10 @@ export default function Live() {
           {attentionList.length === 0 ? (
             <Empty title="Nothing needs attention" hint="Expired or cancelled rides can be re-broadcast here." />
           ) : (
-            attentionList.map((r) => schedOverdue(r) ? (
+            <PagedGrid
+              items={attentionList}
+              className="space-y-4"
+              render={(r) => schedOverdue(r) ? (
               <Card key={r.id} className="shadow-card border-warning/40 bg-warning/5">
                 <CardContent className="p-5 flex flex-wrap items-center gap-4">
                   <div className="flex-1 min-w-[200px]">
@@ -111,7 +117,8 @@ export default function Live() {
                   onSuccess: () => toast.success("Re-broadcast initiated"),
                   onError: (e: any) => toast.error(e?.message ?? "Failed"),
                 })} />
-            ))
+            )}
+            />
           )}
         </TabsContent>
 
@@ -119,8 +126,9 @@ export default function Live() {
           {completedList.length === 0 ? (
             <Empty title="No completed rides yet" hint="Completed trips will appear here." />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {completedList.map((r) => (
+            <PagedGrid
+              items={completedList}
+              render={(r) => (
                 <div
                   key={r.id}
                   className="cursor-pointer group"
@@ -128,8 +136,8 @@ export default function Live() {
                 >
                   <RideCard ride={r} showDetailHint />
                 </div>
-              ))}
-            </div>
+              )}
+            />
           )}
         </TabsContent>
 

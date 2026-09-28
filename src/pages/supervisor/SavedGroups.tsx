@@ -115,7 +115,6 @@ export default function SavedGroups() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {templates.map((t) => {
-                const stats = report.find((r) => r.id === t.id);
                 return (
                   <Card key={t.id} className="shadow-card flex flex-col">
                     <CardHeader className="pb-3">
@@ -168,24 +167,6 @@ export default function SavedGroups() {
                           </div>
                         )}
                       </div>
-
-                      {/* Usage stats from report */}
-                      {stats && stats.totalRides > 0 && (
-                        <div className="grid grid-cols-3 gap-2 pt-2 border-t">
-                          <div className="text-center">
-                            <div className="text-base font-bold">{stats.totalRides}</div>
-                            <div className="text-[10px] text-muted-foreground">Total rides</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-base font-bold">{stats.completedRides}</div>
-                            <div className="text-[10px] text-muted-foreground">Completed</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-base font-bold">₹{(stats.totalRevenue / 1000).toFixed(1)}k</div>
-                            <div className="text-[10px] text-muted-foreground">Revenue</div>
-                          </div>
-                        </div>
-                      )}
 
                       <Button
                         className="w-full bg-gold text-gold-foreground hover:bg-gold/90 mt-auto"

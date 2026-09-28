@@ -374,7 +374,11 @@ export default function RoutesPage() {
       : officeData?.officeLat != null
       ? { lat: officeData.officeLat, lng: officeData.officeLng! }
       : pt(route.drop.point);
-    const officeName = officeOverride?.address ?? activeOffice?.name ?? officeData?.officeAddress ?? route.drop.name;
+    // Store the office's ACTUAL street address on the ride (not the supervisor's
+    // label like "Indicomm") so the driver sees a real destination they can
+    // navigate to. `activeOffice.address` is the geocoded address; `.name` is
+    // only the supervisor-facing reference label.
+    const officeName = officeOverride?.address ?? activeOffice?.address ?? officeData?.officeAddress ?? route.drop.name;
     // Send employees in the OPTIMIZED route order (nearest-neighbour + female-safety),
     // so the driver's OTP legs (stop 1,2,3…) follow the exact sequence shown here.
     const orderedIds = route.stops.map((s) => s.empId);

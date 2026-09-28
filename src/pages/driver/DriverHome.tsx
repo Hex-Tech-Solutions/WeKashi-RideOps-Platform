@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
+import { DriverEarningsCard } from "./DriverEarningsCard";
 
 /**
  * How long a driver→pickup distance stays fresh. Offers refresh every 8s; without
@@ -350,9 +351,15 @@ export default function DriverHome() {
             Ride broadcasts ({offers.length})
           </div>
           {!online ? (
-            <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Go online to see broadcasts.</CardContent></Card>
+            <div className="space-y-3">
+              <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Go online to see broadcasts.</CardContent></Card>
+              <DriverEarningsCard />
+            </div>
           ) : offers.length === 0 ? (
-            <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No broadcasts right now. Waiting…</CardContent></Card>
+            <div className="space-y-3">
+              <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No broadcasts right now. Waiting…</CardContent></Card>
+              <DriverEarningsCard />
+            </div>
           ) : (
             <div className="space-y-3 max-h-[560px] overflow-y-auto pr-0.5">
               {active && !queuedRide && (

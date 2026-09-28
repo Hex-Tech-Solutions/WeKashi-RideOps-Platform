@@ -22,7 +22,7 @@ async function resolveFileUrl(file: Express.Multer.File): Promise<string> {
 }
 import { listRides, listScheduledRidesForDriver } from '../services/ride.service';
 import { listPackCatalog } from '../lib/creditPacks';
-import { availableCredits, listPacks } from '../services/creditPack.service';
+import { availableCredits, listPacks, getDriverStats } from '../services/creditPack.service';
 import { createOrder, confirmAndActivate } from '../services/packOrder.service';
 import { saveAndValidateVpa } from '../services/vpa.service';
 import type { AuthRequest } from '../types';
@@ -211,6 +211,15 @@ router.delete('/documents/:id', async (req: AuthRequest, res: Response, next: Ne
 router.get('/packs/catalog', async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     res.json({ packs: listPackCatalog() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/driver/stats — earnings dashboard (earnings, trips, credits, expenses, profit)
+router.get('/stats', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getDriverStats(req.driver!.id));
   } catch (err) {
     next(err);
   }

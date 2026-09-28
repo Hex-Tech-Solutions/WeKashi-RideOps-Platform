@@ -92,7 +92,7 @@ export function DriverOfferCard({
                 <span className="text-[11px] text-muted-foreground">({approach.min} min away)</span>
               )}
             </div>
-            <div className="text-xs text-muted-foreground line-clamp-2 leading-snug">
+            <div className="text-xs text-muted-foreground leading-snug break-words">
               {ride.pickupAddress}
             </div>
           </div>
@@ -105,7 +105,7 @@ export function DriverOfferCard({
               </span>
               <span className="text-[11px] text-muted-foreground">trip</span>
             </div>
-            <div className="text-xs text-muted-foreground line-clamp-2 leading-snug">
+            <div className="text-xs text-muted-foreground leading-snug break-words">
               {ride.dropAddress}
             </div>
           </div>
