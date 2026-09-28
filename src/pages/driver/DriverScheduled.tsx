@@ -6,6 +6,7 @@ import { MapPin, Users, IndianRupee, Calendar, Wind, Shield } from "lucide-react
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
+import { HighlightedAddress } from "@/lib/highlightAddress";
 
 export default function DriverScheduled() {
   const { data: mkt } = useScheduledRides();
@@ -90,7 +91,10 @@ function SchedSummary({ ride }: { ride: RideRow }) {
 
       <div className="flex items-start gap-2 text-sm">
         <MapPin className="h-4 w-4 text-gold mt-0.5 shrink-0" />
-        <div><div className="font-medium">{ride.pickupAddress}</div><div className="text-muted-foreground text-xs">→ {ride.dropAddress}</div></div>
+        <div>
+          <HighlightedAddress address={ride.pickupAddress} className="font-medium block" />
+          <div className="text-muted-foreground text-xs">→ <HighlightedAddress address={ride.dropAddress} /></div>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">

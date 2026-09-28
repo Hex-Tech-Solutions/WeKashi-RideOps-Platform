@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check, X, Users, Shield, Timer, LogIn, MapPin, Wind } from "lucide-react";
 import type { RideRow } from "@/lib/queries";
+import { HighlightedAddress } from "@/lib/highlightAddress";
 
 /** Format an ISO datetime (or an HH:MM string) to HH:MM for display. */
 function fmtTime(v?: string | null): string | null {
@@ -119,9 +120,10 @@ export function DriverOfferCard({
                 <span className="text-[11px] text-muted-foreground">({approach.min} min away)</span>
               )}
             </div>
-            <div className="text-xs text-muted-foreground leading-snug break-words">
-              {ride.pickupAddress}
-            </div>
+            <HighlightedAddress
+              address={ride.pickupAddress}
+              className="text-xs text-muted-foreground leading-snug break-words block"
+            />
           </div>
 
           <div className="relative mt-2.5">
@@ -132,9 +134,10 @@ export function DriverOfferCard({
               </span>
               <span className="text-[11px] text-muted-foreground">trip</span>
             </div>
-            <div className="text-xs text-muted-foreground leading-snug break-words">
-              {ride.dropAddress}
-            </div>
+            <HighlightedAddress
+              address={ride.dropAddress}
+              className="text-xs text-muted-foreground leading-snug break-words block"
+            />
           </div>
         </div>
 
