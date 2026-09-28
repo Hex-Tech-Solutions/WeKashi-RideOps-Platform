@@ -89,7 +89,7 @@ export function CompletedRideDetailSheet({ rideId, onClose }: Props) {
               {/* ── Ride metadata ──────────────────────────────────────── */}
               <Section title="Trip Summary" icon={<Route className="h-3.5 w-3.5" />}>
                 <InfoGrid>
-                  <InfoRow label="Type" value={<span className="capitalize">{ride.type}</span>} />
+                  <InfoRow label="Type" value={<span className="capitalize text-green-700 font-medium">{ride.type}</span>} />
                   <InfoRow label="Vehicle" value={ride.vehicleType ?? "—"} />
                   {ride.distanceKm != null && (
                     <InfoRow label="Distance" value={`${ride.distanceKm} km`} />

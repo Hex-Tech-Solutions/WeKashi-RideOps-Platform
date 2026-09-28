@@ -89,7 +89,7 @@ export function DriverOfferCard({
                 <Shield className="h-2.5 w-2.5" /> Escort
               </Badge>
             )}
-            <Badge variant="outline" className="capitalize text-[10px] px-2 py-0.5 border-background/30 text-background">
+            <Badge variant="outline" className="capitalize text-[10px] px-2 py-0.5 border-green-400/50 text-green-400 bg-green-500/10">
               {ride.type}
             </Badge>
           </div>

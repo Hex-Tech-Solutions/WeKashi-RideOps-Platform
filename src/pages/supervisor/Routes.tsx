@@ -551,8 +551,8 @@ export default function RoutesPage() {
             )}
             <Tabs value={type} onValueChange={(v) => { setType(v as "login" | "logout"); setCustomStops(undefined); setOfficeOverride(null); }}>
               <TabsList>
-                <TabsTrigger value="login">Login (to office)</TabsTrigger>
-                <TabsTrigger value="logout">Logout (from office)</TabsTrigger>
+                <TabsTrigger value="login" className="text-green-600 data-[state=active]:text-green-700">Login (to office)</TabsTrigger>
+                <TabsTrigger value="logout" className="text-green-600 data-[state=active]:text-green-700">Logout (from office)</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

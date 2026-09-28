@@ -25,6 +25,7 @@ import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditGroupDialog } from "@/components/EditGroupDialog";
+import { RideTypeBadge } from "@/components/RideTypeLabel";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -121,7 +122,7 @@ export default function SavedGroups() {
                     <div className="min-w-[180px] flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-sm">{t.name}</span>
-                        <Badge variant="outline" className="capitalize text-[10px] py-0">{t.rideType}</Badge>
+                        <RideTypeBadge type={t.rideType} className="text-[10px] py-0" />
                         {t.vehicleType && (
                           <Badge variant="outline" className="capitalize text-[10px] py-0">
                             <Car className="h-3 w-3 mr-1" />{t.vehicleType}
@@ -216,7 +217,7 @@ export default function SavedGroups() {
                             </div>
                           )}
                         </div>
-                        <div className="px-3 py-3 capitalize">{r.rideType}</div>
+                        <div className="px-3 py-3 capitalize text-green-700 font-medium">{r.rideType}</div>
                         <div className="px-3 py-3 capitalize text-muted-foreground">{r.vehicleType ?? "any"}</div>
                         <div className="px-3 py-3">
                           <span className="flex items-center gap-1">

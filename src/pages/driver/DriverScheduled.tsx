@@ -5,6 +5,7 @@ import { useScheduledRides, useDriverRides, useClaimRide, useReleaseRide, type R
 import { MapPin, Users, IndianRupee, Calendar } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { RideTypeBadge } from "@/components/RideTypeLabel";
 
 export default function DriverScheduled() {
   const { data: mkt } = useScheduledRides();
@@ -69,7 +70,7 @@ function SchedSummary({ ride }: { ride: RideRow }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Badge variant="outline" className="capitalize">{ride.type}</Badge>
+        <RideTypeBadge type={ride.type} />
         {ride.scheduledFor && <span className="text-xs flex items-center gap-1 text-gold"><Calendar className="h-3.5 w-3.5" />{format(new Date(ride.scheduledFor), "EEE d MMM, HH:mm")}</span>}
       </div>
       <div className="flex items-start gap-2 text-sm">

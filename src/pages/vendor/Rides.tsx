@@ -34,7 +34,7 @@ export default function VendorRides() {
                 )}
                 {vendorRides.map((r) => (
                   <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
-                    <td className="px-6 py-3"><div className="font-mono text-xs">{r.id.slice(0, 8)}</div><div className="text-xs text-muted-foreground capitalize mt-0.5">{r.type}</div></td>
+                    <td className="px-6 py-3"><div className="font-mono text-xs">{r.id.slice(0, 8)}</div><div className="text-xs capitalize mt-0.5 text-green-700 font-medium">{r.type}</div></td>
                     <td className="px-6 py-3"><div className="font-medium">{r.driver?.fullName ?? "—"}</div><div className="text-xs text-muted-foreground">{r.driver?.phone ?? ""}</div></td>
                     <td className="px-6 py-3 text-muted-foreground">{r.pickupAddress} → {r.dropAddress}</td>
                     <td className="px-6 py-3"><div className="font-medium">{r.supervisor?.fullName ?? "—"}</div></td>

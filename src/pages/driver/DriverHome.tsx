@@ -18,6 +18,7 @@ import DriverBoarding from "./DriverBoarding";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
 import { DriverEarningsCard } from "./DriverEarningsCard";
 import { MadeInIndiaFooter } from "@/components/MadeInIndiaFooter";
+import { RideTypeBadge } from "@/components/RideTypeLabel";
 
 /**
  * How long a driver→pickup distance stays fresh. Offers refresh every 8s; without
@@ -508,7 +509,7 @@ function RideSummary({ ride }: { ride: RideRow }) {
     <div className="space-y-2">
       {/* Top badges row — countdown pinned right while broadcasting */}
       <div className="flex items-center gap-2 flex-wrap">
-        <Badge variant="outline" className="capitalize">{ride.type}</Badge>
+        <RideTypeBadge type={ride.type} />
         <Badge variant="outline" className="capitalize">{ride.status.replace("_", " ")}</Badge>
         <Badge className={ride.isAc ? "bg-sky-500 text-white gap-1" : "bg-muted text-muted-foreground gap-1"}>
           <Wind className="h-3 w-3" /> {ride.isAc ? "AC" : "Non-AC"}
