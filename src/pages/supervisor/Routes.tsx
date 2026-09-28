@@ -261,13 +261,16 @@ export default function RoutesPage() {
 
   // Live cabs near where the driver actually starts: the first pickup for a
   // login ride, or the office for a logout ride. Only polled on the map step.
+  // No vehicleType filter here — the overlay is an "available cabs in the area"
+  // indicator, so it must show every online cab nearby, not only the currently
+  // selected vehicle type (which previously made the map look empty).
   const cabAnchor = type === "logout"
     ? officePoint
     : (route.stops[0]?.point ?? officePoint);
   const { data: nearbyCabsData } = useNearbyCabs(
     cabAnchor?.lat,
     cabAnchor?.lng,
-    vehicleType,
+    null,
     step === 3,
   );
   const availLoaded = !!vehOpts;
