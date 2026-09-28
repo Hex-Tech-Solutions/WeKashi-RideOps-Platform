@@ -53,7 +53,7 @@ export function CompletedRideDetailSheet({ rideId, onClose }: Props) {
             Ride Detail
             {ride && (
               <span className="font-mono text-xs text-muted-foreground ml-1">
-                #{ride.id.slice(-8).toUpperCase()}
+                #{ride.id.slice(0, 8)}
               </span>
             )}
             {ride && (

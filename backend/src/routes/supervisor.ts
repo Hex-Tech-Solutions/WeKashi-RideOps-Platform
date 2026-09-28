@@ -378,7 +378,7 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
         office:               r.dropAddress,
         date:                 fmtDate(r.createdAt),
         tripTypeShiftTime:    `${r.type.charAt(0).toUpperCase() + r.type.slice(1)} ${plannedStart ? fmt(plannedStart) : ''}`.trim(),
-        tripId:               r.id.slice(-8).toUpperCase(),
+        tripId:               r.id.slice(0, 8),
         vehicleId:            vehicleLabel,
         registrationNo:       regNo,
         vendor:               vendorName,
