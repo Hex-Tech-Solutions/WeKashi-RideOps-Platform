@@ -10,8 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useEmployees, useDeleteEmployee, useOfficeLocations, useUpdateEmployeeCompany } from "@/lib/queries";
 import { api } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
-import { Upload, Plus, Search, Trash2, Loader2, Building2, Pencil } from "lucide-react";
-import { AddEmployeeDialog } from "@/components/AddEmployeeDialog";
+import { Upload, Plus, Search, Trash2, Loader2, Building2, Pencil, MapPin, Move } from "lucide-react";
+import { AddEmployeeDialog, PinMap } from "@/components/AddEmployeeDialog";
 import { CsvImportDialog } from "@/components/CsvImportDialog";
 import { PlacesInput } from "@/components/PlacesInput";
 import { TimeSelect } from "@/components/TimeSelect";
@@ -272,82 +272,108 @@ function EditEmployeeDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Edit employee — {employee.empId}</DialogTitle>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-4 py-2">
-          <div className="col-span-2">
-            <Label>Full name</Label>
-            <Input className="mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </div>
+      <DialogContent className="max-w-4xl overflow-hidden p-0">
+        <div className="flex flex-col md:flex-row h-full min-h-0">
 
-          <div>
-            <Label>Gender</Label>
-            <Select value={form.gender} onValueChange={(v) => setForm({ ...form, gender: v as "M" | "F" })}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="M">Male</SelectItem>
-                <SelectItem value="F">Female</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* ── Left: form ───────────────────────────────────────────────── */}
+          <div className="flex-1 min-w-0 p-6 overflow-y-auto max-h-[90vh]">
+            <DialogHeader className="mb-4">
+              <DialogTitle>Edit employee — {employee.empId}</DialogTitle>
+            </DialogHeader>
 
-          <div>
-            <Label>Phone</Label>
-            <Input className="mt-1" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+91 ..." />
-          </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <Label>Full name</Label>
+                <Input className="mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </div>
 
-          {/* Pickup location */}
-          <div className="col-span-2">
-            <Label>Pickup / Home address</Label>
-            <div className="mt-1">
-              <PlacesInput
-                placeholder="Search new pickup address…"
-                onSelect={(loc) => setPickup(loc)}
-              />
+              <div>
+                <Label>Gender</Label>
+                <Select value={form.gender} onValueChange={(v) => setForm({ ...form, gender: v as "M" | "F" })}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="M">Male</SelectItem>
+                    <SelectItem value="F">Female</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Phone</Label>
+                <Input className="mt-1" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+91 ..." />
+              </div>
+
+              {/* Pickup location */}
+              <div className="col-span-2">
+                <Label className="flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-muted-foreground" /> Pickup / Home address
+                </Label>
+                <div className="mt-1">
+                  <PlacesInput
+                    placeholder="Search new pickup address…"
+                    onSelect={(loc) => setPickup(loc)}
+                  />
+                </div>
+                <div className="mt-1.5 text-xs rounded bg-secondary px-2.5 py-1.5 text-muted-foreground flex items-start gap-1">
+                  <MapPin className="h-3 w-3 shrink-0 mt-0.5 text-gold" />
+                  {pickup?.address ?? employee.pickupAddress}
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  Search a new address or drag the pin on the map to fine-tune the exact location.
+                </div>
+              </div>
+
+              <div>
+                <Label>Login time</Label>
+                <TimeSelect className="mt-1" value={form.shiftStart} onChange={(v) => setForm({ ...form, shiftStart: v })} />
+              </div>
+
+              <div>
+                <Label>Logout time</Label>
+                <TimeSelect className="mt-1" value={form.shiftEnd} onChange={(v) => setForm({ ...form, shiftEnd: v })} />
+              </div>
+
+              {offices.length > 0 && (
+                <div className="col-span-2">
+                  <Label>Company / Office</Label>
+                  <Select
+                    value={form.companyLabel || "__none__"}
+                    onValueChange={(v) => setForm({ ...form, companyLabel: v === "__none__" ? "" : v })}
+                  >
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="No company assigned" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— No company —</SelectItem>
+                      {offices.map((o) => (
+                        <SelectItem key={o.id} value={o.name}>
+                          {o.name}{o.isDefault ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
-            <div className="mt-1.5 text-xs rounded bg-secondary px-2.5 py-1.5 text-muted-foreground">
-              📍 {pickup?.address ?? employee.pickupAddress}
+
+            <DialogFooter className="mt-6">
+              <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+              <Button className="bg-foreground text-background hover:bg-foreground/90" onClick={submit} disabled={saving}>
+                {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</> : "Save changes"}
+              </Button>
+            </DialogFooter>
+          </div>
+
+          {/* ── Right: map ────────────────────────────────────────────────── */}
+          <div className="w-full md:w-96 border-t md:border-t-0 md:border-l bg-muted/30 flex flex-col">
+            <div className="px-4 py-3 border-b flex items-center gap-2 text-sm font-medium">
+              <Move className="h-4 w-4 text-muted-foreground" />
+              {pickup ? "Drag pin to exact location" : "Map preview"}
+            </div>
+            <div className="flex-1 relative min-h-[300px] md:min-h-0">
+              <PinMap location={pickup} onMoved={(loc) => setPickup(loc)} />
             </div>
           </div>
 
-          <div>
-            <Label>Login time</Label>
-            <TimeSelect className="mt-1" value={form.shiftStart} onChange={(v) => setForm({ ...form, shiftStart: v })} />
-          </div>
-
-          <div>
-            <Label>Logout time</Label>
-            <TimeSelect className="mt-1" value={form.shiftEnd} onChange={(v) => setForm({ ...form, shiftEnd: v })} />
-          </div>
-
-          {offices.length > 0 && (
-            <div className="col-span-2">
-              <Label>Company / Office</Label>
-              <Select
-                value={form.companyLabel || "__none__"}
-                onValueChange={(v) => setForm({ ...form, companyLabel: v === "__none__" ? "" : v })}
-              >
-                <SelectTrigger className="mt-1"><SelectValue placeholder="No company assigned" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— No company —</SelectItem>
-                  {offices.map((o) => (
-                    <SelectItem key={o.id} value={o.name}>
-                      {o.name}{o.isDefault ? " (default)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button className="bg-foreground text-background hover:bg-foreground/90" onClick={submit} disabled={saving}>
-            {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</> : "Save changes"}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

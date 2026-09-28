@@ -199,7 +199,7 @@ export function AddEmployeeDialog({ open, onOpenChange }: { open: boolean; onOpe
 
 // ─── Draggable pin map ─────────────────────────────────────────────────────────
 
-function PinMap({
+export function PinMap({
   location,
   onMoved,
 }: {
