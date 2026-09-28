@@ -20,6 +20,7 @@ import { NotFoundError, ValidationError } from '../types';
 import { logger } from '../lib/logger';
 import { computeFare } from '../lib/pricing';
 import { redis } from '../lib/redis';
+import { emitDriverBroadcast } from '../lib/driverBroadcast';
 import type { Server as IoServer } from 'socket.io';
 
 interface RebookResult {
@@ -236,11 +237,6 @@ export async function sosRebook(
 
   if (nearbyDrivers.length > 0) {
     const driverIds = nearbyDrivers.map((d) => d.id);
-    const drivers = await prisma.driver.findMany({
-      where: { id: { in: driverIds } },
-      select: { id: true, vendorId: true },
-    });
-    const vendorIds = [...new Set(drivers.map((d) => d.vendorId))];
 
     const ridePayload = {
       id: newRideId, type: ride_type, status: 'broadcasting',
@@ -248,14 +244,14 @@ export async function sosRebook(
       pax_count: paxCount, capacity, distance_km: estimatedKm, price,
     };
 
-    for (const vid of vendorIds) {
-      io.of('/driver').to(`vendor:${vid}`).emit('ride:broadcast', ridePayload);
-    }
-
+    // Persist offers BEFORE emitting so the driver app can refetch a complete
+    // offer model when the socket alert fires.
     await prisma.rideOffer.createMany({
       data: driverIds.map((driverId) => ({ rideId: newRideId, driverId, response: 'pending' })),
       skipDuplicates: true,
     });
+
+    emitDriverBroadcast(io, driverIds, ridePayload);
   }
 
   // ── 12. Notify supervisor and admin ──────────────────────────────────────

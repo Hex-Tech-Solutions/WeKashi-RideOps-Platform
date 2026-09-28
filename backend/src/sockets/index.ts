@@ -123,19 +123,9 @@ export function initSockets(httpServer: HttpServer): IoServer {
     s.join(`vendor:${vendorId}`);
     s.join(`driver:${driverId}`);
 
-    // Mark driver online
-    await prisma.driver.update({
-      where: { id: driverId },
-      data: { isOnline: true },
-    });
-
     logger.info({ driverId, vendorId, socketId: s.id }, 'Driver connected');
 
     s.on('disconnect', async () => {
-      await prisma.driver.update({
-        where: { id: driverId },
-        data: { isOnline: false },
-      });
       logger.info({ driverId, socketId: s.id }, 'Driver disconnected');
     });
 

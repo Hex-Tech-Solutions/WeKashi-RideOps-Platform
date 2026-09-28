@@ -15,6 +15,7 @@ import {
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import { availableCredits, consumeOneCredit } from './creditPack.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
+import { emitDriverBroadcast } from '../lib/driverBroadcast';
 import { randomInt } from 'crypto';
 import type { Server as IoServer } from 'socket.io';
 
@@ -192,31 +193,24 @@ export async function createRide(
 
   logger.info({ rideId, nearbyCount: nearbyDrivers.length }, 'Ride created, broadcasting');
 
-  // Emit to vendor rooms
-  if (io && nearbyDrivers.length > 0) {
-    // Group by vendor from DB
-    const driverIds = nearbyDrivers.map((d) => d.id);
-    const drivers = await prisma.driver.findMany({
-      where: { id: { in: driverIds } },
-      select: { id: true, vendorId: true },
-    });
+  const driverIds = nearbyDrivers.map((d) => d.id);
 
-    const vendorIds = [...new Set(drivers.map((d) => d.vendorId))];
-    const ridePayload = await getRidePublicPayload(rideId);
-
-    for (const vendorId of vendorIds) {
-      io.of('/driver').to(`vendor:${vendorId}`).emit('ride:broadcast', ridePayload);
-    }
-
-    // Also create offer records
+  // Persist offers before notifying clients. This prevents the instant socket
+  // refresh from racing a not-yet-created RideOffer row.
+  if (driverIds.length > 0) {
     await prisma.rideOffer.createMany({
       data: driverIds.map((driverId) => ({ rideId, driverId, response: 'pending' })),
       skipDuplicates: true,
     });
+  }
+
+  if (io && driverIds.length > 0) {
+    const ridePayload = await getRidePublicPayload(rideId);
+    emitDriverBroadcast(io, driverIds, ridePayload);
 
     io.of('/supervisor')
       .to(`supervisor:${input.supervisorId}`)
-      .emit('ride:status_changed', { rideId, status: 'broadcasting', nearbyCount: nearbyDrivers.length });
+      .emit('ride:status_changed', { rideId, status: 'broadcasting', nearbyCount: driverIds.length });
   }
 
   return { ride: { id: rideId, status: 'broadcasting' }, nearbyCount: nearbyDrivers.length };
@@ -518,14 +512,11 @@ export async function rebroadcastRide(
       const { lat, lng } = pickupRows[0];
       const nearbyDrivers = await findNearbyDrivers(lat, lng, BROADCAST_RADIUS_KM);
       const driverIds = nearbyDrivers.map((d) => d.id);
-      const drivers = await prisma.driver.findMany({
-        where: { id: { in: driverIds } },
-        select: { id: true, vendorId: true },
+      await prisma.rideOffer.createMany({
+        data: driverIds.map((driverId) => ({ rideId, driverId, response: 'pending' })),
+        skipDuplicates: true,
       });
-      const vendorIds = [...new Set(drivers.map((d) => d.vendorId))];
-      for (const vendorId of vendorIds) {
-        io.of('/driver').to(`vendor:${vendorId}`).emit('ride:broadcast', ridePayload);
-      }
+      emitDriverBroadcast(io, driverIds, ridePayload);
     }
   }
 }
@@ -575,13 +566,12 @@ export async function releaseQueuedRide(
     if (pickupRows.length > 0) {
       const { lat, lng } = pickupRows[0];
       const nearby = await findNearbyDrivers(lat, lng, BROADCAST_RADIUS_KM);
-      const drivers = await prisma.driver.findMany({
-        where: { id: { in: nearby.map((d) => d.id).filter((id) => id !== driverId) } },
-        select: { vendorId: true },
+      const driverIds = nearby.map((d) => d.id).filter((id) => id !== driverId);
+      await prisma.rideOffer.createMany({
+        data: driverIds.map((id) => ({ rideId, driverId: id, response: 'pending' })),
+        skipDuplicates: true,
       });
-      for (const vendorId of [...new Set(drivers.map((d) => d.vendorId))]) {
-        io.of('/driver').to(`vendor:${vendorId}`).emit('ride:broadcast', ridePayload);
-      }
+      emitDriverBroadcast(io, driverIds, ridePayload);
     }
     io.of('/supervisor').to(`supervisor:${ride.supervisorId}`).emit('ride:status_changed', {
       rideId, status: 'broadcasting',
@@ -656,15 +646,12 @@ export async function driverCancelAssignedRide(
     if (pickupRows.length > 0) {
       const { lat, lng } = pickupRows[0];
       const nearby = await findNearbyDrivers(lat, lng, BROADCAST_RADIUS_KM);
-      // Exclude the driver who just dropped it — re-offering them their own
-      // abandoned ride is noise at best.
-      const drivers = await prisma.driver.findMany({
-        where: { id: { in: nearby.map((d) => d.id).filter((id) => id !== driverId) } },
-        select: { vendorId: true },
+      const driverIds = nearby.map((d) => d.id).filter((id) => id !== driverId);
+      await prisma.rideOffer.createMany({
+        data: driverIds.map((id) => ({ rideId, driverId: id, response: 'pending' })),
+        skipDuplicates: true,
       });
-      for (const vendorId of [...new Set(drivers.map((d) => d.vendorId))]) {
-        io.of('/driver').to(`vendor:${vendorId}`).emit('ride:broadcast', ridePayload);
-      }
+      emitDriverBroadcast(io, driverIds, ridePayload);
     }
   }
 
@@ -1160,3 +1147,4 @@ export async function getRideDetail(rideId: string): Promise<RideDetailResult> {
     locationTrail: ride.locationLogs,
   };
 }
+

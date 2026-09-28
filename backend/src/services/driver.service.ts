@@ -8,7 +8,7 @@ import { grantJoiningBonus } from './creditPack.service';
 // Next-ride queueing: a driver whose in-progress ride's drop is within this
 // straight-line distance of their current location is "finishing" and becomes
 // eligible to accept a new broadcast (held as a queued ride). Tunable.
-export const FINISHING_DISTANCE_KM = 3;
+export const FINISHING_DISTANCE_KM = 0.3;
 
 export interface CreateDriverInput {
   phone: string;

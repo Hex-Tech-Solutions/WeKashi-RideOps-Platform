@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, type IssueRow } from "@/lib/queries";
+import { useDriverBroadcastSocket, type DriverBroadcastPayload } from "@/lib/driverRideAlerts";
 import DriverHome from "./DriverHome";
 import DriverScheduled from "./DriverScheduled";
 import DriverDocuments from "./DriverDocuments";
@@ -27,6 +28,13 @@ export default function DriverShell() {
   const { data: offersData } = useDriverOffers();
   const online = me?.isOnline ?? false;
   const availableOffersCount = offersData?.totalCount ?? 0;
+
+  // Rapido-style live broadcast alert: vibration + sound + surface the offer.
+  // Only active while the driver is Online. The hook itself refetches offers.
+  const handleBroadcast = useCallback((_payload: DriverBroadcastPayload) => {
+    setTab("rides");
+  }, []);
+  useDriverBroadcastSocket(online, handleBroadcast);
 
   // Active ride — needed to attach the SOS to the right ride
   const rides  = ridesData?.rides ?? [];
