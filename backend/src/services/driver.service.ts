@@ -351,3 +351,55 @@ export async function countDriverOffers(driverId: string): Promise<number> {
     where: { driverId, response: 'pending', ride: { status: 'broadcasting' } },
   });
 }
+
+/**
+ * Nearby ONLINE cabs around a point, for the live booking-map overlay (the
+ * "cars moving near the pickup" view like Rapido/Uber). Returns coordinates +
+ * vehicle type + a coarse heading so the client can rotate the car icon.
+ *
+ * Deliberately lighter than findNearbyDrivers(): this is a visual availability
+ * indicator, so it only requires online + active + approved + a GPS fix. It
+ * intentionally does NOT apply the credit/active-ride/queued gates — the map is
+ * showing "cabs in the area", not "who will get this exact broadcast".
+ */
+export interface NearbyCab {
+  id: string;
+  lat: number;
+  lng: number;
+  vehicleType: string | null;
+  bearing: number | null; // degrees, 0 = north; null if unknown
+}
+
+export async function listNearbyCabs(
+  lat: number,
+  lng: number,
+  radiusKm: number,
+  vehicleType?: string | null,
+): Promise<NearbyCab[]> {
+  const vt = vehicleType ?? null;
+  const rows = await prisma.$queryRaw<Array<{
+    id: string; vehicle_type: string | null; lat: number; lng: number;
+  }>>`
+    SELECT id, vehicle_type,
+      ST_Y(current_location::geometry) AS lat,
+      ST_X(current_location::geometry) AS lng
+    FROM drivers
+    WHERE is_online = true
+      AND status = 'active'
+      AND kyc_status = 'approved'
+      AND current_location IS NOT NULL
+      AND (${vt}::text IS NULL OR vehicle_type = ${vt})
+      AND ST_DWithin(current_location, ST_Point(${lng}, ${lat})::geography, ${radiusKm * 1000})
+    ORDER BY ST_Distance(current_location, ST_Point(${lng}, ${lat})::geography)
+    LIMIT 25
+  `;
+  // bearing is derived client-side from consecutive polls (the car rotates
+  // toward its direction of travel), so it isn't queried here.
+  return rows.map((r) => ({
+    id: r.id,
+    lat: r.lat,
+    lng: r.lng,
+    vehicleType: r.vehicle_type,
+    bearing: null,
+  }));
+}

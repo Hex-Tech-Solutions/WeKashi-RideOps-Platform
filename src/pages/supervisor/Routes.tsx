@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   useEmployees, useCreateRide, useVehicleOptions, useSupervisorOffice,
-  useOfficeLocations, useOptimizeRoute,
+  useOfficeLocations, useOptimizeRoute, useNearbyCabs,
   type CreateRidePayload, type OfficeLocationRow,
 } from "@/lib/queries";
 import {
@@ -258,6 +258,18 @@ export default function RoutesPage() {
     ? (officeOverride ?? activeOffice ?? (officeData?.officeLat != null ? { lat: officeData.officeLat, lng: officeData.officeLng! } : null))
     : route.stops[0]?.point;
   const { data: vehOpts } = useVehicleOptions(searchOrigin?.lat, searchOrigin?.lng, selected.length || undefined);
+
+  // Live cabs near where the driver actually starts: the first pickup for a
+  // login ride, or the office for a logout ride. Only polled on the map step.
+  const cabAnchor = type === "logout"
+    ? officePoint
+    : (route.stops[0]?.point ?? officePoint);
+  const { data: nearbyCabsData } = useNearbyCabs(
+    cabAnchor?.lat,
+    cabAnchor?.lng,
+    vehicleType,
+    step === 3,
+  );
   const availLoaded = !!vehOpts;
   const availabilityFor = (t: VehicleType) => vehOpts?.options.find((o) => o.type === t)?.availableCount ?? 0;
   // Selectable = allowed by group size. Show all types regardless of availability
@@ -669,6 +681,7 @@ export default function RoutesPage() {
                 setPickupTimes((prev) => ({ ...prev, [empId]: time }))
               }
               pickupTimeWindow={pickupTimeWindow}
+              nearbyCabs={nearbyCabsData?.cabs}
             />
 
             {/* Per-stop time block warning — shown when female stops are missing their time */}

@@ -30,7 +30,14 @@ interface Props {
   polyline?: string | null;
   /** True while the backend is computing/re-computing the route for the current stops. */
   routeLoading?: boolean;
+  /** Live online cabs near the pickup — rendered as animated moving car icons. */
+  nearbyCabs?: { id: string; lat: number; lng: number; bearing: number | null }[];
 }
+
+// A top-down car glyph (viewBox 24x24, pointing "up"/north). Rotated per-cab
+// toward its direction of travel to give the Rapido/Uber live-movement feel.
+const CAR_SVG_PATH =
+  "M5 11l1.5-4.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11v6a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-6z";
 
 // ─── Reverse geocode helper ───────────────────────────────────────────────────
 
@@ -63,6 +70,7 @@ export function GoogleRouteMap({
   pickupTimeWindow,
   polyline,
   routeLoading,
+  nearbyCabs,
 }: Props) {
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -70,6 +78,14 @@ export function GoogleRouteMap({
   const officeMarkerRef = useRef<google.maps.Marker | null>(null);
   const polylineRef = useRef<google.maps.Polyline | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
+
+  // Live cab markers, keyed by driver id, with animation bookkeeping so each
+  // car glides from its old position to the new one and rotates toward travel.
+  const cabMarkersRef = useRef<Map<string, {
+    marker: google.maps.Marker;
+    anim: number | null;   // requestAnimationFrame handle
+    heading: number;        // current icon rotation (deg)
+  }>>(new Map());
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -245,6 +261,110 @@ export function GoogleRouteMap({
     onOfficeMoved,
     polyline,
   ]);
+
+  // ── Live nearby cabs — animated moving car markers ─────────────────────────
+  // Each poll gives fresh coordinates; we glide the marker from its current
+  // position to the target over ~1s and rotate the car toward its heading.
+  const cabsKey = useMemo(
+    () => (nearbyCabs ?? []).map((c) => `${c.id}:${c.lat.toFixed(5)},${c.lng.toFixed(5)}`).join("|"),
+    [nearbyCabs],
+  );
+
+  useEffect(() => {
+    if (!ready || !mapRef.current) return;
+    const g = (window as any).google as typeof google;
+    const map = mapRef.current;
+    const cabs = nearbyCabs ?? [];
+    const store = cabMarkersRef.current;
+
+    const carIcon = (rotation: number): google.maps.Symbol => ({
+      path: CAR_SVG_PATH,
+      anchor: new g.maps.Point(12, 12),
+      scale: 1.1,
+      rotation,
+      fillColor: "#111827",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 1.5,
+    });
+
+    const bearingBetween = (a: google.maps.LatLng, b: google.maps.LatLng): number => {
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const toDeg = (r: number) => (r * 180) / Math.PI;
+      const y = Math.sin(toRad(b.lng() - a.lng())) * Math.cos(toRad(b.lat()));
+      const x =
+        Math.cos(toRad(a.lat())) * Math.sin(toRad(b.lat())) -
+        Math.sin(toRad(a.lat())) * Math.cos(toRad(b.lat())) * Math.cos(toRad(b.lng() - a.lng()));
+      return (toDeg(Math.atan2(y, x)) + 360) % 360;
+    };
+
+    const seen = new Set<string>();
+    for (const cab of cabs) {
+      seen.add(cab.id);
+      const target = new g.maps.LatLng(cab.lat, cab.lng);
+      const existing = store.get(cab.id);
+
+      if (!existing) {
+        const marker = new g.maps.Marker({
+          map,
+          position: target,
+          icon: carIcon(cab.bearing ?? 0),
+          zIndex: 50,
+          title: "Available cab",
+        });
+        store.set(cab.id, { marker, anim: null, heading: cab.bearing ?? 0 });
+        continue;
+      }
+
+      const from = existing.marker.getPosition();
+      if (!from || from.equals(target)) continue;
+
+      // Rotate toward the direction of travel derived from the move.
+      const heading = bearingBetween(from, target);
+      existing.heading = heading;
+      existing.marker.setIcon(carIcon(heading));
+
+      // Cancel any in-flight animation, then tween position over ~1s.
+      if (existing.anim != null) cancelAnimationFrame(existing.anim);
+      const startLat = from.lat();
+      const startLng = from.lng();
+      const dLat = target.lat() - startLat;
+      const dLng = target.lng() - startLng;
+      const startTs = performance.now();
+      const DURATION = 1000;
+      const step = (now: number) => {
+        const t = Math.min(1, (now - startTs) / DURATION);
+        existing.marker.setPosition(
+          new g.maps.LatLng(startLat + dLat * t, startLng + dLng * t),
+        );
+        if (t < 1) existing.anim = requestAnimationFrame(step);
+        else existing.anim = null;
+      };
+      existing.anim = requestAnimationFrame(step);
+    }
+
+    // Remove cabs that dropped out of range / went offline.
+    for (const [id, entry] of store) {
+      if (!seen.has(id)) {
+        if (entry.anim != null) cancelAnimationFrame(entry.anim);
+        entry.marker.setMap(null);
+        store.delete(id);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, cabsKey]);
+
+  // Clean up all cab markers on unmount.
+  useEffect(() => {
+    const store = cabMarkersRef.current;
+    return () => {
+      for (const [, entry] of store) {
+        if (entry.anim != null) cancelAnimationFrame(entry.anim);
+        entry.marker.setMap(null);
+      }
+      store.clear();
+    };
+  }, []);
 
   const totalKm = route.totalKm;
   const etaMin = route.etaMin;

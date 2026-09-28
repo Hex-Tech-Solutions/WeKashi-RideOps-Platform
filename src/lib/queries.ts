@@ -1681,6 +1681,37 @@ export function useDriverCredits() {
   });
 }
 
+export interface NearbyCab {
+  id: string;
+  lat: number;
+  lng: number;
+  vehicleType: string | null;
+  bearing: number | null;
+}
+
+/**
+ * Live online cabs near the pickup, for the booking-map moving-car overlay.
+ * Polls every 5s while enabled (a pickup point + step 3 map is visible).
+ */
+export function useNearbyCabs(
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+  vehicleType?: string | null,
+  enabled = true,
+) {
+  const on = enabled && lat != null && lng != null;
+  return useQuery({
+    queryKey: ["nearbyCabs", lat, lng, vehicleType],
+    queryFn: () => {
+      const params = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+      if (vehicleType) params.set("vehicleType", vehicleType);
+      return api<{ cabs: NearbyCab[] }>(`/rides/nearby-cabs?${params.toString()}`);
+    },
+    enabled: on,
+    refetchInterval: on ? 5_000 : false,
+  });
+}
+
 export interface DriverStats {
   totalEarnings: number;
   trips: number;

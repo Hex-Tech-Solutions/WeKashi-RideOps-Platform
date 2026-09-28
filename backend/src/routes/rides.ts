@@ -133,6 +133,28 @@ export function createRidesRouter(io: IoServer): Router {
     }
   });
 
+  // GET /rides/nearby-cabs?lat=&lng=&vehicleType=&radius= — live online cabs
+  // near the pickup, for the Rapido/Uber-style moving-car overlay on the
+  // booking map. Supervisor/admin only. Poll this every few seconds.
+  router.get('/nearby-cabs', requireRole('supervisor', 'admin'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        res.json({ cabs: [] });
+        return;
+      }
+      const radius = Math.min(Math.max(Number(req.query.radius) || 6, 1), 15);
+      const vehicleType = typeof req.query.vehicleType === 'string' && req.query.vehicleType
+        ? req.query.vehicleType
+        : null;
+      const { listNearbyCabs } = await import('../services/driver.service');
+      res.json({ cabs: await listNearbyCabs(lat, lng, radius, vehicleType) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /rides — supervisor only
   router.post(
     '/',
