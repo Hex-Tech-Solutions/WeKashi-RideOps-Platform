@@ -19,6 +19,7 @@ import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
 import { DriverEarningsCard } from "./DriverEarningsCard";
 import { MadeInIndiaFooter } from "@/components/MadeInIndiaFooter";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
+import { format } from "date-fns";
 
 /**
  * How long a driver→pickup distance stays fresh. Offers refresh every 8s; without
@@ -43,11 +44,30 @@ export default function DriverHome() {
   const online = me?.isOnline ?? false;
   const offers = offersData?.offers ?? [];
   const rides = ridesData?.rides ?? [];
+
+  // Scheduled-ride timing gates: a claimed scheduled ride only surfaces as an
+  // ACTIVE ride 3h before its pickup, and can only be STARTED from 40 min before.
+  // A live-broadcast ride (no scheduledFor) is active immediately, as before.
+  const ACTIVE_WINDOW_MS = 3 * 60 * 60 * 1000;   // 3 hours before pickup
+  const START_WINDOW_MS = 40 * 60 * 1000;        // 40 minutes before pickup
+  const scheduledReady = (r: RideRow) => {
+    if (!r.scheduledFor) return true; // live ride — always active
+    return new Date(r.scheduledFor).getTime() - Date.now() <= ACTIVE_WINDOW_MS;
+  };
+  const canStartScheduled = (r: RideRow) => {
+    if (!r.scheduledFor) return true;
+    return new Date(r.scheduledFor).getTime() - Date.now() <= START_WINDOW_MS;
+  };
+
   // The ACTIVE ride is the one the driver is serving now: assigned/in_progress
   // and NOT queued behind another ride. The QUEUED ride (if any) is an
   // assigned ride with queuedBehindRideId set — held until the active one ends.
+  // A claimed scheduled ride stays out of the active slot until its 3h window.
   const active = rides.find(
-    (r) => (r.status === "assigned" || r.status === "in_progress") && !r.queuedBehindRideId,
+    (r) =>
+      (r.status === "in_progress" ||
+        (r.status === "assigned" && scheduledReady(r))) &&
+      !r.queuedBehindRideId,
   );
   const queuedRide = rides.find((r) => r.status === "assigned" && !!r.queuedBehindRideId);
 
@@ -147,12 +167,19 @@ export default function DriverHome() {
   const isLogoutRide = (ride: RideRow) => ride.type === "logout";
 
   const canStartTrip = (ride: RideRow) => {
+    // Scheduled rides can't be started until 40 min before pickup, regardless
+    // of ride type.
+    if (!canStartScheduled(ride)) return false;
     if (!isLogoutRide(ride)) return true;
     // Must be at the office and have everyone accounted for before departing.
     return arrivedRideIds.has(ride.id) && allBoarded;
   };
 
   const startBlockedReason = (ride: RideRow) => {
+    if (!canStartScheduled(ride) && ride.scheduledFor) {
+      const t = format(new Date(ride.scheduledFor), "EEE d MMM, HH:mm");
+      return `This scheduled ride starts near ${t}. You can begin it 40 minutes before pickup.`;
+    }
     if (!arrivedRideIds.has(ride.id)) return "Confirm arrival at the office first.";
     return "Verify every employee's boarding OTP (or mark them no-show) before starting.";
   };

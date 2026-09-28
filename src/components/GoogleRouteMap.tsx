@@ -34,10 +34,10 @@ interface Props {
   nearbyCabs?: { id: string; lat: number; lng: number; bearing: number | null }[];
 }
 
-// A top-down car glyph (viewBox 24x24, pointing "up"/north). Rotated per-cab
-// toward its direction of travel to give the Rapido/Uber live-movement feel.
-const CAR_SVG_PATH =
-  "M5 11l1.5-4.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11v6a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-6z";
+// Real top-view car image (points "up"/north); rotated per-cab toward its
+// direction of travel for the Rapido/Uber live-movement feel.
+import carTopUrl from "@/assets/car-top.png";
+const CAR_ICON_SIZE = 34; // px on the map
 
 // ─── Reverse geocode helper ───────────────────────────────────────────────────
 
@@ -277,26 +277,14 @@ export function GoogleRouteMap({
     const cabs = nearbyCabs ?? [];
     const store = cabMarkersRef.current;
 
-    const carIcon = (rotation: number): google.maps.Symbol => ({
-      path: CAR_SVG_PATH,
-      anchor: new g.maps.Point(12, 12),
-      scale: 1.1,
-      rotation,
-      fillColor: "#111827",
-      fillOpacity: 1,
-      strokeColor: "#ffffff",
-      strokeWeight: 1.5,
+    // Raster marker icon. Google's Marker can't rotate an image icon (only
+    // vector symbols rotate), so the car stays upright; the smooth glide between
+    // polls provides the "live movement" feel.
+    const carIcon = (): google.maps.Icon => ({
+      url: carTopUrl,
+      scaledSize: new g.maps.Size(CAR_ICON_SIZE, CAR_ICON_SIZE),
+      anchor: new g.maps.Point(CAR_ICON_SIZE / 2, CAR_ICON_SIZE / 2),
     });
-
-    const bearingBetween = (a: google.maps.LatLng, b: google.maps.LatLng): number => {
-      const toRad = (d: number) => (d * Math.PI) / 180;
-      const toDeg = (r: number) => (r * 180) / Math.PI;
-      const y = Math.sin(toRad(b.lng() - a.lng())) * Math.cos(toRad(b.lat()));
-      const x =
-        Math.cos(toRad(a.lat())) * Math.sin(toRad(b.lat())) -
-        Math.sin(toRad(a.lat())) * Math.cos(toRad(b.lat())) * Math.cos(toRad(b.lng() - a.lng()));
-      return (toDeg(Math.atan2(y, x)) + 360) % 360;
-    };
 
     const seen = new Set<string>();
     for (const cab of cabs) {
@@ -308,21 +296,16 @@ export function GoogleRouteMap({
         const marker = new g.maps.Marker({
           map,
           position: target,
-          icon: carIcon(cab.bearing ?? 0),
+          icon: carIcon(),
           zIndex: 50,
           title: "Available cab",
         });
-        store.set(cab.id, { marker, anim: null, heading: cab.bearing ?? 0 });
+        store.set(cab.id, { marker, anim: null, heading: 0 });
         continue;
       }
 
       const from = existing.marker.getPosition();
       if (!from || from.equals(target)) continue;
-
-      // Rotate toward the direction of travel derived from the move.
-      const heading = bearingBetween(from, target);
-      existing.heading = heading;
-      existing.marker.setIcon(carIcon(heading));
 
       // Cancel any in-flight animation, then tween position over ~1s.
       if (existing.anim != null) cancelAnimationFrame(existing.anim);
