@@ -271,7 +271,7 @@ export default function RoutesPage() {
     cabAnchor?.lat,
     cabAnchor?.lng,
     null,
-    step === 3,
+    step === 2, // the route-preview map (with GoogleRouteMap) is shown on step 2
   );
   const availLoaded = !!vehOpts;
   const availabilityFor = (t: VehicleType) => vehOpts?.options.find((o) => o.type === t)?.availableCount ?? 0;
