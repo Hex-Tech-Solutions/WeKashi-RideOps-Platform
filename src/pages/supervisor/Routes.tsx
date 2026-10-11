@@ -449,30 +449,18 @@ export default function RoutesPage() {
   const schedule = () => {
     if (displayKm == null) { toast.error("Wait for the route distance to calculate"); return; }
     if (!vehicleType) { toast.error("Select a vehicle type before scheduling"); return; }
-    if (!scheduleAt) { toast.error("Pick a date & time first"); return; }
+    if (!scheduleAt) { toast.error("Pick a date first"); return; }
+    if (!plannedPickupTime) { toast.error("Set the shift / pickup time first"); return; }
 
-    const when = new Date(scheduleAt);
-    if (isNaN(when.getTime())) { toast.error("Invalid date & time"); return; }
+    // Combine the chosen DATE with the group's SHIFT TIME — the time is never
+    // picked separately, so the scheduled ride can't drift from the shift.
+    const [hh, mm] = plannedPickupTime.split(":").map(Number);
+    const [yy, mo, dd] = scheduleAt.split("-").map(Number);
+    const when = new Date(yy, mo - 1, dd, hh, mm, 0, 0);
+    if (isNaN(when.getTime())) { toast.error("Invalid date"); return; }
     if (when.getTime() <= Date.now()) { toast.error("Scheduled time must be in the future"); return; }
     if (when.getTime() > Date.now() + 2 * 24 * 3600 * 1000) {
       toast.error("Scheduled rides can be at most 2 days ahead"); return;
-    }
-
-    // Guard against a date/time that contradicts the group's shift time. The
-    // scheduled time-of-day should match the shift (login/logout) time so the
-    // driver and the OTD report agree. Warn + block on a clear mismatch.
-    if (groupShiftTime) {
-      const [sh, sm] = groupShiftTime.split(":").map(Number);
-      const schedMinutes = when.getHours() * 60 + when.getMinutes();
-      const shiftMinutes = sh * 60 + sm;
-      if (Math.abs(schedMinutes - shiftMinutes) > 90) {
-        const hhmm = `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
-        toast.error(
-          `Scheduled time ${hhmm} doesn't match the group's shift time ${groupShiftTime}`,
-          { description: "Set the scheduled time close to the shift time so the driver and reports stay consistent." },
-        );
-        return;
-      }
     }
 
     if (escortPolicy.required && !escortName.trim()) {
@@ -975,10 +963,15 @@ export default function RoutesPage() {
               </Button>
               <div className="pt-3 border-t space-y-2">
                 <Label>Or schedule for later (up to 2 days ahead)</Label>
-                <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="mt-1"
-                  min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
-                  max={new Date(Date.now() + 2 * 24 * 3600 * 1000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} />
-                <Button onClick={schedule} variant="outline" className="w-full" disabled={createRide.isPending}>Schedule ride</Button>
+                {/* Date-only: the TIME is locked to the group's shift time so the
+                    scheduled ride can never drift away from it. */}
+                <Input type="date" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} className="mt-1"
+                  min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}
+                  max={new Date(Date.now() + 2 * 24 * 3600 * 1000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)} />
+                {groupShiftTime
+                  ? <p className="text-[11px] text-muted-foreground">Ride time is fixed to the shift time <b className="text-foreground font-mono">{groupShiftTime}</b>. Pick the date only.</p>
+                  : <p className="text-[11px] text-destructive">Set the shift / pickup time above first.</p>}
+                <Button onClick={schedule} variant="outline" className="w-full" disabled={createRide.isPending || !groupShiftTime}>Schedule ride</Button>
               </div>
             </CardContent>
           </Card>
