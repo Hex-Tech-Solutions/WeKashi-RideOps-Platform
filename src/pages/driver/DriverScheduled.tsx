@@ -2,11 +2,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useScheduledRides, useDriverRides, useClaimRide, useReleaseRide, type RideRow } from "@/lib/queries";
-import { MapPin, Users, IndianRupee, Calendar, Wind, Shield } from "lucide-react";
+import { MapPin, Users, IndianRupee, Calendar, Wind, Shield, LogIn } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
 import { HighlightedAddress } from "@/lib/highlightAddress";
+
+/** Format an ISO datetime (or an HH:MM string) to HH:MM for display. */
+function fmtTime(v?: string | null): string | null {
+  if (!v) return null;
+  if (/^\d{2}:\d{2}$/.test(v)) return v;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
 
 export default function DriverScheduled() {
   const { data: mkt } = useScheduledRides();
@@ -86,8 +95,29 @@ function SchedSummary({ ride }: { ride: RideRow }) {
             <Badge className="bg-amber-500 text-white gap-1 text-[10px]"><Shield className="h-3 w-3" /> Escort</Badge>
           )}
         </div>
-        {ride.scheduledFor && <span className="text-xs flex items-center gap-1 text-gold shrink-0"><Calendar className="h-3.5 w-3.5" />{format(new Date(ride.scheduledFor), "EEE d MMM, HH:mm")}</span>}
+        {ride.scheduledFor && <span className="text-xs flex items-center gap-1 text-gold shrink-0"><Calendar className="h-3.5 w-3.5" />{format(new Date(ride.scheduledFor), "EEE d MMM")}</span>}
       </div>
+
+      {/* Shift time (login/logout) + first pickup time — same as the broadcast
+          offer card, so the driver knows exactly when to report. */}
+      {(ride.plannedStartTime || ride.firstPickupTime) && (
+        <div className="flex items-center gap-3 text-[11px] rounded-md bg-muted/50 px-2 py-1.5">
+          {ride.plannedStartTime && (
+            <span className="flex items-center gap-1">
+              <LogIn className="h-3 w-3 text-gold-dark" />
+              <span className="text-muted-foreground">{ride.type === "logout" ? "Logout" : "Login"}</span>
+              <span className="font-semibold text-foreground font-mono">{fmtTime(ride.plannedStartTime)}</span>
+            </span>
+          )}
+          {ride.firstPickupTime && (
+            <span className="flex items-center gap-1">
+              <MapPin className="h-3 w-3 text-gold-dark" />
+              <span className="text-muted-foreground">1st pickup</span>
+              <span className="font-semibold text-foreground font-mono">{fmtTime(ride.firstPickupTime)}</span>
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="flex items-start gap-2 text-sm">
         <MapPin className="h-4 w-4 text-gold mt-0.5 shrink-0" />

@@ -250,7 +250,8 @@ export default function RoutesPage() {
   const route = serverRoute ?? fallbackRoute;
   const routeLoading = optimizeRoute.isPending;
 
-  const [vehicleType, setVehicleType] = useState<VehicleType>("suv");
+  // No default — the supervisor must pick a vehicle manually. "" means unset.
+  const [vehicleType, setVehicleType] = useState<VehicleType | "">("");
   const allowedTypes = allowedVehicleTypes(selected.length);
   // For logout the driver picks everyone up at the OFFICE — search radius from office.
   // For login the driver starts from the first employee's home.
@@ -277,16 +278,19 @@ export default function RoutesPage() {
   const availabilityFor = (t: VehicleType) => vehOpts?.options.find((o) => o.type === t)?.availableCount ?? 0;
   // Selectable = allowed by group size. Show all types regardless of availability
   // so supervisor can always choose — just indicate 0 online as a warning.
-  const isSelectable = (t: VehicleType) => allowedTypes.includes(t);
+  const isSelectable = (t: VehicleType | "") => !!t && allowedTypes.includes(t);
   const selectableTypes = (["hatchback", "sedan", "suv"] as VehicleType[]).filter(isSelectable);
+  // If the current selection becomes invalid for the group size, clear it so
+  // the supervisor is forced to re-pick a valid vehicle (never auto-select).
   useEffect(() => {
-    if (!isSelectable(vehicleType) && selectableTypes.length) setVehicleType(selectableTypes[selectableTypes.length - 1]);
+    if (vehicleType && !isSelectable(vehicleType)) setVehicleType("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectableTypes.join(","), vehicleType]);
   // Real driving distance from the backend's Routes API call. null = still
   // loading (server hasn't responded yet) or no stops selected.
   const displayKm = serverRoute ? route.totalKm : null;
-  const baseFare = displayKm != null ? computeFare(displayKm, vehicleType, isAc) : null;
+  // Fare only computes once a vehicle is chosen.
+  const baseFare = displayKm != null && vehicleType ? computeFare(displayKm, vehicleType, isAc) : null;
   const price = baseFare != null ? baseFare + (fareAdjustment ?? 0) : null;
 
   // ── Escort policy ─────────────────────────────────────────────────────────
@@ -404,7 +408,7 @@ export default function RoutesPage() {
       capacity,
       scheduledFor,
       distanceKm: displayKm,
-      vehicleType,
+      vehicleType: vehicleType || undefined,
       isAc,
       fareAdjustment: fareAdjustment ?? undefined,
       scheduledPickupTimes: pickupTimes,
@@ -426,6 +430,7 @@ export default function RoutesPage() {
 
   const broadcast = () => {
     if (displayKm == null) { toast.error("Wait for the route distance to calculate"); return; }
+    if (!vehicleType) { toast.error("Select a vehicle type before broadcasting"); return; }
     if (escortPolicy.required && !escortName.trim()) {
       toast.error("Escort name is required before broadcasting", { description: escortPolicy.reason });
       return;
@@ -843,7 +848,7 @@ export default function RoutesPage() {
               </div>
               <div className="rounded-md bg-secondary p-3 space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Driver fare · {displayKm != null ? `${displayKm} km` : "…"} · {VEHICLE_LABELS[vehicleType]}{isAc ? " · AC" : ""}</span>
+                  <span className="text-muted-foreground">Driver fare · {displayKm != null ? `${displayKm} km` : "…"} · {vehicleType ? VEHICLE_LABELS[vehicleType] : "select vehicle"}{isAc ? " · AC" : ""}</span>
                   <span className="font-semibold">
                     {baseFare != null ? `₹${baseFare}` : <span className="flex items-center gap-1.5 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> calculating</span>}
                   </span>
@@ -931,7 +936,7 @@ export default function RoutesPage() {
                 )}
               </div>
               <div className="text-xs space-y-1 text-muted-foreground">
-                <div>• Notifies online <b className="text-foreground">{VEHICLE_LABELS[vehicleType]}</b> drivers within <b className="text-foreground">10 km</b> of first pickup</div>
+                <div>• Notifies online <b className="text-foreground">{vehicleType ? VEHICLE_LABELS[vehicleType] : "selected"}</b> drivers within <b className="text-foreground">10 km</b> of first pickup</div>
                 <div>• <b className="text-foreground">3-min</b> auction window</div>
               </div>
               <Button onClick={broadcast} disabled={createRide.isPending || price == null || escortNameMissing} className="w-full bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">

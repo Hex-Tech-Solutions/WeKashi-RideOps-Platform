@@ -864,7 +864,7 @@ export async function listScheduledRidesForDriver(vehicleType?: string | null) {
   const cutoff = new Date(Date.now() + 4 * 60 * 60 * 1000); // claim window closes 4h before
   const where: Record<string, unknown> = { status: 'scheduled', scheduledFor: { gt: cutoff } };
   if (vehicleType) where.OR = [{ vehicleType: null }, { vehicleType }];
-  return prisma.ride.findMany({
+  const rides = await prisma.ride.findMany({
     where,
     include: {
       supervisor: { select: { fullName: true, org: true } },
@@ -872,6 +872,25 @@ export async function listScheduledRidesForDriver(vehicleType?: string | null) {
     },
     orderBy: { scheduledFor: 'asc' },
   });
+  return attachFirstPickupTimes(rides);
+}
+
+// Attach `firstPickupTime` (HH:MM of the earliest stop that has a supervisor-set
+// pickup time) to each ride, so the driver sees the same shift + pickup times on
+// scheduled cards as on live broadcast offer cards.
+async function attachFirstPickupTimes<T extends { id: string }>(rides: T[]): Promise<(T & { firstPickupTime: string | null })[]> {
+  if (rides.length === 0) return [];
+  const ids = rides.map((r) => r.id);
+  const firstPickups = await prisma.ridePax.findMany({
+    where: { rideId: { in: ids }, scheduledPickupTime: { not: null } },
+    orderBy: { seq: 'asc' },
+    select: { rideId: true, scheduledPickupTime: true },
+  });
+  const byRide = new Map<string, string>();
+  for (const p of firstPickups) {
+    if (!byRide.has(p.rideId) && p.scheduledPickupTime) byRide.set(p.rideId, p.scheduledPickupTime);
+  }
+  return rides.map((r) => ({ ...r, firstPickupTime: byRide.get(r.id) ?? null }));
 }
 
 // Expire stale scheduled rides: unclaimed ones past their time, and claimed
@@ -931,7 +950,11 @@ export async function listRides(filters: {
     prisma.ride.count({ where }),
   ]);
 
-  return { rides, total, page, limit };
+  // Attach firstPickupTime so driver scheduled/active cards can show the real
+  // shift + pickup times (not just scheduledFor).
+  const ridesWithPickup = await attachFirstPickupTimes(rides);
+
+  return { rides: ridesWithPickup, total, page, limit };
 }
 
 export async function getRide(id: string) {
