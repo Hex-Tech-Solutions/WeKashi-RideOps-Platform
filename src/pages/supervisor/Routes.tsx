@@ -448,12 +448,38 @@ export default function RoutesPage() {
 
   const schedule = () => {
     if (displayKm == null) { toast.error("Wait for the route distance to calculate"); return; }
+    if (!vehicleType) { toast.error("Select a vehicle type before scheduling"); return; }
     if (!scheduleAt) { toast.error("Pick a date & time first"); return; }
+
+    const when = new Date(scheduleAt);
+    if (isNaN(when.getTime())) { toast.error("Invalid date & time"); return; }
+    if (when.getTime() <= Date.now()) { toast.error("Scheduled time must be in the future"); return; }
+    if (when.getTime() > Date.now() + 2 * 24 * 3600 * 1000) {
+      toast.error("Scheduled rides can be at most 2 days ahead"); return;
+    }
+
+    // Guard against a date/time that contradicts the group's shift time. The
+    // scheduled time-of-day should match the shift (login/logout) time so the
+    // driver and the OTD report agree. Warn + block on a clear mismatch.
+    if (groupShiftTime) {
+      const [sh, sm] = groupShiftTime.split(":").map(Number);
+      const schedMinutes = when.getHours() * 60 + when.getMinutes();
+      const shiftMinutes = sh * 60 + sm;
+      if (Math.abs(schedMinutes - shiftMinutes) > 90) {
+        const hhmm = `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
+        toast.error(
+          `Scheduled time ${hhmm} doesn't match the group's shift time ${groupShiftTime}`,
+          { description: "Set the scheduled time close to the shift time so the driver and reports stay consistent." },
+        );
+        return;
+      }
+    }
+
     if (escortPolicy.required && !escortName.trim()) {
       toast.error("Escort name is required before scheduling", { description: escortPolicy.reason });
       return;
     }
-    const payload = buildPayload(new Date(scheduleAt).toISOString());
+    const payload = buildPayload(when.toISOString());
     if (!payload) { toast.error("Select at least one employee"); return; }
     createRide.mutate({ ...payload, scheduled: true }, {
       onSuccess: () => { toast.success("Ride scheduled — drivers can claim it"); setTimeout(() => nav("/supervisor/live"), 500); },
@@ -463,12 +489,12 @@ export default function RoutesPage() {
 
   const escortNameMissing = escortPolicy.required && !escortName.trim();
 
-  // Block Step 2→3 if any female stop has no per-stop pickup time set.
-  // The per-stop time beside each employee is what drives the safety window check.
-  const femaleStopsWithoutTime = route.stops.filter(
-    (s) => s.gender === "F" && !pickupTimes[s.empId]
-  );
-  const timeRequiredButMissing = femaleStopsWithoutTime.length > 0;
+  // EVERY stop must have a pickup time — not just female stops. A missing
+  // pickup time means the driver has no schedule to follow and the OTD report
+  // has no baseline, so it must block the booking.
+  const stopsWithoutTime = route.stops.filter((s) => !pickupTimes[s.empId]);
+  const femaleStopsWithoutTime = stopsWithoutTime.filter((s) => s.gender === "F");
+  const timeRequiredButMissing = stopsWithoutTime.length > 0;
 
   // ── Shift-time mismatch guard ──────────────────────────────────────────────
   // Employees being grouped into ONE ride must share the same shift (the
@@ -499,10 +525,14 @@ export default function RoutesPage() {
     : [];
   const timeOutsideWindow = stopsOutsideWindow.length > 0;
 
+  // Shift/pickup time (the group's "Planned Start Time") must be set before
+  // advancing — it anchors OTD reporting and the women's-safety window.
+  const shiftTimeMissing = !plannedPickupTime;
+
   const canNext = step === 1
     ? selected.length > 0 && !shiftMismatch
     : step === 2
-    ? displayKm != null && !timeRequiredButMissing && !timeOutsideWindow
+    ? displayKm != null && !timeRequiredButMissing && !timeOutsideWindow && !shiftTimeMissing
     : true;
 
   // Auto-fill the Shift/pickup time from the group's shared shift time, and
@@ -692,15 +722,16 @@ export default function RoutesPage() {
               nearbyCabs={nearbyCabsData?.cabs}
             />
 
-            {/* Per-stop time block warning — shown when female stops are missing their time */}
+            {/* Per-stop time block warning — EVERY stop needs a pickup time. */}
             {timeRequiredButMissing && (
               <div className="mt-4 rounded-md border border-destructive/60 bg-destructive/5 px-3 py-2.5 flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
                 <div className="text-xs text-destructive">
-                  <div className="font-semibold">Stop pickup time required for female employees</div>
+                  <div className="font-semibold">Stop pickup time required</div>
                   <div className="mt-0.5">
                     Set the "Stop pickup time" beside{" "}
-                    {femaleStopsWithoutTime.map((s) => s.name).join(", ")} to check the 19:00–07:00 safety window before continuing.
+                    {stopsWithoutTime.map((s) => s.name).join(", ")} before continuing.
+                    {femaleStopsWithoutTime.length > 0 && " This also drives the 19:00–07:00 women's-safety window check."}
                   </div>
                 </div>
               </div>
@@ -970,9 +1001,11 @@ export default function RoutesPage() {
             {step === 1
               ? (shiftMismatch ? "Fix timing mismatch to continue" : "Create group & view route")
               : timeRequiredButMissing
-              ? "Set pickup time to continue"
+              ? "Set a pickup time for every stop"
               : timeOutsideWindow
               ? "Fix pickup timings to continue"
+              : shiftTimeMissing
+              ? "Set the shift / pickup time to continue"
               : "Continue"
             } <ArrowRight className="h-4 w-4" />
           </Button>
