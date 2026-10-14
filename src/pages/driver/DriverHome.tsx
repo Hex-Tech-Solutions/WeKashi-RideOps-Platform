@@ -46,9 +46,11 @@ export default function DriverHome() {
   const rides = ridesData?.rides ?? [];
 
   // Scheduled-ride timing gates: a claimed scheduled ride only surfaces as an
-  // ACTIVE ride 3h before its pickup, and can only be STARTED from 40 min before.
+  // ACTIVE ride 45 min before pickup (enough lead to navigate + confirm
+  // arrival), and can be STARTED from 40 min before. Before that it stays in
+  // the Scheduled tab — the driver shouldn't confirm arrival hours early.
   // A live-broadcast ride (no scheduledFor) is active immediately, as before.
-  const ACTIVE_WINDOW_MS = 3 * 60 * 60 * 1000;   // 3 hours before pickup
+  const ACTIVE_WINDOW_MS = 45 * 60 * 1000;       // 45 minutes before pickup
   const START_WINDOW_MS = 40 * 60 * 1000;        // 40 minutes before pickup
   const scheduledReady = (r: RideRow) => {
     if (!r.scheduledFor) return true; // live ride — always active
@@ -62,7 +64,7 @@ export default function DriverHome() {
   // The ACTIVE ride is the one the driver is serving now: assigned/in_progress
   // and NOT queued behind another ride. The QUEUED ride (if any) is an
   // assigned ride with queuedBehindRideId set — held until the active one ends.
-  // A claimed scheduled ride stays out of the active slot until its 3h window.
+  // A claimed scheduled ride stays out of the active slot until ~45 min before.
   const active = rides.find(
     (r) =>
       (r.status === "in_progress" ||
@@ -528,6 +530,15 @@ function OfferCountdown({ expiresAt }: { expiresAt: string }) {
   );
 }
 
+// Format an ISO datetime (or HH:MM string) to HH:MM.
+function summaryTime(v?: string | null): string | null {
+  if (!v) return null;
+  if (/^\d{2}:\d{2}$/.test(v)) return v;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 function RideSummary({ ride }: { ride: RideRow }) {
   // Driver earnings = fare + escort charge (escort charge belongs to driver)
   const driverEarnings = (ride.price ?? 0) + (ride.escortCharge ?? 0);
@@ -552,6 +563,25 @@ function RideSummary({ ride }: { ride: RideRow }) {
           </span>
         )}
       </div>
+
+      {/* Shift (login/logout) + first pickup time — same prominent row as the
+          broadcast offer card so the driver always sees when to report. */}
+      {(ride.plannedStartTime || ride.firstPickupTime) && (
+        <div className="flex items-center gap-4 text-sm rounded-md bg-muted/50 px-3 py-2">
+          {ride.plannedStartTime && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">{ride.type === "logout" ? "Logout" : "Login"}</span>
+              <span className="font-bold text-foreground font-mono text-base">{summaryTime(ride.plannedStartTime)}</span>
+            </span>
+          )}
+          {ride.firstPickupTime && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">1st pickup</span>
+              <span className="font-bold text-foreground font-mono text-base">{summaryTime(ride.firstPickupTime)}</span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Route */}
       <div className="flex items-start gap-2 text-sm">

@@ -101,19 +101,19 @@ function SchedSummary({ ride }: { ride: RideRow }) {
       {/* Shift time (login/logout) + first pickup time — same as the broadcast
           offer card, so the driver knows exactly when to report. */}
       {(ride.plannedStartTime || ride.firstPickupTime) && (
-        <div className="flex items-center gap-3 text-[11px] rounded-md bg-muted/50 px-2 py-1.5">
+        <div className="flex items-center gap-4 text-sm rounded-md bg-muted/50 px-3 py-2">
           {ride.plannedStartTime && (
-            <span className="flex items-center gap-1">
-              <LogIn className="h-3 w-3 text-gold-dark" />
+            <span className="flex items-center gap-1.5">
+              <LogIn className="h-4 w-4 text-gold-dark" />
               <span className="text-muted-foreground">{ride.type === "logout" ? "Logout" : "Login"}</span>
-              <span className="font-semibold text-foreground font-mono">{fmtTime(ride.plannedStartTime)}</span>
+              <span className="font-bold text-foreground font-mono text-base">{fmtTime(ride.plannedStartTime)}</span>
             </span>
           )}
           {ride.firstPickupTime && (
-            <span className="flex items-center gap-1">
-              <MapPin className="h-3 w-3 text-gold-dark" />
+            <span className="flex items-center gap-1.5">
+              <MapPin className="h-4 w-4 text-gold-dark" />
               <span className="text-muted-foreground">1st pickup</span>
-              <span className="font-semibold text-foreground font-mono">{fmtTime(ride.firstPickupTime)}</span>
+              <span className="font-bold text-foreground font-mono text-base">{fmtTime(ride.firstPickupTime)}</span>
             </span>
           )}
         </div>

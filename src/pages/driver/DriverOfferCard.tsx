@@ -148,19 +148,19 @@ export function DriverOfferCard({
         {/* Times row — employee login/shift time and the first pickup time so
             the driver knows the schedule before accepting. */}
         {(loginTime || firstPickup) && (
-          <div className="flex items-center gap-3 text-[11px] rounded-md bg-muted/50 px-2 py-1.5">
+          <div className="flex items-center gap-4 text-sm rounded-md bg-muted/50 px-3 py-2">
             {loginTime && (
-              <span className="flex items-center gap-1">
-                <LogIn className="h-3 w-3 text-gold-dark" />
+              <span className="flex items-center gap-1.5">
+                <LogIn className="h-4 w-4 text-gold-dark" />
                 <span className="text-muted-foreground">{isLogin ? "Login" : "Logout"}</span>
-                <span className="font-semibold text-foreground font-mono">{loginTime}</span>
+                <span className="font-bold text-foreground font-mono text-base">{loginTime}</span>
               </span>
             )}
             {firstPickup && (
-              <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3 text-gold-dark" />
+              <span className="flex items-center gap-1.5">
+                <MapPin className="h-4 w-4 text-gold-dark" />
                 <span className="text-muted-foreground">1st pickup</span>
-                <span className="font-semibold text-foreground font-mono">{firstPickup}</span>
+                <span className="font-bold text-foreground font-mono text-base">{firstPickup}</span>
               </span>
             )}
           </div>
