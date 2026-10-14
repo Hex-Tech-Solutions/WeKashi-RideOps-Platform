@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditGroupDialog } from "@/components/EditGroupDialog";
 import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
+import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -83,6 +84,11 @@ export default function SavedGroups() {
           </Button>
         }
       />
+
+      {/* First layout — the full shift roster (same filters as Roster page). */}
+      <div className="mb-6">
+        <RosterEmployeePanel />
+      </div>
 
       <Tabs defaultValue="groups">
         <TabsList className="mb-6">
