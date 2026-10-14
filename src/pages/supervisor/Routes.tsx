@@ -458,7 +458,12 @@ export default function RoutesPage() {
     const [yy, mo, dd] = scheduleAt.split("-").map(Number);
     const when = new Date(yy, mo - 1, dd, hh, mm, 0, 0);
     if (isNaN(when.getTime())) { toast.error("Invalid date"); return; }
-    if (when.getTime() <= Date.now()) { toast.error("Scheduled time must be in the future"); return; }
+    if (when.getTime() - Date.now() < SCHEDULE_MIN_LEAD_MS) {
+      toast.error("Scheduled rides must be at least 4 hours ahead", {
+        description: "Drivers claim scheduled rides up to 4h before. For a ride this soon, use Broadcast now instead.",
+      });
+      return;
+    }
     if (when.getTime() > Date.now() + 2 * 24 * 3600 * 1000) {
       toast.error("Scheduled rides can be at most 2 days ahead"); return;
     }
@@ -516,6 +521,19 @@ export default function RoutesPage() {
   // Shift/pickup time (the group's "Planned Start Time") must be set before
   // advancing — it anchors OTD reporting and the women's-safety window.
   const shiftTimeMissing = !plannedPickupTime;
+
+  // 4-hour claim window: a scheduled ride must be at least 4h in the future, or
+  // drivers never get the chance to claim it (and it instantly lands in "Needs
+  // attention"). Within the window, scheduling is disabled — broadcast instead.
+  const SCHEDULE_MIN_LEAD_MS = 4 * 60 * 60 * 1000;
+  const scheduledWhen = (() => {
+    if (!scheduleAt || !plannedPickupTime) return null;
+    const [hh, mm] = plannedPickupTime.split(":").map(Number);
+    const [yy, mo, dd] = scheduleAt.split("-").map(Number);
+    const d = new Date(yy, mo - 1, dd, hh, mm, 0, 0);
+    return isNaN(d.getTime()) ? null : d;
+  })();
+  const scheduledTooSoon = !!scheduledWhen && scheduledWhen.getTime() - Date.now() < SCHEDULE_MIN_LEAD_MS;
 
   const canNext = step === 1
     ? selected.length > 0 && !shiftMismatch
@@ -971,7 +989,12 @@ export default function RoutesPage() {
                 {groupShiftTime
                   ? <p className="text-[11px] text-muted-foreground">Ride time is fixed to the shift time <b className="text-foreground font-mono">{groupShiftTime}</b>. Pick the date only.</p>
                   : <p className="text-[11px] text-destructive">Set the shift / pickup time above first.</p>}
-                <Button onClick={schedule} variant="outline" className="w-full" disabled={createRide.isPending || !groupShiftTime}>Schedule ride</Button>
+                {scheduledTooSoon && (
+                  <p className="text-[11px] text-destructive">
+                    Scheduled rides must be at least 4 hours ahead so drivers can claim them. For a ride this soon, use <b>Broadcast now</b> instead.
+                  </p>
+                )}
+                <Button onClick={schedule} variant="outline" className="w-full" disabled={createRide.isPending || !groupShiftTime || scheduledTooSoon}>Schedule ride</Button>
               </div>
             </CardContent>
           </Card>
