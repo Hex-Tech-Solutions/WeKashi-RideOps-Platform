@@ -21,9 +21,11 @@ import {
   CalendarClock,
   Clock,
   Building2,
+  Download,
 } from "lucide-react";
 import { format, formatDistanceStrict } from "date-fns";
 import { RideTypeText } from "@/components/RideTypeLabel";
+import { downloadRideReceipt } from "@/lib/rideReceipt";
 
 interface Props {
   rideId: string | undefined;
@@ -64,6 +66,16 @@ export function CompletedRideDetailSheet({ rideId, onClose }: Props) {
               >
                 {ride.status.replace("_", " ")}
               </Badge>
+            )}
+            {ride && (
+              <button
+                type="button"
+                onClick={() => downloadRideReceipt(ride)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-gold/50 bg-gold/10 px-2.5 py-1 text-[11px] font-semibold text-gold-dark hover:bg-gold/20"
+                title="Download ride receipt for bill claim"
+              >
+                <Download className="h-3.5 w-3.5" /> Download
+              </button>
             )}
           </SheetTitle>
         </SheetHeader>
