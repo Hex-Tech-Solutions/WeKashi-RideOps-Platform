@@ -106,12 +106,21 @@ export default function Live() {
                     <div className="font-medium">{r.pickupAddress} → {r.dropAddress}</div>
                     <div className="text-xs text-muted-foreground">No driver claimed · {r.paxCount} PAX{r.totalAmount != null ? ` · ₹${r.totalAmount}` : r.price != null ? ` · ₹${r.price}` : ""}</div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
                     <Dialog>
                       <DialogTrigger asChild><Button variant="outline"><Route className="h-3.5 w-3.5" /> Trip &amp; OTPs</Button></DialogTrigger>
                       <DialogContent><DialogHeader><DialogTitle>Trip progress</DialogTitle></DialogHeader><TripProgress rideId={r.id} type={r.type} /></DialogContent>
                     </Dialog>
                     <Button onClick={() => setAssignRideId(r.id)} className="bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">Find &amp; assign driver</Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive shrink-0"
+                      onClick={() => setDeleteId(r.id)}
+                      title="Delete this ride"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </CardContent>
               </Card>

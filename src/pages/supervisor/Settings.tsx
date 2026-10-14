@@ -231,6 +231,8 @@ function OfficeForm({ initial, onSave, onCancel, saving }: {
   const [picked, setPicked] = useState<{ lat: number; lng: number; address: string } | null>(
     initial ? { lat: initial.lat, lng: initial.lng, address: initial.address } : null
   );
+  // Area / Locality drivers see — auto-filled from the office address, editable.
+  const [area, setArea] = useState(initial ? (rideArea(initial.address) ?? "") : "");
 
   const submit = () => {
     if (!name.trim()) { toast.error("Enter an office name (e.g. HQ, Whitefield Campus)"); return; }
@@ -268,16 +270,22 @@ function OfficeForm({ initial, onSave, onCancel, saving }: {
       </div>
       <OfficeMapPicker
         initial={initial ? { lat: initial.lat, lng: initial.lng, address: initial.address } : null}
-        onChange={setPicked}
+        onChange={(p) => { setPicked(p); setArea((prev) => prev || (rideArea(p.address) ?? "")); }}
       />
       {picked && (
-        <div className="space-y-1.5">
-          {rideArea(picked.address) && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">Area / Locality drivers will see:</span>
-              <span className="font-semibold text-foreground">{rideArea(picked.address)}</span>
+        <div className="space-y-2">
+          <div>
+            <Label>Area / Locality</Label>
+            <Input
+              className="mt-1"
+              value={area}
+              onChange={(e) => setArea(e.target.value)}
+              placeholder="e.g. Whitefield, MG Road"
+            />
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              Auto-filled from the address. Drivers see this as the office area.
             </div>
-          )}
+          </div>
           <div className="text-xs rounded bg-secondary p-2">{picked.address}</div>
         </div>
       )}

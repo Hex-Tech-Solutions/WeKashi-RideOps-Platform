@@ -12,6 +12,7 @@ import { getPoint, DROP } from "@/lib/geo";
 import { loadGoogleMaps } from "@/lib/googleMaps";
 import { toast } from "sonner";
 import { Building2, MapPin, Loader2, Move } from "lucide-react";
+import { rideArea } from "@/lib/rideArea";
 
 const mapStyle: google.maps.MapTypeStyle[] = [
   { featureType: "poi", stylers: [{ visibility: "off" }] },
@@ -31,6 +32,8 @@ export function AddEmployeeDialog({ open, onOpenChange }: { open: boolean; onOpe
     companyLabel: "",
   });
   const [home, setHome] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  // Area / Locality the driver sees — auto-filled from the home address, editable.
+  const [area, setArea] = useState("");
 
   const isFemale = form.gender === "F";
   const effectivePhone = isFemale ? (officeData?.phone ?? "") : form.phone;
@@ -137,7 +140,7 @@ export function AddEmployeeDialog({ open, onOpenChange }: { open: boolean; onOpe
                 <div className="mt-1">
                   <PlacesInput
                     placeholder="Search the employee's home address…"
-                    onSelect={(v) => setHome(v)}
+                    onSelect={(v) => { setHome(v); setArea((prev) => prev || (rideArea(v.address) ?? "")); }}
                   />
                 </div>
                 {home && (
@@ -151,6 +154,20 @@ export function AddEmployeeDialog({ open, onOpenChange }: { open: boolean; onOpe
                     After selecting, drag the pin on the map to fine-tune the exact location.
                   </div>
                 )}
+              </div>
+
+              {/* Area / Locality — what the driver sees as the pickup area */}
+              <div className="col-span-2">
+                <Label>Area / Locality</Label>
+                <Input
+                  className="mt-1"
+                  value={area}
+                  onChange={(e) => setArea(e.target.value)}
+                  placeholder="e.g. Rajajinagar, Mahatma Gandhi Rd"
+                />
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  Auto-filled from the address. Drivers see this as the pickup area.
+                </div>
               </div>
 
               {!selectedOffice && (
