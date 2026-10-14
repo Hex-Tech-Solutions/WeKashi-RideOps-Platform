@@ -13,7 +13,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Check, X, Users, Shield, Timer, LogIn, MapPin, Wind } from "lucide-react";
+import { Check, X, Users, Shield, Timer, LogIn, MapPin, Wind, CalendarClock } from "lucide-react";
 import type { RideRow } from "@/lib/queries";
 import { rideArea } from "@/lib/rideArea";
 
@@ -40,14 +40,20 @@ export function DriverOfferCard({
   onDecline,
   acceptDisabled,
   declineDisabled,
+  footer,
+  scheduledDate,
 }: {
   ride: RideRow;
   approach?: ApproachInfo;
   countdown?: React.ReactNode;
-  onAccept: () => void;
-  onDecline: () => void;
+  onAccept?: () => void;
+  onDecline?: () => void;
   acceptDisabled?: boolean;
   declineDisabled?: boolean;
+  /** When provided, replaces the Accept/Decline actions (used for scheduled claim/release). */
+  footer?: React.ReactNode;
+  /** Optional date pill shown in the header (used for scheduled rides). */
+  scheduledDate?: string;
 }) {
   // Driver keeps the fare plus any escort charge.
   const earnings = (ride.price ?? 0) + (ride.escortCharge ?? 0);
@@ -67,6 +73,11 @@ export function DriverOfferCard({
             </div>
             {ride.escortRequired && ride.escortCharge != null && (
               <div className="text-[11px] text-gold/70 mt-0.5">incl. ₹{ride.escortCharge} escort</div>
+            )}
+            {scheduledDate && (
+              <div className="text-[11px] text-background/70 mt-0.5 flex items-center gap-1">
+                <CalendarClock className="h-3 w-3" /> {scheduledDate}
+              </div>
             )}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[55%]">
@@ -179,26 +190,28 @@ export function DriverOfferCard({
           </span>
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2">
-          <Button
-            className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90 h-10"
-            disabled={acceptDisabled}
-            onClick={onAccept}
-          >
-            <Check className="h-4 w-4" /> Accept
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-10 w-10 shrink-0 text-muted-foreground"
-            disabled={declineDisabled}
-            onClick={onDecline}
-            aria-label="Decline ride"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
+        {/* Actions — custom footer (scheduled claim/release) or Accept/Decline */}
+        {footer ?? (
+          <div className="flex gap-2">
+            <Button
+              className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90 h-10"
+              disabled={acceptDisabled}
+              onClick={() => onAccept?.()}
+            >
+              <Check className="h-4 w-4" /> Accept
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-10 w-10 shrink-0 text-muted-foreground"
+              disabled={declineDisabled}
+              onClick={() => onDecline?.()}
+              aria-label="Decline ride"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
