@@ -8,6 +8,7 @@ import {
   useUpdateRouteTemplate,
   useDeleteRouteTemplate,
   useSavedGroupsReport,
+  useEmployees,
   type RouteTemplateRow,
 } from "@/lib/queries";
 import {
@@ -27,6 +28,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditGroupDialog } from "@/components/EditGroupDialog";
 import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
 import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
+import { GroupBuilderPanel } from "@/components/GroupBuilderPanel";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -59,12 +61,33 @@ function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report
 export default function SavedGroups() {
   const { data: templatesData } = useRouteTemplates();
   const { data: reportData } = useSavedGroupsReport();
+  const { data: employeesData } = useEmployees();
   const updateTemplate = useUpdateRouteTemplate();
   const deleteTemplate = useDeleteRouteTemplate();
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const templates = templatesData?.templates ?? [];
   const report = reportData?.report ?? [];
+  const allEmployees = employeesData?.employees ?? [];
+
+  // Group builder: ordered list of selected employees (built from the roster).
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selectedSet = new Set(selectedIds);
+  const selectedEmployees = selectedIds
+    .map((id) => allEmployees.find((e) => e.id === id))
+    .filter((e): e is NonNullable<typeof e> => !!e);
+
+  const toggleEmployee = (id: string) =>
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const removeEmployee = (id: string) => setSelectedIds((prev) => prev.filter((x) => x !== id));
+  const reorderSelected = (from: number, to: number) =>
+    setSelectedIds((prev) => {
+      if (to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
 
   // "Load group" now opens an editable preview instead of jumping straight
   // into the booking flow — the supervisor can add/remove people and see the
@@ -85,9 +108,20 @@ export default function SavedGroups() {
         }
       />
 
-      {/* First layout — the full shift roster (same filters as Roster page). */}
-      <div className="mb-6">
-        <RosterEmployeePanel />
+      {/* Group builder — pick employees from the roster (left), build the
+          ordered group (right), and save it directly here. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <RosterEmployeePanel
+          onPick={(e) => toggleEmployee(e.id)}
+          selectedIds={selectedSet}
+          title="Shift roster — tap to add"
+        />
+        <GroupBuilderPanel
+          selected={selectedEmployees}
+          onReorder={reorderSelected}
+          onRemove={removeEmployee}
+          onClear={() => setSelectedIds([])}
+        />
       </div>
 
       <Tabs defaultValue="groups">
@@ -110,13 +144,8 @@ export default function SavedGroups() {
                 <BookOpen className="h-10 w-10 mx-auto text-muted-foreground/30" />
                 <div className="font-medium">No saved groups yet</div>
                 <div className="text-sm text-muted-foreground max-w-sm mx-auto">
-                  When booking a ride, go to Step 2 and click <b>Save group</b> to save the employee selection for reuse.
+                  Pick employees from the roster above and click <b>Save group</b> to create a reusable group.
                 </div>
-                <Button asChild variant="outline" className="mt-2">
-                  <a href="/supervisor/routes">
-                    <Play className="h-3.5 w-3.5" /> Start a booking
-                  </a>
-                </Button>
               </CardContent>
             </Card>
           ) : (
