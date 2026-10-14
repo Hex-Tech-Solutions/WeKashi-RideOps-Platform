@@ -17,6 +17,7 @@ import {
   releaseQueuedRide,
   nearbyDriversForRide,
   manualAssignRide,
+  deleteRide,
 } from '../services/ride.service';
 import { getRidePax, verifyPickup, verifyDrop, markNoShow, verifyEscortDrop } from '../services/ridePax.service';
 import { authenticate } from '../middleware/authenticate';
@@ -426,6 +427,17 @@ export function createRidesRouter(io: IoServer): Router {
     try {
       const radius = Math.min(Math.max(Number(req.query.radius) || 5, 1), 20);
       res.json({ drivers: await nearbyDriversForRide(req.params.id, radius) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // DELETE /rides/:id — supervisor/admin permanently delete a terminal ride
+  // (cancelled / expired / completed / pending). Active rides are rejected.
+  router.delete('/:id', requireRole('supervisor', 'admin'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await deleteRide(req.params.id, { role: req.user!.role, userId: req.user!.id });
+      res.status(204).send();
     } catch (err) {
       next(err);
     }

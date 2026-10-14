@@ -1175,3 +1175,47 @@ export async function getRideDetail(rideId: string): Promise<RideDetailResult> {
   };
 }
 
+
+/**
+ * Permanently delete a terminal ride and all its child records. Used by the
+ * supervisor to clear cancelled/expired/completed rides from the "Needs
+ * attention"/history lists (e.g. for bill-claim housekeeping).
+ *
+ * Guards:
+ *   - A supervisor may only delete their OWN rides (admins may delete any).
+ *   - ACTIVE rides (broadcasting / assigned / in_progress) can NEVER be
+ *     deleted — they must be cancelled first, so a live trip is never yanked.
+ *   - Children are removed in FK-safe order inside one transaction.
+ */
+export async function deleteRide(
+  rideId: string,
+  requestor: { role: string; userId?: string },
+): Promise<void> {
+  const ride = await prisma.ride.findUnique({
+    where: { id: rideId },
+    select: { id: true, status: true, supervisorId: true },
+  });
+  if (!ride) throw new NotFoundError('Ride not found');
+
+  if (requestor.role === 'supervisor' && ride.supervisorId !== requestor.userId) {
+    throw new ForbiddenError('You can only delete your own rides');
+  }
+
+  const ACTIVE = ['broadcasting', 'assigned', 'in_progress'];
+  if (ACTIVE.includes(ride.status)) {
+    throw new ValidationError('Cancel the ride before deleting it — active rides cannot be deleted.');
+  }
+
+  await prisma.$transaction([
+    prisma.rideLocationLog.deleteMany({ where: { rideId } }),
+    prisma.safetyIncident.deleteMany({ where: { rideId } }),
+    prisma.ridePax.deleteMany({ where: { rideId } }),
+    prisma.rideOffer.deleteMany({ where: { rideId } }),
+    prisma.rideEmployee.deleteMany({ where: { rideId } }),
+    // Detach any linked issues rather than deleting the SOS history.
+    prisma.driverIssue.updateMany({ where: { rideId }, data: { rideId: null } }),
+    prisma.ride.delete({ where: { id: rideId } }),
+  ]);
+
+  logger.info({ rideId, by: requestor.role }, 'Ride deleted');
+}

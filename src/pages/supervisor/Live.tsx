@@ -4,7 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useRides, useCancelRide, useRebroadcastRide, useRide, type RideRow } from "@/lib/queries";
+import { useRides, useCancelRide, useRebroadcastRide, useDeleteRide, useRide, type RideRow } from "@/lib/queries";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { statusColor } from "@/lib/rideStatus";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -13,7 +17,7 @@ import { AssignDriverDialog } from "@/components/AssignDriverDialog";
 import { CompletedRideDetailSheet } from "@/components/CompletedRideDetailSheet";
 import { LiveRideTracker } from "@/components/LiveRideTracker";
 import { DriverApproachBadge } from "@/components/DriverApproachBadge";
-import { Phone, Radio, AlertTriangle, Plus, Route, ChevronRight } from "lucide-react";
+import { Phone, Radio, AlertTriangle, Plus, Route, ChevronRight, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { PagedGrid } from "@/components/PagedList";
@@ -22,9 +26,11 @@ export default function Live() {
   const { data } = useRides({ limit: 100 });
   const cancelRide = useCancelRide();
   const rebroadcast = useRebroadcastRide();
+  const deleteRide = useDeleteRide();
 
   const [assignRideId, setAssignRideId] = useState<string | null>(null);
   const [detailRideId, setDetailRideId] = useState<string | undefined>(undefined);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const rides = data?.rides ?? [];
   const schedOverdue = (r: RideRow) => r.status === "scheduled" && !!r.scheduledFor && new Date(r.scheduledFor).getTime() - Date.now() < 4 * 3600 * 1000;
   const liveList = rides.filter((r) => ["broadcasting", "assigned", "in_progress"].includes(r.status) && !r.scheduledFor);
@@ -113,6 +119,7 @@ export default function Live() {
               <AttentionRow key={r.id} ride={r}
                 canRebroadcast={["expired", "cancelled", "pending"].includes(r.status)}
                 onAssign={() => setAssignRideId(r.id)}
+                onDelete={() => setDeleteId(r.id)}
                 onRebroadcast={() => rebroadcast.mutate(r.id, {
                   onSuccess: () => toast.success("Re-broadcast initiated"),
                   onError: (e: any) => toast.error(e?.message ?? "Failed"),
@@ -144,6 +151,35 @@ export default function Live() {
       </Tabs>
 
       <AssignDriverDialog rideId={assignRideId} open={!!assignRideId} onOpenChange={(o) => !o && setAssignRideId(null)} />
+
+      <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this ride?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the ride and its records. This cannot be undone.
+              Active rides can't be deleted — cancel them first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteId) {
+                  deleteRide.mutate(deleteId, {
+                    onSuccess: () => toast.success("Ride deleted"),
+                    onError: (e: any) => toast.error(e?.message ?? "Failed to delete"),
+                  });
+                }
+                setDeleteId(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <CompletedRideDetailSheet
         rideId={detailRideId}
@@ -299,7 +335,7 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
   );
 }
 
-function AttentionRow({ ride, canRebroadcast, onRebroadcast, onAssign }: { ride: RideRow; canRebroadcast: boolean; onRebroadcast: () => void; onAssign: () => void }) {
+function AttentionRow({ ride, canRebroadcast, onRebroadcast, onAssign, onDelete }: { ride: RideRow; canRebroadcast: boolean; onRebroadcast: () => void; onAssign: () => void; onDelete: () => void }) {
   return (
     <Card className="shadow-card border-warning/40 bg-warning/5">
       <CardContent className="p-5 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
@@ -319,6 +355,15 @@ function AttentionRow({ ride, canRebroadcast, onRebroadcast, onAssign }: { ride:
             </Button>
           )}
           <Button onClick={onAssign} className="bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">Find &amp; assign driver</Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-destructive shrink-0"
+            onClick={onDelete}
+            title="Delete this ride"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         </div>
       </CardContent>
     </Card>

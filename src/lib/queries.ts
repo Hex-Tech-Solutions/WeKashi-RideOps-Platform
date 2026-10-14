@@ -538,6 +538,14 @@ export function useRebroadcastRide() {
   });
 }
 
+export function useDeleteRide() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/rides/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["rides"] }),
+  });
+}
+
 export function useAdvanceRideStatus() {
   const qc = useQueryClient();
   return useMutation({
