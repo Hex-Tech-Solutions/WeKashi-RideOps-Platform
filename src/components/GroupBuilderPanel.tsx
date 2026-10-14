@@ -16,25 +16,31 @@ import { toast } from "sonner";
  */
 export function GroupBuilderPanel({
   selected,
+  rideType,
+  onRideTypeChange,
+  shiftMismatch = false,
   onReorder,
   onRemove,
   onClear,
   height = 440,
 }: {
   selected: EmployeeRow[];
+  rideType: "login" | "logout";
+  onRideTypeChange: (t: "login" | "logout") => void;
+  shiftMismatch?: boolean;
   onReorder: (from: number, to: number) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
   height?: number;
 }) {
   const [name, setName] = useState("");
-  const [rideType, setRideType] = useState<"login" | "logout">("login");
   const save = useCreateRouteTemplate();
 
   const submit = () => {
     const trimmed = name.trim();
     if (!trimmed) { toast.error("Enter a name for this group"); return; }
     if (selected.length === 0) { toast.error("Pick at least one employee from the roster"); return; }
+    if (shiftMismatch) { toast.error("All employees must share the same shift time"); return; }
     save.mutate(
       { name: trimmed, rideType, orderedEmployeeIds: selected.map((e) => e.id) },
       {
@@ -60,12 +66,17 @@ export function GroupBuilderPanel({
               <Users className="h-3.5 w-3.5" /> {selected.length} selected
             </span>
           </div>
-          <Tabs value={rideType} onValueChange={(v) => setRideType(v as "login" | "logout")}>
+          <Tabs value={rideType} onValueChange={(v) => onRideTypeChange(v as "login" | "logout")}>
             <TabsList className="w-full">
               <TabsTrigger value="login" className="flex-1 text-green-700 data-[state=active]:text-gold-foreground">Login</TabsTrigger>
               <TabsTrigger value="logout" className="flex-1 text-red-700 data-[state=active]:text-gold-foreground">Logout</TabsTrigger>
             </TabsList>
           </Tabs>
+          {shiftMismatch && (
+            <div className="text-[11px] text-destructive">
+              Employees have different shift times — a group must share one shift.
+            </div>
+          )}
         </div>
 
         {/* Ordered selection */}
@@ -136,7 +147,7 @@ export function GroupBuilderPanel({
             <Button
               className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90"
               onClick={submit}
-              disabled={save.isPending || selected.length === 0}
+              disabled={save.isPending || selected.length === 0 || shiftMismatch}
             >
               {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="h-4 w-4" /> Save group</>}
             </Button>

@@ -19,11 +19,20 @@ export function RosterEmployeePanel({
   selectedIds,
   title = "Shift roster",
   height = 440,
+  rideType = "login",
+  lockedCompany = null,
+  lockedShift = null,
 }: {
   onPick?: (e: EmployeeRow) => void;
   selectedIds?: Set<string>;
   title?: string;
   height?: number;
+  /** Ride direction — decides which shift time (start/end) must match. */
+  rideType?: "login" | "logout";
+  /** Once a group has an employee with a company, only that company is pickable. */
+  lockedCompany?: string | null;
+  /** Once a group has a shift time, only employees on that shift are pickable. */
+  lockedShift?: string | null;
 }) {
   const { data, isLoading } = useEmployees();
   const { data: locationsData } = useOfficeLocations();
@@ -113,14 +122,26 @@ export function RosterEmployeePanel({
             )}
             {filtered.map((e) => {
               const picked = selectedIds?.has(e.id);
+              const empShift = rideType === "logout" ? e.shiftEnd : e.shiftStart;
+              // Same rules as Book-a-ride: can't mix companies or shift times.
+              const companyBlocked = !picked && !!lockedCompany && (e.companyLabel ?? null) !== lockedCompany;
+              const shiftBlocked = !picked && !!lockedShift && empShift !== lockedShift;
+              const blocked = !!onPick && (companyBlocked || shiftBlocked);
               return (
                 <button
                   key={e.id}
                   type="button"
-                  onClick={() => onPick?.(e)}
-                  disabled={!onPick}
+                  onClick={() => !blocked && onPick?.(e)}
+                  disabled={!onPick || blocked}
+                  title={
+                    companyBlocked ? `Different company — a group can only mix one office (${lockedCompany}).`
+                    : shiftBlocked ? `Different ${rideType === "logout" ? "logout" : "login"} time — a group must share one shift (${lockedShift}).`
+                    : undefined
+                  }
                   className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors ${
-                    onPick ? "hover:bg-muted/50 cursor-pointer" : "cursor-default"
+                    !onPick ? "cursor-default"
+                    : blocked ? "opacity-40 cursor-not-allowed"
+                    : "hover:bg-muted/50 cursor-pointer"
                   } ${picked ? "bg-gold/10" : ""}`}
                 >
                   <div className="h-8 w-8 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-semibold shrink-0">

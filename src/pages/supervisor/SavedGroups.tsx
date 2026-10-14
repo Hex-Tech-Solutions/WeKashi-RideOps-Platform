@@ -70,15 +70,52 @@ export default function SavedGroups() {
   const report = reportData?.report ?? [];
   const allEmployees = employeesData?.employees ?? [];
 
-  // Group builder: ordered list of selected employees (built from the roster).
+  // Group builder: ride direction + ordered employee selection, built from the
+  // roster. Selection rules mirror Book-a-ride: one office only, one shift time.
+  const [rideType, setRideType] = useState<"login" | "logout">("login");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const selectedSet = new Set(selectedIds);
   const selectedEmployees = selectedIds
     .map((id) => allEmployees.find((e) => e.id === id))
     .filter((e): e is NonNullable<typeof e> => !!e);
 
-  const toggleEmployee = (id: string) =>
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // Shift-match rule (same as booking): everyone in the group must share the
+  // relevant shift time — shiftStart for login, shiftEnd for logout.
+  const shiftTimes = Array.from(
+    new Set(selectedEmployees.map((e) => (rideType === "logout" ? e.shiftEnd : e.shiftStart)).filter(Boolean)),
+  );
+  const shiftMismatch = shiftTimes.length > 1;
+
+  // Office-match rule (same as booking): a group can only mix employees from a
+  // single company/office. The first picked employee locks the office.
+  const lockedCompany = selectedEmployees.find((e) => e.companyLabel)?.companyLabel ?? null;
+
+  const shiftOf = (e: typeof allEmployees[number]) => (rideType === "logout" ? e.shiftEnd : e.shiftStart);
+  const toggleEmployee = (id: string) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds((prev) => prev.filter((x) => x !== id));
+      return;
+    }
+    const emp = allEmployees.find((e) => e.id === id);
+    if (!emp) return;
+    const anchor = selectedEmployees[0];
+    if (anchor) {
+      // Same rules as Book a ride: no mixing companies, one shift time.
+      if ((emp.companyLabel ?? null) !== (anchor.companyLabel ?? null)) {
+        toast.error("A group can't mix companies/offices", {
+          description: `This group is for ${anchor.companyLabel ?? "unassigned"}. Clear it to start another company.`,
+        });
+        return;
+      }
+      if (shiftOf(emp) !== shiftOf(anchor)) {
+        toast.error("All employees must share the same shift time", {
+          description: `${anchor.name}'s ${rideType} time is ${shiftOf(anchor)}; ${emp.name}'s is ${shiftOf(emp)}.`,
+        });
+        return;
+      }
+    }
+    setSelectedIds((prev) => [...prev, id]);
+  };
   const removeEmployee = (id: string) => setSelectedIds((prev) => prev.filter((x) => x !== id));
   const reorderSelected = (from: number, to: number) =>
     setSelectedIds((prev) => {
@@ -108,16 +145,23 @@ export default function SavedGroups() {
         }
       />
 
-      {/* Group builder — pick employees from the roster (left), build the
-          ordered group (right), and save it directly here. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      {/* Group builder — two stacked layouts: roster list on top, group
+          summary below (manifest style). Same selection rules as Book a ride:
+          one office, one shift time. */}
+      <div className="space-y-4 mb-6">
         <RosterEmployeePanel
           onPick={(e) => toggleEmployee(e.id)}
           selectedIds={selectedSet}
           title="Shift roster — tap to add"
+          rideType={rideType}
+          lockedCompany={lockedCompany}
+          lockedShift={shiftTimes.length === 1 ? shiftTimes[0] : null}
         />
         <GroupBuilderPanel
           selected={selectedEmployees}
+          rideType={rideType}
+          onRideTypeChange={setRideType}
+          shiftMismatch={shiftMismatch}
           onReorder={reorderSelected}
           onRemove={removeEmployee}
           onClear={() => setSelectedIds([])}
