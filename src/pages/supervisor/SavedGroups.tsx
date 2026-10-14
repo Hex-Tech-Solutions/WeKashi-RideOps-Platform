@@ -72,7 +72,7 @@ export default function SavedGroups() {
   const [editingTemplate, setEditingTemplate] = useState<RouteTemplateRow | null>(null);
 
   return (
-    <div className="max-w-5xl">
+    <div className="w-full">
       <PageHeader
         title="Saved Groups"
         description="Reusable employee groups for one-tap booking and usage analytics."
