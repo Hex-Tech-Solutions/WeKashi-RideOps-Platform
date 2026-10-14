@@ -17,6 +17,7 @@ import {
   type OfficeLocationRow,
 } from "@/lib/queries";
 import { OfficeMapPicker } from "@/components/OfficeMapPicker";
+import { rideArea } from "@/lib/rideArea";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Loader2, MapPin, Plus, Pencil, Trash2, Star, X, Check } from "lucide-react";
@@ -270,7 +271,15 @@ function OfficeForm({ initial, onSave, onCancel, saving }: {
         onChange={setPicked}
       />
       {picked && (
-        <div className="text-xs rounded bg-secondary p-2">{picked.address}</div>
+        <div className="space-y-1.5">
+          {rideArea(picked.address) && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground">Area / Locality drivers will see:</span>
+              <span className="font-semibold text-foreground">{rideArea(picked.address)}</span>
+            </div>
+          )}
+          <div className="text-xs rounded bg-secondary p-2">{picked.address}</div>
+        </div>
       )}
       <div className="flex gap-2 pt-1">
         <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={saving}>

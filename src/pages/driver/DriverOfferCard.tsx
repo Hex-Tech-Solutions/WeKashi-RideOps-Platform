@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check, X, Users, Shield, Timer, LogIn, MapPin, Wind } from "lucide-react";
 import type { RideRow } from "@/lib/queries";
-import { HighlightedAddress } from "@/lib/highlightAddress";
+import { rideArea } from "@/lib/rideArea";
 
 /** Format an ISO datetime (or an HH:MM string) to HH:MM for display. */
 function fmtTime(v?: string | null): string | null {
@@ -112,7 +112,7 @@ export function DriverOfferCard({
 
           <div className="relative">
             <span className="absolute -left-4 top-1 h-1.5 w-1.5 rounded-full bg-gold ring-2 ring-gold/20" />
-            <div className="flex items-baseline gap-1.5">
+            <div className="flex items-baseline gap-1.5 flex-wrap">
               <span className="text-sm font-bold">
                 {approach?.km != null ? `${approach.km} km` : "—"}
               </span>
@@ -120,10 +120,12 @@ export function DriverOfferCard({
                 <span className="text-[11px] text-muted-foreground">({approach.min} min away)</span>
               )}
             </div>
-            <HighlightedAddress
-              address={ride.pickupAddress}
-              className="text-xs text-muted-foreground leading-snug break-words block"
-            />
+            {rideArea(ride.pickupAddress) && (
+              <div className="text-sm font-semibold text-foreground leading-tight">{rideArea(ride.pickupAddress)}</div>
+            )}
+            <div className="text-xs text-muted-foreground leading-snug break-words">
+              {ride.pickupAddress}
+            </div>
           </div>
 
           <div className="relative mt-2.5">
@@ -134,10 +136,12 @@ export function DriverOfferCard({
               </span>
               <span className="text-[11px] text-muted-foreground">trip</span>
             </div>
-            <HighlightedAddress
-              address={ride.dropAddress}
-              className="text-xs text-muted-foreground leading-snug break-words block"
-            />
+            {rideArea(ride.dropAddress) && (
+              <div className="text-sm font-semibold text-foreground leading-tight">{rideArea(ride.dropAddress)}</div>
+            )}
+            <div className="text-xs text-muted-foreground leading-snug break-words">
+              {ride.dropAddress}
+            </div>
           </div>
         </div>
 

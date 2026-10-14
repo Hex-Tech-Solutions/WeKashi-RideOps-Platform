@@ -6,7 +6,7 @@ import { MapPin, Users, IndianRupee, Calendar, Wind, Shield, LogIn } from "lucid
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
-import { HighlightedAddress } from "@/lib/highlightAddress";
+import { rideArea } from "@/lib/rideArea";
 
 /** Format an ISO datetime (or an HH:MM string) to HH:MM for display. */
 function fmtTime(v?: string | null): string | null {
@@ -121,9 +121,12 @@ function SchedSummary({ ride }: { ride: RideRow }) {
 
       <div className="flex items-start gap-2 text-sm">
         <MapPin className="h-4 w-4 text-gold mt-0.5 shrink-0" />
-        <div>
-          <HighlightedAddress address={ride.pickupAddress} className="font-medium block" />
-          <div className="text-muted-foreground text-xs">→ <HighlightedAddress address={ride.dropAddress} /></div>
+        <div className="min-w-0">
+          {rideArea(ride.pickupAddress) && <div className="font-semibold text-foreground leading-tight">{rideArea(ride.pickupAddress)}</div>}
+          <div className="font-medium text-xs text-muted-foreground">{ride.pickupAddress}</div>
+          <div className="text-muted-foreground text-xs mt-1">
+            → {rideArea(ride.dropAddress) && <span className="font-semibold text-foreground">{rideArea(ride.dropAddress)} · </span>}{ride.dropAddress}
+          </div>
         </div>
       </div>
 
