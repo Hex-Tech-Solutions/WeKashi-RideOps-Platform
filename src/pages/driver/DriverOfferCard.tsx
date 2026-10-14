@@ -123,14 +123,16 @@ export function DriverOfferCard({
 
           <div className="relative">
             <span className="absolute -left-4 top-1 h-1.5 w-1.5 rounded-full bg-gold ring-2 ring-gold/20" />
-            <div className="flex items-baseline gap-1.5 flex-wrap">
-              <span className="text-sm font-bold">
-                {approach?.km != null ? `${approach.km} km` : "—"}
-              </span>
-              {approach?.min != null && (
-                <span className="text-[11px] text-muted-foreground">({approach.min} min away)</span>
-              )}
-            </div>
+            {/* Driver→pickup distance is only known for live offers; omit the
+                line entirely for scheduled rides (no approach computed). */}
+            {approach?.km != null && (
+              <div className="flex items-baseline gap-1.5 flex-wrap">
+                <span className="text-sm font-bold">{approach.km} km</span>
+                {approach.min != null && (
+                  <span className="text-[11px] text-muted-foreground">({approach.min} min away)</span>
+                )}
+              </div>
+            )}
             {rideArea(ride.pickupAddress) && (
               <div className="text-sm font-semibold text-foreground leading-tight">{rideArea(ride.pickupAddress)}</div>
             )}

@@ -6,7 +6,7 @@ import type { Server as IoServer } from 'socket.io';
 // Lazy import to avoid circular dependency (ride.service.ts doesn't import broadcastSweeper directly at module scope)
 async function sweepStaleScheduledRides(): Promise<void> {
   const { sweepStaleScheduledRides: sweep } = await import('../services/ride.service');
-  await sweep();
+  await sweep(ioInstance ?? undefined);
 }
 
 let sweeperInterval: NodeJS.Timeout | null = null;

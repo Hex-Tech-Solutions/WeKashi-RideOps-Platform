@@ -7,20 +7,27 @@
  *    Bengaluru, Karnataka 560001, India"
  *   "Rajajinagar, Bengaluru, Karnataka, India"
  *
- * We take the first segment that is a real locality — skipping pure
- * house/plot numbers — and prefer a road/locality-type token when present.
+ * City-agnostic: Google addresses end with "<City>, <State PIN>, <Country>", so
+ * we strip state/PIN/country lines and the trailing city, then take the first
+ * real locality (preferring a road/locality-type token).
  */
 const PIN = /^\d{6}$/;
 const HOUSE_NO = /^(no\.?\s*)?\d+[a-z]?$/i;
-const CITY_STATE_NOISE = /^(bengaluru|bangalore|karnataka|india)$/i;
+const STATE_PIN_COUNTRY = /\b\d{6}\b|karnataka|maharashtra|tamil nadu|telangana|kerala|andhra pradesh|delhi|india/i;
 const LOCALITY_HINT = /\b(rd|road|marg|main|cross|nagar|layout|garden|gardens|circle|town|colony|extension|hobli)\b/i;
 
 export function rideArea(address: string | null | undefined): string | null {
   if (!address) return null;
   const segments = address.split(",").map((s) => s.trim()).filter(Boolean);
-  const meaningful = segments.filter(
-    (s) => !PIN.test(s) && !HOUSE_NO.test(s) && !CITY_STATE_NOISE.test(s),
-  );
+  if (segments.length === 0) return null;
+
+  // Drop state/PIN/country lines (no hardcoded single city).
+  const trimmed = segments.filter((s) => !STATE_PIN_COUNTRY.test(s) && !PIN.test(s));
+  // The last remaining segment is usually the city — drop it when a more
+  // specific locality exists before it.
+  const candidates = trimmed.length > 1 ? trimmed.slice(0, -1) : trimmed;
+
+  const meaningful = candidates.filter((s) => !HOUSE_NO.test(s));
   if (meaningful.length === 0) return null;
   const hinted = meaningful.find((s) => LOCALITY_HINT.test(s));
   return hinted ?? meaningful[0];

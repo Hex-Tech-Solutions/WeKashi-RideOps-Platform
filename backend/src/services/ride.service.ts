@@ -898,7 +898,55 @@ async function attachFirstPickupTimes<T extends { id: string }>(rides: T[]): Pro
 //
 // No-show fines have been removed — the ride is simply expired. No credit is
 // consumed for an expired ride, and no wallet debit or fine record is written.
-export async function sweepStaleScheduledRides(): Promise<void> {
+export async function sweepStaleScheduledRides(io?: IoServer): Promise<void> {
+  // 1) Promote unclaimed scheduled rides that have crossed into the <4h window
+  //    into a live broadcast — otherwise they'd vanish from the claim
+  //    marketplace (which only shows rides >4h out) and the employees would
+  //    silently get no driver. We broadcast them to nearby drivers now.
+  const CLAIM_WINDOW_MS = 4 * 60 * 60 * 1000;
+  const toPromote = await prisma.ride.findMany({
+    where: {
+      status: 'scheduled',
+      scheduledFor: { not: null, gt: new Date(), lte: new Date(Date.now() + CLAIM_WINDOW_MS) },
+    },
+    select: { id: true, vehicleType: true, supervisorId: true },
+  });
+
+  for (const r of toPromote) {
+    try {
+      await prisma.ride.update({
+        where: { id: r.id },
+        data: { status: 'broadcasting' },
+      });
+      await startRideBroadcast(r.id);
+
+      const pickupRows = await prisma.$queryRaw<Array<{ lat: number; lng: number }>>`
+        SELECT ST_Y(pickup_point::geometry) as lat, ST_X(pickup_point::geometry) as lng
+        FROM rides WHERE id = ${r.id}
+      `;
+      if (pickupRows.length > 0) {
+        const { lat, lng } = pickupRows[0];
+        const nearby = await findNearbyDrivers(lat, lng, BROADCAST_RADIUS_KM, r.vehicleType);
+        const driverIds = nearby.map((d) => d.id);
+        if (driverIds.length > 0) {
+          await prisma.rideOffer.createMany({
+            data: driverIds.map((id) => ({ rideId: r.id, driverId: id, response: 'pending' })),
+            skipDuplicates: true,
+          });
+          if (io) {
+            const payload = await getRidePublicPayload(r.id);
+            emitDriverBroadcast(io, driverIds, payload);
+          }
+        }
+      }
+      logger.info({ rideId: r.id }, 'Unclaimed scheduled ride promoted to broadcasting (<4h window)');
+    } catch (err) {
+      logger.error({ err, rideId: r.id }, 'Failed to promote scheduled ride to broadcasting');
+    }
+  }
+
+  // 2) Expire truly-stale rides: unclaimed scheduled ones past their time, and
+  //    claimed ones never started more than 1h after their time (driver no-show).
   await prisma.$executeRaw`
     UPDATE rides SET status = 'expired'
     WHERE (status = 'scheduled' AND scheduled_for IS NOT NULL AND scheduled_for < NOW())

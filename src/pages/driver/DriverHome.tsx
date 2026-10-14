@@ -50,8 +50,10 @@ export default function DriverHome() {
   // arrival), and can be STARTED from 40 min before. Before that it stays in
   // the Scheduled tab — the driver shouldn't confirm arrival hours early.
   // A live-broadcast ride (no scheduledFor) is active immediately, as before.
+  // Both windows are equal so the ride is startable the moment it appears as
+  // active — no dead zone where it's active but Start is disabled.
   const ACTIVE_WINDOW_MS = 45 * 60 * 1000;       // 45 minutes before pickup
-  const START_WINDOW_MS = 40 * 60 * 1000;        // 40 minutes before pickup
+  const START_WINDOW_MS = 45 * 60 * 1000;        // 45 minutes before pickup
   const scheduledReady = (r: RideRow) => {
     if (!r.scheduledFor) return true; // live ride — always active
     return new Date(r.scheduledFor).getTime() - Date.now() <= ACTIVE_WINDOW_MS;
