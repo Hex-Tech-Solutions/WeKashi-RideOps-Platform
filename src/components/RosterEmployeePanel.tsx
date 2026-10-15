@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useEmployees, useOfficeLocations, type EmployeeRow } from "@/lib/queries";
-import { Search, Users, Building2, Loader2 } from "lucide-react";
+import { Search, Users, Loader2, MapPin } from "lucide-react";
+import { rideArea } from "@/lib/rideArea";
 
 /**
  * Shift-roster employee list panel — the full roster with the same
@@ -107,71 +108,68 @@ export function RosterEmployeePanel({
           )}
         </div>
 
-        {/* Scrollable list */}
+        {/* Table — MoveInSync-style columns: ☑ · Emp ID · Name · G · Landmark · Address · dir */}
         <ScrollArea style={{ height }}>
-          <div className="divide-y">
-            {isLoading && (
-              <div className="py-12 text-center">
-                <Loader2 className="h-5 w-5 animate-spin text-gold mx-auto" />
-              </div>
-            )}
-            {!isLoading && filtered.length === 0 && (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                {employees.length === 0 ? "No employees yet." : "No employees match your search."}
-              </div>
-            )}
-            {filtered.map((e) => {
-              const picked = selectedIds?.has(e.id);
-              const empShift = rideType === "logout" ? e.shiftEnd : e.shiftStart;
-              // Same rules as Book-a-ride: can't mix companies or shift times.
-              const companyBlocked = !picked && !!lockedCompany && (e.companyLabel ?? null) !== lockedCompany;
-              const shiftBlocked = !picked && !!lockedShift && empShift !== lockedShift;
-              const blocked = !!onPick && (companyBlocked || shiftBlocked);
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  onClick={() => !blocked && onPick?.(e)}
-                  disabled={!onPick || blocked}
-                  title={
-                    companyBlocked ? `Different company — a group can only mix one office (${lockedCompany}).`
-                    : shiftBlocked ? `Different ${rideType === "logout" ? "logout" : "login"} time — a group must share one shift (${lockedShift}).`
-                    : undefined
-                  }
-                  className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors ${
-                    !onPick ? "cursor-default"
-                    : blocked ? "opacity-40 cursor-not-allowed"
-                    : "hover:bg-muted/50 cursor-pointer"
-                  } ${picked ? "bg-gold/10" : ""}`}
-                >
-                  <div className="h-8 w-8 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-semibold shrink-0">
-                    {e.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm truncate">{e.name}</span>
-                      {isFemale(e.gender) && (
-                        <Badge variant="outline" className="border-gold/40 text-gold-dark bg-gold-soft text-[10px] py-0">F</Badge>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate">
-                      <span className="font-mono">{e.empId}</span>
-                      {e.companyLabel && (
-                        <span className="inline-flex items-center gap-0.5 ml-1.5">
-                          <Building2 className="h-3 w-3" /> {e.companyLabel}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate">{e.pickupAddress}</div>
-                  </div>
-                  <div className="text-right shrink-0 text-[11px] font-mono text-muted-foreground">
-                    <div>Login {e.shiftStart}</div>
-                    <div>Logout {e.shiftEnd}</div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur text-[10px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b">
+                <th className="w-8 px-2 py-2"></th>
+                <th className="text-left font-medium px-2 py-2 w-16">Emp ID</th>
+                <th className="text-left font-medium px-2 py-2">Name</th>
+                <th className="w-8 px-1 py-2 text-center">G</th>
+                <th className="text-left font-medium px-2 py-2">Landmark</th>
+                <th className="text-left font-medium px-2 py-2">Address</th>
+                <th className="w-10 px-1 py-2 text-center">{rideType === "logout" ? "Drop" : "Pick"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && (
+                <tr><td colSpan={7} className="py-12 text-center"><Loader2 className="h-5 w-5 animate-spin text-gold mx-auto" /></td></tr>
+              )}
+              {!isLoading && filtered.length === 0 && (
+                <tr><td colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                  {employees.length === 0 ? "No employees yet." : "No employees match your search."}
+                </td></tr>
+              )}
+              {filtered.map((e) => {
+                const picked = selectedIds?.has(e.id);
+                const empShift = rideType === "logout" ? e.shiftEnd : e.shiftStart;
+                const companyBlocked = !picked && !!lockedCompany && (e.companyLabel ?? null) !== lockedCompany;
+                const shiftBlocked = !picked && !!lockedShift && empShift !== lockedShift;
+                const blocked = !!onPick && (companyBlocked || shiftBlocked);
+                return (
+                  <tr
+                    key={e.id}
+                    onClick={() => onPick && !blocked && onPick(e)}
+                    title={
+                      companyBlocked ? `Different company — a group can only mix one office (${lockedCompany}).`
+                      : shiftBlocked ? `Different ${rideType === "logout" ? "logout" : "login"} time — a group must share one shift (${lockedShift}).`
+                      : undefined
+                    }
+                    className={`border-b last:border-0 transition-colors ${
+                      !onPick ? "" : blocked ? "opacity-40 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"
+                    } ${picked ? "bg-gold/10" : ""}`}
+                  >
+                    <td className="px-2 py-2 text-center">
+                      <input type="checkbox" readOnly checked={!!picked} className="accent-[hsl(var(--gold))] pointer-events-none" />
+                    </td>
+                    <td className="px-2 py-2 font-mono text-muted-foreground">{e.empId}</td>
+                    <td className="px-2 py-2 font-medium">{e.name}</td>
+                    <td className="px-1 py-2 text-center">
+                      {isFemale(e.gender)
+                        ? <span className="text-gold-dark font-semibold">F</span>
+                        : <span className="text-muted-foreground">M</span>}
+                    </td>
+                    <td className="px-2 py-2 font-semibold text-foreground">{rideArea(e.pickupAddress) ?? "—"}</td>
+                    <td className="px-2 py-2 text-muted-foreground max-w-[220px] truncate" title={e.pickupAddress}>{e.pickupAddress}</td>
+                    <td className="px-1 py-2 text-center">
+                      <MapPin className={`h-3.5 w-3.5 inline ${rideType === "logout" ? "text-sky-500" : "text-red-500"}`} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </ScrollArea>
       </CardContent>
     </Card>
