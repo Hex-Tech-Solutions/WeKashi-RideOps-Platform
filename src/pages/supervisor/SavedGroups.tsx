@@ -8,6 +8,7 @@ import {
   useUpdateRouteTemplate,
   useDeleteRouteTemplate,
   useSavedGroupsReport,
+  useCreateRouteTemplate,
   useEmployees,
   type RouteTemplateRow,
 } from "@/lib/queries";
@@ -28,7 +29,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditGroupDialog } from "@/components/EditGroupDialog";
 import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
 import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
-import { GroupBuilderPanel } from "@/components/GroupBuilderPanel";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -70,10 +70,29 @@ export default function SavedGroups() {
   const report = reportData?.report ?? [];
   const allEmployees = employeesData?.employees ?? [];
 
-  // Group builder: ride direction + ordered employee selection, built from the
-  // roster. Selection rules mirror Book-a-ride: one office only, one shift time.
+  // Group builder: ride direction + employee selection (checked rows), built
+  // from the roster. Rules mirror Book-a-ride: one office only, one shift time.
   const [rideType, setRideType] = useState<"login" | "logout">("login");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [groupName, setGroupName] = useState("");
+  const createTemplate = useCreateRouteTemplate();
+
+  const createGroup = () => {
+    const name = groupName.trim();
+    if (!name) { toast.error("Enter a group name"); return; }
+    if (selectedIds.length === 0) { toast.error("Tick at least one employee"); return; }
+    createTemplate.mutate(
+      { name, rideType, orderedEmployeeIds: selectedIds },
+      {
+        onSuccess: () => {
+          toast.success(`Group "${name}" created`);
+          setGroupName("");
+          setSelectedIds([]);
+        },
+        onError: (e: any) => toast.error(e?.message ?? "Failed to create group"),
+      },
+    );
+  };
   const selectedSet = new Set(selectedIds);
   const selectedEmployees = selectedIds
     .map((id) => allEmployees.find((e) => e.id === id))
@@ -116,15 +135,6 @@ export default function SavedGroups() {
     }
     setSelectedIds((prev) => [...prev, id]);
   };
-  const removeEmployee = (id: string) => setSelectedIds((prev) => prev.filter((x) => x !== id));
-  const reorderSelected = (from: number, to: number) =>
-    setSelectedIds((prev) => {
-      if (to < 0 || to >= prev.length) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
 
   // "Load group" now opens an editable preview instead of jumping straight
   // into the booking flow — the supervisor can add/remove people and see the
@@ -145,26 +155,25 @@ export default function SavedGroups() {
         }
       />
 
-      {/* Group builder — two stacked layouts: roster list on top, group
-          summary below (manifest style). Same selection rules as Book a ride:
-          one office, one shift time. */}
-      <div className="space-y-4 mb-6">
+      {/* Merged group builder: one roster table where checked rows = group
+          members, with the create-group toolbar (direction + name + create)
+          in its header. Same selection rules as Book a ride. */}
+      <div className="mb-6">
         <RosterEmployeePanel
           onPick={(e) => toggleEmployee(e.id)}
           selectedIds={selectedSet}
-          title="Shift roster — tap to add"
+          title="Shift roster — tick employees to add"
           rideType={rideType}
           lockedCompany={lockedCompany}
           lockedShift={shiftTimes.length === 1 ? shiftTimes[0] : null}
-        />
-        <GroupBuilderPanel
-          selected={selectedEmployees}
-          rideType={rideType}
           onRideTypeChange={setRideType}
+          groupName={groupName}
+          onGroupNameChange={setGroupName}
+          onCreateGroup={createGroup}
+          creating={createTemplate.isPending}
           shiftMismatch={shiftMismatch}
-          onReorder={reorderSelected}
-          onRemove={removeEmployee}
-          onClear={() => setSelectedIds([])}
+          selectedCount={selectedIds.length}
+          height={520}
         />
       </div>
 

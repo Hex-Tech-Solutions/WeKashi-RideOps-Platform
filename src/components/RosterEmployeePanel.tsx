@@ -2,9 +2,11 @@ import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useEmployees, useOfficeLocations, type EmployeeRow } from "@/lib/queries";
-import { Search, Users, Loader2, MapPin } from "lucide-react";
+import { Search, Users, Loader2, MapPin, BookmarkPlus, Save } from "lucide-react";
 import { rideArea } from "@/lib/rideArea";
 
 /**
@@ -23,6 +25,14 @@ export function RosterEmployeePanel({
   rideType = "login",
   lockedCompany = null,
   lockedShift = null,
+  // ── Merged create-group controls (optional) ──
+  onRideTypeChange,
+  groupName,
+  onGroupNameChange,
+  onCreateGroup,
+  creating = false,
+  shiftMismatch = false,
+  selectedCount = 0,
 }: {
   onPick?: (e: EmployeeRow) => void;
   selectedIds?: Set<string>;
@@ -34,7 +44,16 @@ export function RosterEmployeePanel({
   lockedCompany?: string | null;
   /** Once a group has a shift time, only employees on that shift are pickable. */
   lockedShift?: string | null;
+  /** When these are provided, the panel shows the merged create-group toolbar. */
+  onRideTypeChange?: (t: "login" | "logout") => void;
+  groupName?: string;
+  onGroupNameChange?: (v: string) => void;
+  onCreateGroup?: () => void;
+  creating?: boolean;
+  shiftMismatch?: boolean;
+  selectedCount?: number;
 }) {
+  const showCreate = !!onCreateGroup;
   const { data, isLoading } = useEmployees();
   const { data: locationsData } = useOfficeLocations();
   const employees = data?.employees ?? [];
@@ -74,6 +93,47 @@ export function RosterEmployeePanel({
               {filtered.length} of {employees.length}
             </Badge>
           </div>
+
+          {/* Create-group toolbar: direction + name + create (checked rows = members) */}
+          {showCreate && (
+            <div className="flex items-center gap-2 flex-wrap rounded-md border bg-muted/30 p-2">
+              <div className="flex items-center gap-1.5">
+                <BookmarkPlus className="h-4 w-4 text-gold shrink-0" />
+                <span className="text-xs font-medium">New group</span>
+              </div>
+              <Select value={rideType} onValueChange={(v) => onRideTypeChange?.(v as "login" | "logout")}>
+                <SelectTrigger className="h-8 w-[120px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="login"><span className="text-green-700 font-medium">Login</span></SelectItem>
+                  <SelectItem value="logout"><span className="text-red-700 font-medium">Logout</span></SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                value={groupName ?? ""}
+                onChange={(e) => onGroupNameChange?.(e.target.value)}
+                placeholder="Group name (e.g. BTM Morning Login)"
+                className="h-8 flex-1 min-w-[160px] text-xs"
+              />
+              <span className="text-[11px] text-muted-foreground flex items-center gap-1 shrink-0">
+                <Users className="h-3.5 w-3.5" /> {selectedCount}
+              </span>
+              <Button
+                size="sm"
+                className="h-8 bg-gold text-gold-foreground hover:bg-gold/90 shrink-0"
+                onClick={onCreateGroup}
+                disabled={creating || selectedCount === 0 || shiftMismatch}
+              >
+                {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Save className="h-3.5 w-3.5" /> Create group</>}
+              </Button>
+            </div>
+          )}
+          {showCreate && shiftMismatch && (
+            <div className="text-[11px] text-destructive">
+              Selected employees have different shift times — a group must share one shift.
+            </div>
+          )}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -119,15 +179,16 @@ export function RosterEmployeePanel({
                 <th className="w-8 px-1 py-2 text-center">G</th>
                 <th className="text-left font-medium px-2 py-2">Landmark</th>
                 <th className="text-left font-medium px-2 py-2">Address</th>
+                <th className="w-20 px-2 py-2 text-left">{rideType === "logout" ? "Logout" : "Login"}</th>
                 <th className="w-10 px-1 py-2 text-center">{rideType === "logout" ? "Drop" : "Pick"}</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={7} className="py-12 text-center"><Loader2 className="h-5 w-5 animate-spin text-gold mx-auto" /></td></tr>
+                <tr><td colSpan={8} className="py-12 text-center"><Loader2 className="h-5 w-5 animate-spin text-gold mx-auto" /></td></tr>
               )}
               {!isLoading && filtered.length === 0 && (
-                <tr><td colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                <tr><td colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
                   {employees.length === 0 ? "No employees yet." : "No employees match your search."}
                 </td></tr>
               )}
@@ -162,6 +223,7 @@ export function RosterEmployeePanel({
                     </td>
                     <td className="px-2 py-2 font-semibold text-foreground">{rideArea(e.pickupAddress) ?? "—"}</td>
                     <td className="px-2 py-2 text-muted-foreground max-w-[220px] truncate" title={e.pickupAddress}>{e.pickupAddress}</td>
+                    <td className="px-2 py-2 font-mono text-foreground">{empShift}</td>
                     <td className="px-1 py-2 text-center">
                       <MapPin className={`h-3.5 w-3.5 inline ${rideType === "logout" ? "text-sky-500" : "text-red-500"}`} />
                     </td>
