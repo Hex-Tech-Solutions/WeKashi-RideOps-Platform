@@ -401,23 +401,10 @@ export default function DriverHome() {
           {!online ? (
             <div className="space-y-3">
               <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Go online to see broadcasts.</CardContent></Card>
-              {/* Earnings dashboard + banner only while idle — hidden during an active ride. */}
-              {!active && (
-                <>
-                  <DriverEarningsCard />
-                  <MadeInIndiaFooter />
-                </>
-              )}
             </div>
           ) : offers.length === 0 ? (
             <div className="space-y-3">
               <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No broadcasts right now. Waiting…</CardContent></Card>
-              {!active && (
-                <>
-                  <DriverEarningsCard />
-                  <MadeInIndiaFooter />
-                </>
-              )}
             </div>
           ) : (
             <div className="space-y-3 max-h-[560px] overflow-y-auto pr-0.5">
@@ -498,6 +485,17 @@ export default function DriverHome() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Earnings dashboard + "Made in India" banner — always the LAST thing
+            on the page, below both ride and rental broadcasts, and only while
+            idle (hidden during an active ride). Previously this sat inside the
+            ride-broadcasts block, which pushed the rentals section below it. */}
+        {!active && (
+          <div className="px-4 pb-2 space-y-3">
+            <DriverEarningsCard />
+            <MadeInIndiaFooter />
           </div>
         )}
 
