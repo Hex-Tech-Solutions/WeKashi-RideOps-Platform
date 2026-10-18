@@ -37,11 +37,14 @@ export function stopBroadcastSweeper(): void {
 
 async function sweepExpiredBroadcasts(): Promise<void> {
   try {
+    // Catch both normally-expired broadcasts AND any stuck 'broadcasting' row
+    // that somehow has no expiry set (otherwise NULL < NOW() is never true and
+    // the row would broadcast forever).
     const expiredRides = await prisma.$queryRaw<Array<{ id: string; supervisor_id: string }>>`
       SELECT id, supervisor_id
       FROM rides
       WHERE status = 'broadcasting'
-        AND broadcast_expires_at < NOW()
+        AND (broadcast_expires_at IS NULL OR broadcast_expires_at < NOW())
     `;
 
     if (expiredRides.length === 0) return;

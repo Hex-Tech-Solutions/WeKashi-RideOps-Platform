@@ -41,10 +41,12 @@ export default function Live() {
   }, []);
   const rides = data?.rides ?? [];
   const schedOverdue = (r: RideRow) => r.status === "scheduled" && !!r.scheduledFor && new Date(r.scheduledFor).getTime() - Date.now() < 4 * 3600 * 1000;
-  // An expired broadcast whose window has passed (server sweeper lags ~30s)
-  // shouldn't show as an active broadcast or in the live list.
+  // A broadcast is "expired/stale" if its window has passed OR it has no
+  // expiry at all (a stuck broadcasting row). Either way it must not show as an
+  // active broadcast — otherwise the banner lingers at 00:00 forever.
   const isExpiredBroadcast = (r: RideRow) =>
-    r.status === "broadcasting" && !!r.broadcastExpiresAt && new Date(r.broadcastExpiresAt).getTime() <= Date.now();
+    r.status === "broadcasting" &&
+    (!r.broadcastExpiresAt || new Date(r.broadcastExpiresAt).getTime() <= Date.now());
   const liveList = rides.filter((r) => ["broadcasting", "assigned", "in_progress"].includes(r.status) && !r.scheduledFor && !isExpiredBroadcast(r));
   const scheduledList = rides.filter((r) => (r.status === "scheduled" && !schedOverdue(r)) || (r.status === "assigned" && !!r.scheduledFor));
   const attentionList = rides.filter((r) => ["expired", "cancelled", "pending"].includes(r.status) || schedOverdue(r) || isExpiredBroadcast(r));

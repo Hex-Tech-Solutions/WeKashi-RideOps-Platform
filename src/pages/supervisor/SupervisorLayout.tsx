@@ -9,10 +9,11 @@ export default function SupervisorLayout() {
   const { data } = useRides({ limit: 100 });
   const { data: paymentsData } = usePendingPayments();
   const rides = data?.rides ?? [];
-  // A broadcast whose window has already expired (server sweeper hasn't flipped
-  // it to 'expired' yet) must not count as live.
+  // A broadcast whose window has passed OR has no expiry (a stuck row) must not
+  // count as live — the server sweeper may lag or the row may be stale.
   const isExpiredBroadcast = (r: typeof rides[number]) =>
-    r.status === "broadcasting" && !!r.broadcastExpiresAt && new Date(r.broadcastExpiresAt).getTime() <= Date.now();
+    r.status === "broadcasting" &&
+    (!r.broadcastExpiresAt || new Date(r.broadcastExpiresAt).getTime() <= Date.now());
   const liveCount = rides.filter(
     (r) => ["broadcasting", "assigned", "in_progress", "pending"].includes(r.status) && !isExpiredBroadcast(r),
   ).length;

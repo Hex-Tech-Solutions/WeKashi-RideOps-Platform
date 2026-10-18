@@ -914,10 +914,16 @@ export async function sweepStaleScheduledRides(io?: IoServer): Promise<void> {
 
   for (const r of toPromote) {
     try {
-      await prisma.ride.update({
-        where: { id: r.id },
-        data: { status: 'broadcasting' },
-      });
+      // Set the DB broadcast window too — startRideBroadcast only sets the
+      // Redis key, so without this the row would be 'broadcasting' with a null
+      // expiry and the sweeper could never retire it.
+      await prisma.$executeRaw`
+        UPDATE rides
+        SET status = 'broadcasting',
+            broadcast_started_at = NOW(),
+            broadcast_expires_at = NOW() + INTERVAL '1 minute'
+        WHERE id = ${r.id}
+      `;
       await startRideBroadcast(r.id);
 
       const pickupRows = await prisma.$queryRaw<Array<{ lat: number; lng: number }>>`
