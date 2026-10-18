@@ -1,5 +1,5 @@
 import { Outlet } from "react-router-dom";
-import { LayoutDashboard, Users, Route, Radio, BarChart3, Settings, AlertTriangle, BookOpen, IndianRupee } from "lucide-react";
+import { LayoutDashboard, Users, Route, Radio, BarChart3, Settings, AlertTriangle, BookOpen, IndianRupee, CarFront } from "lucide-react";
 import { RoleLayout, NavItem } from "@/components/RoleLayout";
 import { useRides, usePendingPayments } from "@/lib/queries";
 import { useAuth } from "@/hooks/useAuth";
@@ -23,6 +23,7 @@ export default function SupervisorLayout() {
     { to: "/supervisor/roster", label: "Roster", icon: Users },
     { to: "/supervisor/routes", label: "Book a ride", icon: Route },
     { to: "/supervisor/saved-groups", label: "Saved Groups", icon: BookOpen },
+    { to: "/supervisor/rentals", label: "Rentals", icon: CarFront },
     { to: "/supervisor/live", label: "Live rides", icon: Radio, badge: liveCount || undefined },
     { to: "/supervisor/payments", label: "Payments", icon: IndianRupee, badge: pendingPayCount || undefined },
     { to: "/supervisor/reports", label: "Reports", icon: BarChart3 },

@@ -30,6 +30,7 @@ model User {
   employees       Employee[]       @relation("SupervisorEmployees")
   issuesRaised    DriverIssue[]    @relation("SupervisorIssues")
   officeLocations OfficeLocation[]
+  rentals         Rental[]         @relation("SupervisorRentals")
   routeTemplates  RouteTemplate[]
 
   @@map("users")
@@ -47,6 +48,9 @@ model Driver {
   rating          Float        @default(5.0)
   vehicleId       String?      @map("vehicle_id")
   vehicleType     String?      @map("vehicle_type") // hatchback | sedan | suv
+  /// Driver opts in to receive rental bookings (Sedan/SUV only). Toggleable by
+  /// the driver in Vehicle Info; gates rental broadcast eligibility.
+  rentalOptIn     Boolean      @default(false) @map("rental_opt_in")
   seats           Int?         // total seats including driver
   // ── Direct-payment UPI (validated via Razorpay VPA API) ───────────────────
   upiVpa                String?   @map("upi_vpa")        // verified UPI VPA for direct supervisor payment
@@ -70,10 +74,47 @@ model Driver {
   locationLogs  RideLocationLog[]
   creditPacks   CreditPack[]
   packOrders    PackOrder[]
+  rentals       Rental[]
 
   @@index([vendorId])
   @@index([isOnline, status])
   @@map("drivers")
+}
+
+/// A rental booking (Sedan/SUV only). Booked by a supervisor for a named
+/// customer; broadcast fleet-wide to eligible opted-in drivers. Consumes one
+/// ride credit on acceptance (like a normal ride). Driver collects fare
+/// directly (no in-app payment).
+model Rental {
+  id             String    @id @default(uuid())
+  supervisorId   String    @map("supervisor_id")
+  driverId       String?   @map("driver_id")
+  customerName   String    @map("customer_name")
+  customerPhone  String    @map("customer_phone")
+  vehicleType    String    @map("vehicle_type")  // sedan | suv
+  packageKey     String    @map("package_key")   // e.g. sedan_2h, suv_8h
+  hours          Int
+  km             Int
+  basePrice      Float     @map("base_price")
+  extraPerKm     Float     @map("extra_per_km")
+  extraPerHr     Float     @map("extra_per_hr")
+  pickupAddress  String    @map("pickup_address")
+  pickupPoint    Unsupported("geography(Point, 4326)")? @map("pickup_point")
+  scheduledFor   DateTime? @map("scheduled_for")
+  status         String    @default("broadcasting") // broadcasting | assigned | in_progress | completed | cancelled
+  creditConsumed Boolean   @default(false) @map("credit_consumed")
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  acceptedAt     DateTime? @map("accepted_at")
+  completedAt    DateTime? @map("completed_at")
+
+  supervisor User    @relation("SupervisorRentals", fields: [supervisorId], references: [id])
+  driver     Driver? @relation(fields: [driverId], references: [id])
+
+  @@index([status])
+  @@index([driverId])
+  @@index([supervisorId])
+  @@map("rentals")
 }
 
 /// The Credit_Ledger: one row per pack a driver holds (purchased or bonus).

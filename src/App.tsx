@@ -18,6 +18,7 @@ import Reports from "./pages/supervisor/Reports";
 import SupervisorSettings from "./pages/supervisor/Settings";
 import SavedGroups from "./pages/supervisor/SavedGroups";
 import SupervisorPayments from "./pages/supervisor/Payments";
+import Rentals from "./pages/supervisor/Rentals";
 
 import VendorLayout from "./pages/vendor/VendorLayout";
 import VendorDashboard from "./pages/vendor/Dashboard";
@@ -86,6 +87,7 @@ const App = () => (
               <Route path="reports" element={<Reports />} />
               <Route path="issues" element={<SupervisorIssues />} />
               <Route path="saved-groups" element={<SavedGroups />} />
+              <Route path="rentals" element={<Rentals />} />
               <Route path="payments" element={<SupervisorPayments />} />
               <Route path="settings" element={<SupervisorSettings />} />
             </Route>

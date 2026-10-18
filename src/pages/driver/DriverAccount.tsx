@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import {
-  useDriverMe, useSetDriverVehicle,
+  useDriverMe, useSetDriverVehicle, useSetRentalOptIn,
   useUpdateDriverProfile,
 } from "@/lib/queries";
 import { VEHICLE_LABELS, type VehicleType } from "@/lib/pricing";
@@ -128,7 +129,7 @@ export default function DriverAccount() {
       <KycExpiredBanner kycExpired={kycExpired} />
       <ProfileSummaryCard me={me} fullName={session?.fullName} />
       <ProfileDetailsCard me={me} />
-      <VehicleCard currentType={me?.vehicleType} currentSeats={me?.seats} driverId={me?.id ?? session?.id} />
+      <VehicleCard currentType={me?.vehicleType} currentSeats={me?.seats} rentalOptIn={me?.rentalOptIn} driverId={me?.id ?? session?.id} />
       <CreditsSection />
       <SignOutButton />
     </div>
@@ -251,8 +252,9 @@ function writeVehiclePref(driverId: string | null | undefined, type: VehicleType
   catch { /* ignore */ }
 }
 
-export function VehicleCard({ currentType, currentSeats, driverId }: { currentType?: string | null; currentSeats?: number | null; driverId?: string | null }) {
+export function VehicleCard({ currentType, currentSeats, rentalOptIn, driverId }: { currentType?: string | null; currentSeats?: number | null; rentalOptIn?: boolean | null; driverId?: string | null }) {
   const save = useSetDriverVehicle();
+  const setOptIn = useSetRentalOptIn();
   // Seed from the server value if present, else the remembered local pref, else
   // sensible defaults — so the selection is never blank on a fresh login.
   const pref = readVehiclePref(driverId);
@@ -295,6 +297,28 @@ export function VehicleCard({ currentType, currentSeats, driverId }: { currentTy
           {save.isPending ? "Saving…" : "Save vehicle"}
         </Button>
         <div className="text-[11px] text-muted-foreground">Your vehicle type decides which ride broadcasts you receive.</div>
+
+        {/* Rental opt-in — only for Sedan / SUV (the saved vehicle type). */}
+        {(currentType === "sedan" || currentType === "suv") && (
+          <div className="flex items-center justify-between rounded-md border border-gold/30 bg-gold/5 px-3 py-2.5 mt-1">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">Opt-in for Rentals</div>
+              <div className="text-[11px] text-muted-foreground">
+                Receive rental bookings (Sedan/SUV). Toggle anytime.
+              </div>
+            </div>
+            <Switch
+              checked={!!rentalOptIn}
+              disabled={setOptIn.isPending}
+              onCheckedChange={(v) =>
+                setOptIn.mutate(v, {
+                  onSuccess: () => toast.success(v ? "You'll now receive rentals" : "Rentals turned off"),
+                  onError: (e: any) => toast.error(e?.message ?? "Failed"),
+                })
+              }
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

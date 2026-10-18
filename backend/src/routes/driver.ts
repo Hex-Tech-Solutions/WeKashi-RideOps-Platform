@@ -25,6 +25,13 @@ import { listPackCatalog } from '../lib/creditPacks';
 import { availableCredits, listPacks, getDriverStats } from '../services/creditPack.service';
 import { createOrder, confirmAndActivate } from '../services/packOrder.service';
 import { saveAndValidateVpa } from '../services/vpa.service';
+import {
+  setRentalOptIn,
+  listEligibleRentalsForDriver,
+  listDriverRentals,
+  acceptRental,
+  releaseRental,
+} from '../services/rental.service';
 import type { AuthRequest } from '../types';
 import type { Server as IoServer } from 'socket.io';
 
@@ -270,6 +277,54 @@ router.post('/upi', async (req: AuthRequest, res: Response, next: NextFunction) 
     next(err);
   }
 });
+
+  // ── Rentals ─────────────────────────────────────────────────────────────────
+
+  // POST /api/driver/rental-opt-in — enable/disable receiving rental bookings
+  router.post('/rental-opt-in', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { optIn } = z.object({ optIn: z.boolean() }).parse(req.body);
+      res.json(await setRentalOptIn(req.driver!.id, optIn));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/driver/rentals/available — eligible rental bookings to accept
+  router.get('/rentals/available', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json({ rentals: await listEligibleRentalsForDriver(req.driver!.id) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/driver/rentals/mine — rentals this driver currently holds
+  router.get('/rentals/mine', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json({ rentals: await listDriverRentals(req.driver!.id) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/accept — claim a rental (burns one credit)
+  router.post('/rentals/:id/accept', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json(await acceptRental(req.params.id, req.driver!.id));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/release — cancel a rental (refunds the credit)
+  router.post('/rentals/:id/release', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json(await releaseRental(req.params.id, req.driver!.id));
+    } catch (err) {
+      next(err);
+    }
+  });
 
   return router;
 }

@@ -412,6 +412,63 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
   }
 });
 
+// ── Rentals ───────────────────────────────────────────────────────────────────
+import { listRentalPacks } from '../lib/rentalPacks';
+import { createRental, listRentalsForSupervisor, cancelRental } from '../services/rental.service';
+
+// GET /supervisor/rentals/packs — pricing catalog (optionally by vehicle type)
+router.get('/rentals/packs', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const vt = req.query.vehicleType === 'sedan' || req.query.vehicleType === 'suv' ? req.query.vehicleType : undefined;
+    res.json({ packs: listRentalPacks(vt) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /supervisor/rentals — the supervisor's rentals
+router.get('/rentals', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json({ rentals: await listRentalsForSupervisor(req.user!.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /supervisor/rentals — book a rental
+router.post('/rentals', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const body = z.object({
+      customerName: z.string().min(1).max(100),
+      customerPhone: z.string().min(10).max(15),
+      vehicleType: z.enum(['sedan', 'suv']),
+      packageKey: z.string().min(1),
+      pickupAddress: z.string().min(1),
+      pickupPoint: z.object({ lat: z.number(), lng: z.number() }).optional(),
+      scheduledFor: z.string().datetime().optional(),
+      notes: z.string().max(500).optional(),
+    }).parse(req.body);
+    const result = await createRental({
+      supervisorId: req.user!.id,
+      ...body,
+      scheduledFor: body.scheduledFor ? new Date(body.scheduledFor) : undefined,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /supervisor/rentals/:id — cancel a rental
+router.delete('/rentals/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    await cancelRental(req.params.id, req.user!.id);
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
 
 // ── Supervisor Dashboard ──────────────────────────────────────────────────────

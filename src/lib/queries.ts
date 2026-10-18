@@ -571,6 +571,7 @@ export interface DriverProfile {
   rating: number;
   vehicleType?: string | null;
   seats?: number | null;
+  rentalOptIn?: boolean;
   // Payable UPI (saved by the driver for direct supervisor payment)
   upiVpa?: string | null;
   upiVpaName?: string | null;
@@ -1794,5 +1795,131 @@ export function useRideDriverLocation(rideId: string | undefined) {
     enabled: !!rideId,
     refetchInterval: 8_000, // fallback polling if socket misses
     staleTime: 0,
+  });
+}
+
+// ─── Rentals ──────────────────────────────────────────────────────────────────
+
+export interface RentalPack {
+  key: string;
+  vehicleType: "sedan" | "suv";
+  hours: number;
+  km: number;
+  basePrice: number;
+  extraPerKm: number;
+  extraPerHr: number;
+  popular?: boolean;
+}
+
+export interface RentalRow {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  vehicleType: "sedan" | "suv";
+  packageKey: string;
+  hours: number;
+  km: number;
+  basePrice: number;
+  extraPerKm: number;
+  extraPerHr: number;
+  pickupAddress: string;
+  scheduledFor: string | null;
+  status: "broadcasting" | "assigned" | "in_progress" | "completed" | "cancelled";
+  notes: string | null;
+  createdAt: string;
+  driver?: { fullName: string; phone: string } | null;
+  supervisor?: { fullName: string; org: string | null } | null;
+}
+
+// ── Supervisor ──
+export function useRentalPacks(vehicleType?: "sedan" | "suv") {
+  return useQuery({
+    queryKey: ["rentalPacks", vehicleType ?? "all"],
+    queryFn: () => api<{ packs: RentalPack[] }>(`/supervisor/rentals/packs${vehicleType ? `?vehicleType=${vehicleType}` : ""}`),
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useRentals() {
+  return useQuery({
+    queryKey: ["rentals"],
+    queryFn: () => api<{ rentals: RentalRow[] }>("/supervisor/rentals"),
+    refetchInterval: 15_000,
+  });
+}
+
+export interface CreateRentalPayload {
+  customerName: string;
+  customerPhone: string;
+  vehicleType: "sedan" | "suv";
+  packageKey: string;
+  pickupAddress: string;
+  pickupPoint?: { lat: number; lng: number };
+  scheduledFor?: string;
+  notes?: string;
+}
+
+export function useCreateRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: CreateRentalPayload) =>
+      api<{ id: string }>("/supervisor/rentals", { method: "POST", body: JSON.stringify(p) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["rentals"] }),
+  });
+}
+
+export function useCancelRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/supervisor/rentals/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["rentals"] }),
+  });
+}
+
+// ── Driver ──
+export function useDriverRentalsAvailable() {
+  return useQuery({
+    queryKey: ["driver", "rentals", "available"],
+    queryFn: () => api<{ rentals: RentalRow[] }>("/driver/rentals/available"),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useDriverRentalsMine() {
+  return useQuery({
+    queryKey: ["driver", "rentals", "mine"],
+    queryFn: () => api<{ rentals: RentalRow[] }>("/driver/rentals/mine"),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useSetRentalOptIn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (optIn: boolean) =>
+      api<{ rentalOptIn: boolean }>("/driver/rental-opt-in", { method: "POST", body: JSON.stringify({ optIn }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
+  });
+}
+
+export function useAcceptRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/driver/rentals/${id}/accept`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", "rentals"] });
+      qc.invalidateQueries({ queryKey: ["driverCredits"] });
+    },
+  });
+}
+
+export function useReleaseRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/driver/rentals/${id}/release`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", "rentals"] });
+      qc.invalidateQueries({ queryKey: ["driverCredits"] });
+    },
   });
 }
