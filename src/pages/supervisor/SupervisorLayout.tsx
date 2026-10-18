@@ -9,7 +9,13 @@ export default function SupervisorLayout() {
   const { data } = useRides({ limit: 100 });
   const { data: paymentsData } = usePendingPayments();
   const rides = data?.rides ?? [];
-  const liveCount = rides.filter((r) => ["broadcasting", "assigned", "in_progress", "pending"].includes(r.status)).length;
+  // A broadcast whose window has already expired (server sweeper hasn't flipped
+  // it to 'expired' yet) must not count as live.
+  const isExpiredBroadcast = (r: typeof rides[number]) =>
+    r.status === "broadcasting" && !!r.broadcastExpiresAt && new Date(r.broadcastExpiresAt).getTime() <= Date.now();
+  const liveCount = rides.filter(
+    (r) => ["broadcasting", "assigned", "in_progress", "pending"].includes(r.status) && !isExpiredBroadcast(r),
+  ).length;
   const pendingPayCount = paymentsData?.rides?.length ?? 0;
   const nav: NavItem[] = [
     { to: "/supervisor", label: "Dashboard", icon: LayoutDashboard },
