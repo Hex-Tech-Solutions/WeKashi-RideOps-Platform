@@ -134,6 +134,7 @@ export function DriverAccountPanel({
               <VehicleCard
                 currentType={me?.vehicleType}
                 currentSeats={me?.seats}
+                rentalOptIn={me?.rentalOptIn}
                 driverId={me?.id ?? session?.id}
               />
             )}

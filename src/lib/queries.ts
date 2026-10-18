@@ -621,7 +621,17 @@ export function useGoOnline() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (loc: { lat: number; lng: number }) => api("/driver/online", { method: "POST", body: JSON.stringify(loc) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
+    // Flip the online toggle instantly in the cached `me` so it turns green
+    // right away instead of only after the refetch settles (which was why it
+    // took several hard refreshes to show green).
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["driver", "me"] });
+      const prev = qc.getQueryData<DriverProfile>(["driver", "me"]);
+      if (prev) qc.setQueryData<DriverProfile>(["driver", "me"], { ...prev, isOnline: true });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["driver", "me"], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["driver"] }),
   });
 }
 
@@ -692,7 +702,14 @@ export function useGoOffline() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api("/driver/offline", { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["driver", "me"] });
+      const prev = qc.getQueryData<DriverProfile>(["driver", "me"]);
+      if (prev) qc.setQueryData<DriverProfile>(["driver", "me"], { ...prev, isOnline: false });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["driver", "me"], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["driver"] }),
   });
 }
 
