@@ -148,6 +148,15 @@ export default function SavedGroups() {
   const [editingTemplate, setEditingTemplate] = useState<RouteTemplateRow | null>(null);
   const [editAddressEmployee, setEditAddressEmployee] = useState<EmployeeRow | null>(null);
 
+  // Company filter for the groups list.
+  const [groupCompany, setGroupCompany] = useState("all");
+  const groupCompanies = Array.from(
+    new Set(templates.map((t) => t.officeLocation?.name).filter(Boolean) as string[]),
+  );
+  const visibleTemplates = groupCompany === "all"
+    ? templates
+    : templates.filter((t) => t.officeLocation?.name === groupCompany);
+
   // ── Drag-and-drop between/within group blocks ──────────────────────────────
   const nav = useNavigate();
   const [savingTemplateId, setSavingTemplateId] = useState<string | null>(null);
@@ -283,11 +292,36 @@ export default function SavedGroups() {
             </Card>
           ) : (
             <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+              {/* Company filter */}
+              {groupCompanies.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                  <span className="text-xs text-muted-foreground mr-1">Company:</span>
+                  <button
+                    onClick={() => setGroupCompany("all")}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                      groupCompany === "all" ? "bg-foreground text-background border-foreground" : "border-border hover:border-foreground/40"
+                    }`}
+                  >
+                    All
+                  </button>
+                  {groupCompanies.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setGroupCompany(c)}
+                      className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                        groupCompany === c ? "bg-gold text-gold-foreground border-gold" : "border-border hover:border-gold/40"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* Self-contained scroll — the whole groups layout is capped so
                   the page doesn't grow unbounded; each block caps its own rows. */}
               <ScrollArea style={{ height: 460 }} className="pr-2">
                 <div className="space-y-4">
-                  {templates.map((t) => (
+                  {visibleTemplates.map((t) => (
                     <GroupManifestBlock
                       key={t.id}
                       template={t}
@@ -299,6 +333,11 @@ export default function SavedGroups() {
                       onEditAddress={(emp) => setEditAddressEmployee(emp)}
                     />
                   ))}
+                  {visibleTemplates.length === 0 && (
+                    <div className="py-10 text-center text-sm text-muted-foreground">
+                      No groups for <b>{groupCompany}</b>.
+                    </div>
+                  )}
                 </div>
               </ScrollArea>
             </DndContext>
