@@ -1898,7 +1898,24 @@ export function useSetRentalOptIn() {
   return useMutation({
     mutationFn: (optIn: boolean) =>
       api<{ rentalOptIn: boolean }>("/driver/rental-opt-in", { method: "POST", body: JSON.stringify({ optIn }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
+    // Optimistically flip the toggle in the cached `me` payload so the Switch
+    // reflects the new state instantly — without waiting for the refetch to
+    // settle (which was leaving the toggle visually stale after a success).
+    onMutate: async (optIn) => {
+      await qc.cancelQueries({ queryKey: ["driver", "me"] });
+      const prev = qc.getQueryData<DriverProfile>(["driver", "me"]);
+      if (prev) qc.setQueryData<DriverProfile>(["driver", "me"], { ...prev, rentalOptIn: optIn });
+      return { prev };
+    },
+    onError: (_e, _optIn, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["driver", "me"], ctx.prev);
+    },
+    // Trust the server's returned value, then reconcile with a refetch.
+    onSuccess: (data) => {
+      const prev = qc.getQueryData<DriverProfile>(["driver", "me"]);
+      if (prev) qc.setQueryData<DriverProfile>(["driver", "me"], { ...prev, rentalOptIn: data.rentalOptIn });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["driver"] }),
   });
 }
 
