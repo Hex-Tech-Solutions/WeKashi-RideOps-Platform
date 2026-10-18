@@ -49,8 +49,8 @@ export default function Earnings() {
                   <tr key={p.id} className="border-b last:border-0">
                     <td className="px-6 py-3 font-medium">{p.period}</td>
                     <td className="px-6 py-3 text-right">
-                      <div className="font-bold">₹{p.amount.toLocaleString()}</div>
-                      {p.ratePerRide != null && <div className="text-[11px] text-muted-foreground">₹{p.ratePerRide}/ride × {p.rideCount ?? Math.round(p.amount / p.ratePerRide)}</div>}
+                      <div className="font-bold">₹{(p.amount ?? 0).toLocaleString()}</div>
+                      {p.ratePerRide != null && <div className="text-[11px] text-muted-foreground">₹{p.ratePerRide}/ride × {p.rideCount ?? Math.round((p.amount ?? 0) / p.ratePerRide)}</div>}
                     </td>
                     <td className="px-6 py-3"><Badge variant="outline" className={p.status === "paid" ? "border-success/40 text-success" : "border-warning/40 text-warning"}>{p.status}</Badge></td>
                     <td className="px-6 py-3 text-muted-foreground">{p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}</td>

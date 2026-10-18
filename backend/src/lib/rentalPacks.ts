@@ -48,8 +48,10 @@ export function getRentalPack(key: string): RentalPackFull | undefined {
 
 export function listRentalPacks(
   vehicleType?: RentalVehicleType,
-): Array<RentalPack & { extraPerKm: number; extraPerHr: number }> {
+): Array<RentalPack & { basePrice: number; extraPerKm: number; extraPerHr: number }> {
   return RENTAL_PACKS
     .filter((p) => !vehicleType || p.vehicleType === vehicleType)
-    .map((p) => ({ ...p, ...RENTAL_RATES[p.vehicleType] }));
+    // Expose `basePrice` (alias of `price`) so the frontend's RentalPack type
+    // matches the JSON — the card reads pack.basePrice.
+    .map((p) => ({ ...p, basePrice: p.price, ...RENTAL_RATES[p.vehicleType] }));
 }

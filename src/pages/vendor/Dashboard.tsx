@@ -52,7 +52,7 @@ export default function VendorDashboard() {
                 <div className="h-8 w-8 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-bold">{i + 1}</div>
                 <div className="flex-1">
                   <div className="font-medium">{d.fullName}</div>
-                  <div className="text-xs text-muted-foreground">{rideCount(d.id)} rides · ⭐ {d.rating.toFixed(1)}</div>
+                  <div className="text-xs text-muted-foreground">{rideCount(d.id)} rides · ⭐ {(d.rating ?? 0).toFixed(1)}</div>
                 </div>
                 <div className="font-semibold">₹{earnings(d.id).toLocaleString()}</div>
               </div>

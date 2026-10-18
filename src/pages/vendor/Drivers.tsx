@@ -181,7 +181,7 @@ export default function Drivers() {
                     </td>
 
                     <td className="px-6 py-3 text-right">{rideCount(d.id)}</td>
-                    <td className="px-6 py-3 text-right">⭐ {d.rating.toFixed(1)}</td>
+                    <td className="px-6 py-3 text-right">⭐ {(d.rating ?? 0).toFixed(1)}</td>
                     <td className="px-6 py-3 text-right font-medium">₹{earnings(d.id).toLocaleString()}</td>
 
                     {/* Actions */}

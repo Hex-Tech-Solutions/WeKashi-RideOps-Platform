@@ -77,10 +77,10 @@ export default function Payouts() {
                     <td className="px-6 py-3 font-medium">{p.vendor?.name ?? p.vendorId.slice(0, 8)}</td>
                     <td className="px-6 py-3">{p.period}</td>
                     <td className="px-6 py-3 text-right">
-                      <div className="font-bold">₹{p.amount.toLocaleString()}</div>
+                      <div className="font-bold">₹{(p.amount ?? 0).toLocaleString()}</div>
                       {p.ratePerRide != null && (
                         <div className="text-[11px] text-muted-foreground">
-                          ₹{p.ratePerRide}/ride × {p.rideCount ?? Math.round(p.amount / p.ratePerRide)}{p.status === "pending" ? " · live" : ""}
+                          ₹{p.ratePerRide}/ride × {p.rideCount ?? Math.round((p.amount ?? 0) / p.ratePerRide)}{p.status === "pending" ? " · live" : ""}
                         </div>
                       )}
                     </td>
