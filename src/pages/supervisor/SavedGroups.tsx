@@ -29,6 +29,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditGroupDialog } from "@/components/EditGroupDialog";
 import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
 import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
+import { GroupManifestBlock } from "@/components/GroupManifestBlock";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -69,6 +70,7 @@ export default function SavedGroups() {
   const templates = templatesData?.templates ?? [];
   const report = reportData?.report ?? [];
   const allEmployees = employeesData?.employees ?? [];
+  const employeesById = new Map(allEmployees.map((e) => [e.id, e]));
 
   // Group builder: ride direction + employee selection (checked rows), built
   // from the roster. Rules mirror Book-a-ride: one office only, one shift time.
@@ -202,62 +204,15 @@ export default function SavedGroups() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {templates.map((t) => (
-                <Card key={t.id} className="shadow-card">
-                  <CardContent className="p-4 flex flex-wrap items-center gap-x-6 gap-y-2">
-                    {/* Name + badges */}
-                    <div className="min-w-[180px] flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm">{t.name}</span>
-                        <RideTypeBadge type={t.rideType} className="text-[10px] py-0" />
-                        {t.vehicleType && (
-                          <Badge variant="outline" className="capitalize text-[10px] py-0">
-                            <Car className="h-3 w-3 mr-1" />{t.vehicleType}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Inline meta */}
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-                      <span className="flex items-center gap-1.5">
-                        <Users className="h-3.5 w-3.5 shrink-0" />
-                        {(t.orderedEmployeeIds as string[]).length} employees
-                      </span>
-                      {t.officeLocation && (
-                        <span className="flex items-center gap-1.5">
-                          <Building2 className="h-3.5 w-3.5 shrink-0" />
-                          {t.officeLocation.name}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5 shrink-0" />
-                        {t.lastUsedAt
-                          ? `Last used ${formatDistanceToNow(new Date(t.lastUsedAt), { addSuffix: true })}`
-                          : "Never used"}
-                      </span>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 ml-auto">
-                      <Button
-                        className="bg-gold text-gold-foreground hover:bg-gold/90"
-                        onClick={() => setEditingTemplate(t)}
-                      >
-                        Load group <ArrowRight className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={() => setDeleteId(t.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <GroupManifestBlock
+                  key={t.id}
+                  template={t}
+                  employeesById={employeesById}
+                  onLoad={() => setEditingTemplate(t)}
+                  onDelete={() => setDeleteId(t.id)}
+                />
               ))}
             </div>
           )}
