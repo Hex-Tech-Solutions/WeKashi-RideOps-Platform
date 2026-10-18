@@ -124,7 +124,7 @@ router.post(
       await checkOtpRateLimit(phone);
       const otp = generateOtp();
       await storeOtp(phone, otp);
-      await smsSender.send(phone, `Your RideOps OTP is: ${otp}. Valid for 10 minutes.`);
+      await smsSender.sendLoginOtp(phone, otp);
       res.json({ message: 'OTP sent successfully' });
     } catch (err) {
       next(err);
@@ -166,7 +166,7 @@ router.post(
         await checkOtpRateLimit(phone);
         const otp = generateOtp();
         await storeOtp(phone, otp);
-        await smsSender.send(phone, `Your RideOps OTP is: ${otp}. Valid for 10 minutes.`);
+        await smsSender.sendLoginOtp(phone, otp);
       }
       res.status(201).json({ message: 'Account created. OTP sent to your phone.', vendorName: vendor.name });
     } catch (err) {

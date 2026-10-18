@@ -1,52 +1,63 @@
 import { logger } from './logger';
 
 /**
- * Interface for SMS senders — injectable so Twilio or any other
- * provider can be dropped in by implementing this interface.
+ * SMS sender interface. Two message types exist in RideOps, each backed by its
+ * own DLT-approved MSG91 Flow template:
+ *   1. Login OTP   — single variable {otp}
+ *   2. Ride OTP    — {vehicle} + {board_otp} + {dboard_otp}
+ *
+ * The Flow variable names below MUST match the variable names configured in the
+ * MSG91 Flow for each template.
  */
 export interface SmsSender {
-  send(phone: string, message: string): Promise<void>;
+  /** Driver / vendor sign-in OTP (Template 2 — single variable). */
+  sendLoginOtp(phone: string, otp: string): Promise<void>;
+  /** Employee ride-confirmation OTP (Template 1 — vehicle + two OTPs). */
+  sendRideOtp(
+    phone: string,
+    data: { vehicle: string; boardingOtp: string; deboardingOtp: string },
+  ): Promise<void>;
 }
 
-/**
- * Console-based SMS sender for development / testing.
- * Logs the message instead of making a real API call.
- */
+/** Console sender for dev/testing — logs instead of calling MSG91. */
 export class ConsoleSmssSender implements SmsSender {
-  async send(phone: string, message: string): Promise<void> {
-    logger.info({ phone, message }, 'SMS');
+  async sendLoginOtp(phone: string, otp: string): Promise<void> {
+    logger.info({ phone, otp }, 'SMS (login OTP)');
+  }
+  async sendRideOtp(
+    phone: string,
+    data: { vehicle: string; boardingOtp: string; deboardingOtp: string },
+  ): Promise<void> {
+    logger.info({ phone, ...data }, 'SMS (ride OTP)');
   }
 }
 
 /**
- * MSG91 sender (India). Uses the v5 Flow API with a DLT-approved OTP template.
+ * MSG91 v5 Flow sender (India, DLT). One Flow template per message type.
  *
- * Because Indian DLT rules require pre-approved templates, we don't send free
- * text — we extract the numeric OTP from the message and pass it to the template
- * as a variable. Configure via .env.prod:
+ * .env.prod:
  *   SMS_PROVIDER=msg91
- *   MSG91_AUTHKEY=<authkey from MSG91 dashboard>
- *   MSG91_TEMPLATE_ID=<DLT/flow template id>
- *   MSG91_SENDER_ID=<6-char approved sender id>   (optional, if template needs it)
- *   MSG91_OTP_VAR=OTP                             (template variable name, default "OTP")
+ *   MSG91_AUTHKEY=<authkey>
+ *   MSG91_LOGIN_TEMPLATE_ID=<Template 2 — login OTP>
+ *   MSG91_RIDE_TEMPLATE_ID=<Template 1 — ride confirmation>
+ *   MSG91_SENDER_ID=<approved sender id>            (optional)
+ *
+ * Flow variable names expected:
+ *   Login template:  otp
+ *   Ride template:   vehicle, board_otp, dboard_otp
  */
 export class Msg91SmsSender implements SmsSender {
   constructor(
     private authkey: string,
-    private templateId: string,
+    private loginTemplateId: string,
+    private rideTemplateId: string,
     private senderId?: string,
-    private otpVar: string = 'OTP',
   ) {}
 
-  async send(phone: string, message: string): Promise<void> {
-    // MSG91 expects the mobile with country code and no '+'.
-    const mobiles = phone.replace(/[^\d]/g, '');
-    const otpMatch = message.match(/\d{4,8}/);
-    const otp = otpMatch ? otpMatch[0] : message;
-
+  private async post(templateId: string, mobiles: string, vars: Record<string, string>): Promise<void> {
     const body: Record<string, unknown> = {
-      template_id: this.templateId,
-      recipients: [{ mobiles, [this.otpVar]: otp }],
+      template_id: templateId,
+      recipients: [{ mobiles, ...vars }],
     };
     if (this.senderId) body.sender = this.senderId;
 
@@ -57,32 +68,53 @@ export class Msg91SmsSender implements SmsSender {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      logger.error({ phone, status: res.status, text }, 'MSG91 send failed');
-      throw new Error('Failed to send OTP SMS');
+      logger.error({ mobiles, templateId, status: res.status, text }, 'MSG91 send failed');
+      throw new Error('Failed to send SMS');
     }
-    logger.info({ phone }, 'OTP SMS sent via MSG91');
+    logger.info({ mobiles, templateId }, 'SMS sent via MSG91');
+  }
+
+  async sendLoginOtp(phone: string, otp: string): Promise<void> {
+    await this.post(this.loginTemplateId, normalizeMobile(phone), { otp });
+  }
+
+  async sendRideOtp(
+    phone: string,
+    data: { vehicle: string; boardingOtp: string; deboardingOtp: string },
+  ): Promise<void> {
+    await this.post(this.rideTemplateId, normalizeMobile(phone), {
+      vehicle: data.vehicle,
+      board_otp: data.boardingOtp,
+      dboard_otp: data.deboardingOtp,
+    });
   }
 }
 
+/** MSG91 wants the mobile with country code and no '+'. Defaults to 91 (India). */
+function normalizeMobile(phone: string): string {
+  const digits = phone.replace(/[^\d]/g, '');
+  return digits.length === 10 ? `91${digits}` : digits;
+}
+
 /**
- * Factory — returns the MSG91 sender when its credentials are set,
- * otherwise falls back to the console sender (logs the OTP server-side).
+ * Factory — MSG91 when both template IDs + authkey are set, else console.
  */
 export function createSmsSender(): SmsSender {
   if (
     process.env.SMS_PROVIDER === 'msg91' &&
     process.env.MSG91_AUTHKEY &&
-    process.env.MSG91_TEMPLATE_ID
+    process.env.MSG91_LOGIN_TEMPLATE_ID &&
+    process.env.MSG91_RIDE_TEMPLATE_ID
   ) {
     logger.info('SMS provider: MSG91');
     return new Msg91SmsSender(
       process.env.MSG91_AUTHKEY,
-      process.env.MSG91_TEMPLATE_ID,
+      process.env.MSG91_LOGIN_TEMPLATE_ID,
+      process.env.MSG91_RIDE_TEMPLATE_ID,
       process.env.MSG91_SENDER_ID,
-      process.env.MSG91_OTP_VAR || 'OTP',
     );
   }
-  logger.info('SMS provider: console (no real SMS — OTP is logged server-side)');
+  logger.info('SMS provider: console (no real SMS — OTPs are logged server-side)');
   return new ConsoleSmssSender();
 }
 

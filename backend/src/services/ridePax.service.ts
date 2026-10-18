@@ -37,6 +37,14 @@ export async function createRidePax(
  */
 export async function sendPaxOtpSms(rideId: string): Promise<void> {
   try {
+    // The DLT ride template includes the vehicle number — resolve the assigned
+    // driver's registration number once for the whole ride.
+    const ride = await prisma.ride.findUnique({
+      where: { id: rideId },
+      select: { driver: { select: { vehicle: { select: { regNo: true } } } } },
+    });
+    const vehicle = ride?.driver?.vehicle?.regNo ?? 'N/A';
+
     const paxList = await prisma.ridePax.findMany({
       where: { rideId },
       include: { employee: { select: { name: true, phone: true } } },
@@ -44,10 +52,11 @@ export async function sendPaxOtpSms(rideId: string): Promise<void> {
     for (const p of paxList) {
       if (!p.employee.phone) continue;
       try {
-        await smsSender.send(
-          p.employee.phone,
-          `RideOps: Hi ${p.employee.name}, your cab has been assigned. Boarding OTP: ${p.pickupOtp} | Drop OTP: ${p.dropOtp}. Show these to your driver.`,
-        );
+        await smsSender.sendRideOtp(p.employee.phone, {
+          vehicle,
+          boardingOtp: p.pickupOtp,
+          deboardingOtp: p.dropOtp,
+        });
         logger.info({ rideId, employeeId: p.employeeId }, 'OTP SMS sent to employee');
       } catch (err) {
         logger.warn({ err, employeeId: p.employeeId }, 'Failed to send OTP SMS');
