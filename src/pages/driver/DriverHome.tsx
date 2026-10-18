@@ -466,23 +466,23 @@ export default function DriverHome() {
             {availableRentals.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <CarFront className="h-3.5 w-3.5 text-gold" /> Rental broadcasts ({availableRentals.length})
+                  <CarFront className="h-3.5 w-3.5 text-gold" /> Rental broadcasts
+                  <span className="ml-0.5 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-gold text-gold-foreground text-[11px] font-bold">
+                    {availableRentals.length}
+                  </span>
                 </div>
-                {availableRentals.map((r) => (
-                  <RentalCard
-                    key={r.id}
-                    rental={r}
-                    onAccept={() => acceptRental.mutate(r.id, {
-                      onSuccess: () => toast.success("Rental accepted — 1 credit used"),
-                      onError: (e: any) => toast.error(e?.message ?? "Rental no longer available"),
-                    })}
-                    onDecline={() => {
-                      setDismissedRentals((s) => new Set(s).add(r.id));
-                      toast("Rental dismissed");
-                    }}
-                    accepting={acceptRental.isPending}
-                  />
-                ))}
+                <RentalStack
+                  rentals={availableRentals}
+                  accepting={acceptRental.isPending}
+                  onAccept={(id) => acceptRental.mutate(id, {
+                    onSuccess: () => toast.success("Rental accepted — 1 credit used"),
+                    onError: (e: any) => toast.error(e?.message ?? "Rental no longer available"),
+                  })}
+                  onDecline={(id) => {
+                    setDismissedRentals((s) => new Set(s).add(id));
+                    toast("Rental dismissed");
+                  }}
+                />
               </div>
             )}
           </div>
@@ -681,6 +681,58 @@ function RideSummary({ ride }: { ride: RideRow }) {
             )}
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Rental stack ─────────────────────────────────────────────────────────────
+// Renders available rentals as a card deck instead of an infinite list: the
+// top rental is fully shown and actionable, with up to two cards peeking behind
+// it (max 3 visible layers) to signal "there are more". Accepting/declining the
+// top card surfaces the next one. The count lives in the section header badge.
+function RentalStack({
+  rentals, onAccept, onDecline, accepting,
+}: {
+  rentals: RentalRow[];
+  onAccept: (id: string) => void;
+  onDecline: (id: string) => void;
+  accepting?: boolean;
+}) {
+  const top = rentals[0];
+  if (!top) return null;
+  // Number of peek layers behind the top card (0, 1, or 2).
+  const peek = Math.min(rentals.length - 1, 2);
+
+  return (
+    <div className="relative" style={{ paddingBottom: peek * 10 }}>
+      {/* Peek layers — purely decorative, drawn behind + below the top card.
+          Rendered back-to-front so the nearest one overlaps the furthest. */}
+      {Array.from({ length: peek }).map((_, i) => {
+        const depth = peek - i; // 2 for the furthest, 1 for the nearest
+        return (
+          <div
+            key={`peek-${depth}`}
+            aria-hidden
+            className="absolute inset-x-0 top-0 rounded-xl border border-gold/20 bg-card shadow-card"
+            style={{
+              height: 56,
+              transform: `translateY(${depth * 10}px) scale(${1 - depth * 0.04})`,
+              zIndex: 0,
+              opacity: 1 - depth * 0.25,
+            }}
+          />
+        );
+      })}
+
+      {/* Top, interactive card */}
+      <div className="relative" style={{ zIndex: 1 }}>
+        <RentalCard
+          rental={top}
+          onAccept={() => onAccept(top.id)}
+          onDecline={() => onDecline(top.id)}
+          accepting={accepting}
+        />
       </div>
     </div>
   );
