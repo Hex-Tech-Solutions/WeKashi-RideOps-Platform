@@ -136,7 +136,16 @@ export default function RoutesPage() {
     setFareAdjustment(null);
     setPlannedPickupTime("");
     lastAutoFilled.current = null;
-    if (presetState.presetOfficeLocationId) setSelectedOfficeId(presetState.presetOfficeLocationId);
+    if (presetState.presetOfficeLocationId) {
+      setSelectedOfficeId(presetState.presetOfficeLocationId);
+    } else {
+      // No office on the group — pick the office matching the first preset
+      // employee's company so the drop/visible-roster line up with the group.
+      const firstId = presetState.presetEmployeeIds[0];
+      const emp = (data?.employees ?? []).find((e) => e.id === firstId);
+      const match = emp?.companyLabel ? offices.find((o) => o.name === emp.companyLabel) : null;
+      if (match) setSelectedOfficeId(match.id);
+    }
     if (presetState.presetVehicleType) setVehicleType(presetState.presetVehicleType as VehicleType);
     setStep(presetState.presetStep ?? 2);
     // Clear the router state so a page refresh or back-navigation doesn't
@@ -145,7 +154,11 @@ export default function RoutesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selected = visibleEmployees.filter((e) => selectedIds.includes(e.id));
+  // Derive from the FULL employee list (not the office-filtered visible list) —
+  // a group booked from Saved Groups may contain employees of a company other
+  // than the currently-active office, and an explicitly-selected employee must
+  // never be dropped by the office filter.
+  const selected = employees.filter((e) => selectedIds.includes(e.id));
 
   // Drop = dragged override → selected office → supervisor's legacy office → demo fallback.
   const dropNode = useMemo(() => {
