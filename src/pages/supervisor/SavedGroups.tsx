@@ -250,7 +250,7 @@ export default function SavedGroups() {
           creating={createTemplate.isPending}
           shiftMismatch={shiftMismatch}
           selectedCount={selectedIds.length}
-          height={520}
+          height={288}
         />
       </div>
 
@@ -280,19 +280,23 @@ export default function SavedGroups() {
             </Card>
           ) : (
             <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
-              <div className="space-y-4">
-                {templates.map((t) => (
-                  <GroupManifestBlock
-                    key={t.id}
-                    template={t}
-                    employeesById={employeesById}
-                    saving={savingTemplateId === t.id}
-                    onRideTypeChange={(rt) => persistTemplate(t, { rideType: rt })}
-                    onBook={() => bookGroup(t)}
-                    onDelete={() => setDeleteId(t.id)}
-                  />
-                ))}
-              </div>
+              {/* Self-contained scroll — the whole groups layout is capped so
+                  the page doesn't grow unbounded; each block caps its own rows. */}
+              <ScrollArea style={{ height: 460 }} className="pr-2">
+                <div className="space-y-4">
+                  {templates.map((t) => (
+                    <GroupManifestBlock
+                      key={t.id}
+                      template={t}
+                      employeesById={employeesById}
+                      saving={savingTemplateId === t.id}
+                      onRideTypeChange={(rt) => persistTemplate(t, { rideType: rt })}
+                      onBook={() => bookGroup(t)}
+                      onDelete={() => setDeleteId(t.id)}
+                    />
+                  ))}
+                </div>
+              </ScrollArea>
             </DndContext>
           )}
         </TabsContent>

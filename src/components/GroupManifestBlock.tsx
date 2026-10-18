@@ -97,18 +97,21 @@ export function GroupManifestBlock({
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
             <div className="min-w-[520px]">
               {/* header row */}
-              <div className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_40px] gap-1 text-[10px] uppercase tracking-wide text-muted-foreground border-b bg-background px-1 py-1.5">
+              <div className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_40px] gap-1 text-[10px] uppercase tracking-wide text-muted-foreground border-b bg-background px-1 py-1.5 sticky top-0 z-10">
                 <div>Seq</div><div>Emp ID</div><div>Name</div><div className="text-center">G</div><div>Landmark</div><div>Address</div><div className="text-center">{isLogout ? "Drop" : "Pick"}</div>
               </div>
-              {members.map((e, i) => (
-                <SortableRow
-                  key={e.id}
-                  id={rowId(template.id, e.id)}
-                  seq={i + 1}
-                  employee={e}
-                  isLogout={isLogout}
-                />
-              ))}
+              {/* Cap each group to ~8 rows with its own scroll. */}
+              <div className="max-h-[300px] overflow-y-auto">
+                {members.map((e, i) => (
+                  <SortableRow
+                    key={e.id}
+                    id={rowId(template.id, e.id)}
+                    seq={i + 1}
+                    employee={e}
+                    isLogout={isLogout}
+                  />
+                ))}
+              </div>
             </div>
           </SortableContext>
         )}

@@ -31,13 +31,25 @@ export default function Live() {
   const [assignRideId, setAssignRideId] = useState<string | null>(null);
   const [detailRideId, setDetailRideId] = useState<string | undefined>(undefined);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  // Re-render every second so time-based filters (expired broadcast) recompute
+  // live — otherwise the broadcasting banner lingers at 00:00 until the next
+  // data refetch.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
   const rides = data?.rides ?? [];
   const schedOverdue = (r: RideRow) => r.status === "scheduled" && !!r.scheduledFor && new Date(r.scheduledFor).getTime() - Date.now() < 4 * 3600 * 1000;
-  const liveList = rides.filter((r) => ["broadcasting", "assigned", "in_progress"].includes(r.status) && !r.scheduledFor);
+  // An expired broadcast whose window has passed (server sweeper lags ~30s)
+  // shouldn't show as an active broadcast or in the live list.
+  const isExpiredBroadcast = (r: RideRow) =>
+    r.status === "broadcasting" && !!r.broadcastExpiresAt && new Date(r.broadcastExpiresAt).getTime() <= Date.now();
+  const liveList = rides.filter((r) => ["broadcasting", "assigned", "in_progress"].includes(r.status) && !r.scheduledFor && !isExpiredBroadcast(r));
   const scheduledList = rides.filter((r) => (r.status === "scheduled" && !schedOverdue(r)) || (r.status === "assigned" && !!r.scheduledFor));
-  const attentionList = rides.filter((r) => ["expired", "cancelled", "pending"].includes(r.status) || schedOverdue(r));
+  const attentionList = rides.filter((r) => ["expired", "cancelled", "pending"].includes(r.status) || schedOverdue(r) || isExpiredBroadcast(r));
   const completedList = rides.filter((r) => r.status === "completed");
-  const broadcasting = rides.find((r) => r.status === "broadcasting");
+  const broadcasting = rides.find((r) => r.status === "broadcasting" && !isExpiredBroadcast(r));
 
   return (
     <div>
@@ -126,7 +138,7 @@ export default function Live() {
               </Card>
             ) : (
               <AttentionRow key={r.id} ride={r}
-                canRebroadcast={["expired", "cancelled", "pending"].includes(r.status)}
+                canRebroadcast={["expired", "cancelled", "pending"].includes(r.status) || isExpiredBroadcast(r)}
                 onAssign={() => setAssignRideId(r.id)}
                 onDelete={() => setDeleteId(r.id)}
                 onRebroadcast={() => rebroadcast.mutate(r.id, {
