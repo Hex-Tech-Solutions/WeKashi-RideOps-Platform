@@ -11,6 +11,7 @@ import {
   useCreateRouteTemplate,
   useEmployees,
   type RouteTemplateRow,
+  type EmployeeRow,
 } from "@/lib/queries";
 import {
   Tabs, TabsList, TabsTrigger, TabsContent,
@@ -27,6 +28,7 @@ import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditGroupDialog } from "@/components/EditGroupDialog";
+import { EditAddressDialog } from "@/components/EditAddressDialog";
 import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
 import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
 import { GroupManifestBlock, parseRowId } from "@/components/GroupManifestBlock";
@@ -144,6 +146,7 @@ export default function SavedGroups() {
   // into the booking flow — the supervisor can add/remove people and see the
   // route on a map before committing.
   const [editingTemplate, setEditingTemplate] = useState<RouteTemplateRow | null>(null);
+  const [editAddressEmployee, setEditAddressEmployee] = useState<EmployeeRow | null>(null);
 
   // ── Drag-and-drop between/within group blocks ──────────────────────────────
   const nav = useNavigate();
@@ -293,6 +296,7 @@ export default function SavedGroups() {
                       onRideTypeChange={(rt) => persistTemplate(t, { rideType: rt })}
                       onBook={() => bookGroup(t)}
                       onDelete={() => setDeleteId(t.id)}
+                      onEditAddress={(emp) => setEditAddressEmployee(emp)}
                     />
                   ))}
                 </div>
@@ -426,6 +430,12 @@ export default function SavedGroups() {
         template={editingTemplate}
         open={!!editingTemplate}
         onOpenChange={(o) => !o && setEditingTemplate(null)}
+      />
+
+      <EditAddressDialog
+        employee={editAddressEmployee}
+        open={!!editAddressEmployee}
+        onOpenChange={(o) => !o && setEditAddressEmployee(null)}
       />
     </div>
   );

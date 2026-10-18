@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { rideArea } from "@/lib/rideArea";
 import type { EmployeeRow, RouteTemplateRow } from "@/lib/queries";
-import { Users, Car, Building2, Trash2, MapPin, GripVertical, Radio, Loader2 } from "lucide-react";
+import { Users, Car, Building2, Trash2, MapPin, GripVertical, Radio, Loader2, Pencil } from "lucide-react";
 import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
@@ -29,6 +29,7 @@ export function GroupManifestBlock({
   onRideTypeChange,
   onBook,
   onDelete,
+  onEditAddress,
   saving = false,
 }: {
   template: RouteTemplateRow;
@@ -36,6 +37,7 @@ export function GroupManifestBlock({
   onRideTypeChange: (rideType: "login" | "logout") => void;
   onBook: () => void;
   onDelete: () => void;
+  onEditAddress: (employee: EmployeeRow) => void;
   saving?: boolean;
 }) {
   const ids = template.orderedEmployeeIds as string[];
@@ -97,8 +99,8 @@ export function GroupManifestBlock({
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
             <div className="min-w-[600px]">
               {/* header row */}
-              <div className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_72px_40px] gap-1 text-[10px] uppercase tracking-wide text-muted-foreground border-b bg-background px-1 py-1.5 sticky top-0 z-10">
-                <div>Seq</div><div>Emp ID</div><div>Name</div><div className="text-center">G</div><div>Landmark</div><div>Address</div><div className="text-center">Login/Out</div><div className="text-center">{isLogout ? "Drop" : "Pick"}</div>
+              <div className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_72px_40px_32px] gap-1 text-[10px] uppercase tracking-wide text-muted-foreground border-b bg-background px-1 py-1.5 sticky top-0 z-10">
+                <div>Seq</div><div>Emp ID</div><div>Name</div><div className="text-center">G</div><div>Landmark</div><div>Address</div><div className="text-center">Login/Out</div><div className="text-center">{isLogout ? "Drop" : "Pick"}</div><div></div>
               </div>
               {/* Cap each group to ~8 rows with its own scroll. */}
               <div className="max-h-[300px] overflow-y-auto">
@@ -109,6 +111,7 @@ export function GroupManifestBlock({
                     seq={i + 1}
                     employee={e}
                     isLogout={isLogout}
+                    onEditAddress={() => onEditAddress(e)}
                   />
                 ))}
               </div>
@@ -125,11 +128,13 @@ function SortableRow({
   seq,
   employee: e,
   isLogout,
+  onEditAddress,
 }: {
   id: string;
   seq: number;
   employee: EmployeeRow;
   isLogout: boolean;
+  onEditAddress: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const style = {
@@ -144,7 +149,7 @@ function SortableRow({
       style={style}
       {...attributes}
       {...listeners}
-      className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_72px_40px] gap-1 items-center border-b last:border-0 px-1 py-1.5 text-xs cursor-grab active:cursor-grabbing hover:bg-muted/40 touch-none"
+      className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_72px_40px_32px] gap-1 items-center border-b last:border-0 px-1 py-1.5 text-xs cursor-grab active:cursor-grabbing hover:bg-muted/40 touch-none"
     >
       <div className="flex items-center gap-1">
         <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -165,6 +170,18 @@ function SortableRow({
       </div>
       <div className="text-center">
         <MapPin className={`h-3.5 w-3.5 inline ${isLogout ? "text-sky-500" : "text-red-500"}`} />
+      </div>
+      <div className="text-center">
+        <button
+          type="button"
+          // Keep the drag listeners from hijacking the click.
+          onPointerDown={(ev) => ev.stopPropagation()}
+          onClick={(ev) => { ev.stopPropagation(); onEditAddress(); }}
+          className="text-muted-foreground hover:text-gold-dark"
+          title="Edit address"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   );
