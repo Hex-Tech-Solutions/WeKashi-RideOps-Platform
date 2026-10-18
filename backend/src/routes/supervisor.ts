@@ -414,7 +414,7 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
 
 // ── Rentals ───────────────────────────────────────────────────────────────────
 import { listRentalPacks } from '../lib/rentalPacks';
-import { createRental, listRentalsForSupervisor, cancelRental } from '../services/rental.service';
+import { createRental, listRentalsForSupervisor, cancelRental, removeRental } from '../services/rental.service';
 
 // GET /supervisor/rentals/packs — pricing catalog (optionally by vehicle type)
 router.get('/rentals/packs', async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -463,6 +463,16 @@ router.post('/rentals', async (req: AuthRequest, res: Response, next: NextFuncti
 router.delete('/rentals/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await cancelRental(req.params.id, req.user!.id);
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /supervisor/rentals/:id/remove — permanently remove a cancelled/completed rental
+router.delete('/rentals/:id/remove', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    await removeRental(req.params.id, req.user!.id);
     res.status(204).send();
   } catch (err) {
     next(err);

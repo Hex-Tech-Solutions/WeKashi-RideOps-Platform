@@ -201,6 +201,21 @@ export async function cancelRental(rentalId: string, supervisorId: string): Prom
 }
 
 /**
+ * Supervisor permanently removes a rental row from their list. Only cancelled
+ * or completed rentals can be deleted — live ones (broadcasting/assigned/in
+ * progress) must be cancelled first so a driver isn't left holding a ghost.
+ */
+export async function removeRental(rentalId: string, supervisorId: string): Promise<void> {
+  const rental = await prisma.rental.findUnique({ where: { id: rentalId }, select: { supervisorId: true, status: true } });
+  if (!rental) throw new NotFoundError('Rental not found');
+  if (rental.supervisorId !== supervisorId) throw new ValidationError('Access denied');
+  if (rental.status !== 'cancelled' && rental.status !== 'completed') {
+    throw new ValidationError('Only cancelled or completed rentals can be deleted');
+  }
+  await prisma.rental.delete({ where: { id: rentalId } });
+}
+
+/**
  * Driver toggles their rental opt-in. Only Sedan/SUV drivers can opt in —
  * enabling it on any other vehicle type is rejected so the eligibility query
  * stays honest.

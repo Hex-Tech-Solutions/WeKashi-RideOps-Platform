@@ -13,10 +13,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PlacesInput } from "@/components/PlacesInput";
 import {
-  useRentalPacks, useRentals, useCreateRental, useCancelRental,
+  useRentalPacks, useRentals, useCreateRental, useCancelRental, useRemoveRental,
   type RentalPack, type RentalRow,
 } from "@/lib/queries";
-import { ArrowRight, Route, Clock, IndianRupee, Car, Users, Phone, Trash2, Loader2 } from "lucide-react";
+import { ArrowRight, Route, Clock, IndianRupee, Car, Users, Phone, Trash2, Loader2, CalendarClock, X } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Rentals() {
@@ -25,6 +25,7 @@ export default function Rentals() {
   const { data: rentalsData } = useRentals();
   const createRental = useCreateRental();
   const cancelRental = useCancelRental();
+  const removeRental = useRemoveRental();
 
   const packs = packsData?.packs ?? [];
   const rentals = rentalsData?.rentals ?? [];
@@ -63,9 +64,19 @@ export default function Rentals() {
           No rentals yet. Pick a package above to book one.
         </CardContent></Card>
       ) : (
-        <div className="space-y-3">
+        // Cap the visible area to ~8 rows and scroll the rest, so a long
+        // history (especially cancelled rows) doesn't run the page down.
+        <div className="space-y-3 max-h-[560px] overflow-y-auto pr-1">
           {rentals.map((r) => (
-            <RentalRowCard key={r.id} rental={r} onCancel={() => setCancelId(r.id)} />
+            <RentalRowCard
+              key={r.id}
+              rental={r}
+              onCancel={() => setCancelId(r.id)}
+              onRemove={() => removeRental.mutate(r.id, {
+                onSuccess: () => toast.success("Rental removed"),
+                onError: (e: any) => toast.error(e?.message ?? "Failed to remove"),
+              })}
+            />
           ))}
         </div>
       )}
@@ -158,12 +169,17 @@ function PackageCard({ pack, onBook }: { pack: RentalPack; onBook: () => void })
 }
 
 // ─── Booked rental row ──────────────────────────────────────────────────────────
-function RentalRowCard({ rental: r, onCancel }: { rental: RentalRow; onCancel: () => void }) {
+function RentalRowCard({ rental: r, onCancel, onRemove }: { rental: RentalRow; onCancel: () => void; onRemove: () => void }) {
   const statusColor =
     r.status === "broadcasting" ? "border-gold/50 text-gold-dark bg-gold/10"
     : r.status === "completed" ? "border-success/40 text-success bg-success/5"
     : r.status === "cancelled" ? "border-destructive/40 text-destructive bg-destructive/5"
     : "border-foreground/30 text-foreground";
+
+  const removable = r.status === "cancelled" || r.status === "completed";
+  const pickup = r.scheduledFor
+    ? new Date(r.scheduledFor).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })
+    : "Now";
 
   return (
     <Card className="shadow-card">
@@ -178,7 +194,8 @@ function RentalRowCard({ rental: r, onCancel }: { rental: RentalRow; onCancel: (
         <div className="text-xs text-muted-foreground flex items-center gap-4 flex-wrap">
           <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {r.hours}h · {r.km}km</span>
           <span className="flex items-center gap-1 font-semibold text-foreground"><IndianRupee className="h-3 w-3" />{r.basePrice}</span>
-          <span className="truncate max-w-[220px]" title={r.pickupAddress}>{r.pickupAddress}</span>
+          <span className="flex items-center gap-1" title="Pickup time"><CalendarClock className="h-3.5 w-3.5" /> {pickup}</span>
+          <span className="truncate max-w-[200px]" title={r.pickupAddress}>{r.pickupAddress}</span>
         </div>
         <Badge variant="outline" className={`capitalize ${statusColor}`}>{r.status.replace("_", " ")}</Badge>
         {r.driver && (
@@ -187,8 +204,14 @@ function RentalRowCard({ rental: r, onCancel }: { rental: RentalRow; onCancel: (
           </span>
         )}
         <div className="ml-auto">
-          {r.status !== "completed" && r.status !== "cancelled" && (
-            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={onCancel}>
+          {removable ? (
+            // Cancelled/completed rentals can be permanently removed to keep the
+            // list tidy.
+            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={onRemove} title="Remove from list">
+              <X className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={onCancel} title="Cancel rental">
               <Trash2 className="h-4 w-4" />
             </Button>
           )}
@@ -214,6 +237,7 @@ function BookRentalDialog({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [pickup, setPickup] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [pickupTime, setPickupTime] = useState("");
   const [notes, setNotes] = useState("");
 
   const submit = () => {
@@ -221,6 +245,15 @@ function BookRentalDialog({
     if (!name.trim()) { toast.error("Enter the customer name"); return; }
     if (phone.replace(/\D/g, "").length < 10) { toast.error("Enter a valid mobile number"); return; }
     if (!pickup) { toast.error("Select the pickup location"); return; }
+    // Pickup time is optional (a rental can start "now"); when set it must be
+    // in the future so a driver isn't handed an already-past pickup.
+    let scheduledFor: string | undefined;
+    if (pickupTime) {
+      const t = new Date(pickupTime);
+      if (isNaN(t.getTime())) { toast.error("Enter a valid pickup time"); return; }
+      if (t.getTime() < Date.now() - 60_000) { toast.error("Pickup time can't be in the past"); return; }
+      scheduledFor = t.toISOString();
+    }
     onSubmit({
       customerName: name.trim(),
       customerPhone: phone.trim(),
@@ -228,6 +261,7 @@ function BookRentalDialog({
       packageKey: pack.key,
       pickupAddress: pickup.address,
       pickupPoint: { lat: pickup.lat, lng: pickup.lng },
+      scheduledFor,
       notes: notes.trim() || undefined,
     });
   };
@@ -249,6 +283,16 @@ function BookRentalDialog({
             <Label>Pickup location</Label>
             <div className="mt-1"><PlacesInput placeholder="Search pickup address…" onSelect={(v) => setPickup(v)} /></div>
             {pickup && <div className="text-[11px] text-muted-foreground mt-1">{pickup.address}</div>}
+          </div>
+          <div>
+            <Label>Pickup time (optional)</Label>
+            <Input
+              type="datetime-local"
+              className="mt-1"
+              value={pickupTime}
+              onChange={(e) => setPickupTime(e.target.value)}
+            />
+            <div className="text-[11px] text-muted-foreground mt-1">Leave blank to dispatch now.</div>
           </div>
           <div><Label>Notes (optional)</Label><Input className="mt-1" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any instructions for the driver" /></div>
         </div>

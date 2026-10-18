@@ -686,6 +686,15 @@ function RideSummary({ ride }: { ride: RideRow }) {
   );
 }
 
+// Format a rental's scheduled pickup for display. A rental with no scheduled
+// time is dispatched immediately, shown as "Now".
+function rentalPickup(scheduledFor?: string | null): string {
+  if (!scheduledFor) return "Now";
+  const d = new Date(scheduledFor);
+  if (isNaN(d.getTime())) return "Now";
+  return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 // ─── Rental stack ─────────────────────────────────────────────────────────────
 // Renders available rentals as a card deck instead of an infinite list: the
 // top rental is fully shown and actionable, with up to two cards peeking behind
@@ -789,6 +798,13 @@ function RentalCard({
           <a href={`tel:${r.customerPhone}`} className="text-xs text-gold-dark flex items-center gap-1">
             <Phone className="h-3 w-3" /> {r.customerPhone}
           </a>
+        </div>
+
+        {/* Pickup time — prominent row like the broadcast card's schedule row. */}
+        <div className="flex items-center gap-2 text-sm rounded-md bg-muted/50 px-3 py-2">
+          <Timer className="h-4 w-4 text-gold-dark" />
+          <span className="text-muted-foreground">Pickup</span>
+          <span className="font-bold text-foreground font-mono text-base">{rentalPickup(r.scheduledFor)}</span>
         </div>
 
         {/* Pickup — locality picked out above the full address, same as broadcast */}

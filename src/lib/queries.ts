@@ -1893,6 +1893,15 @@ export function useCancelRental() {
   });
 }
 
+/** Permanently remove a cancelled/completed rental from the supervisor's list. */
+export function useRemoveRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/supervisor/rentals/${id}/remove`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["rentals"] }),
+  });
+}
+
 // ── Driver ──
 export function useDriverRentalsAvailable() {
   return useQuery({
