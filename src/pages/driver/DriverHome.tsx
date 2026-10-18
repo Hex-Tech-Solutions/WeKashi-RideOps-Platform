@@ -7,11 +7,12 @@ import {
   useDriverMe, useDriverOffers, useDriverRides,
   useGoOnline, useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
   useRide, useMarkDriverArrived, useRouteMatrix, useDriverCancelRide, useReleaseQueuedRide,
-  type RideRow,
+  useDriverRentalsAvailable, useDriverRentalsMine, useAcceptRental, useReleaseRental,
+  type RideRow, type RentalRow,
 } from "@/lib/queries";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind } from "lucide-react";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind, CarFront, Clock, Phone } from "lucide-react";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
@@ -44,6 +45,14 @@ export default function DriverHome() {
   const online = me?.isOnline ?? false;
   const offers = offersData?.offers ?? [];
   const rides = ridesData?.rides ?? [];
+
+  // ── Rentals — fleet-wide bookings the driver opted into (Sedan/SUV) ───────
+  const { data: rentalsAvail } = useDriverRentalsAvailable();
+  const { data: rentalsMine } = useDriverRentalsMine();
+  const availableRentals = rentalsAvail?.rentals ?? [];
+  const myRentals = rentalsMine?.rentals ?? [];
+  const acceptRental = useAcceptRental();
+  const releaseRental = useReleaseRental();
 
   // Scheduled-ride timing gates: a claimed scheduled ride only surfaces as an
   // ACTIVE ride 45 min before pickup (enough lead to navigate + confirm
@@ -435,6 +444,53 @@ export default function DriverHome() {
           )}
         </div>
 
+        {/* Rentals — held rentals first, then available-to-accept broadcasts.
+            Only rendered while online, mirroring ride broadcasts. The server
+            gates eligibility (opt-in, vehicle type, credits, not on a ride),
+            so an empty list here means "nothing you can take right now". */}
+        {online && (myRentals.length > 0 || availableRentals.length > 0) && (
+          <div className="px-4 pb-2 space-y-3">
+            {myRentals.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <CarFront className="h-3.5 w-3.5 text-gold" /> Your rentals ({myRentals.length})
+                </div>
+                {myRentals.map((r) => (
+                  <RentalCard
+                    key={r.id}
+                    rental={r}
+                    held
+                    onRelease={() => releaseRental.mutate(r.id, {
+                      onSuccess: () => toast("Rental released — credit refunded"),
+                      onError: (e: any) => toast.error(e?.message ?? "Failed to release"),
+                    })}
+                    releasing={releaseRental.isPending}
+                  />
+                ))}
+              </div>
+            )}
+
+            {availableRentals.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <CarFront className="h-3.5 w-3.5 text-gold" /> Rental broadcasts ({availableRentals.length})
+                </div>
+                {availableRentals.map((r) => (
+                  <RentalCard
+                    key={r.id}
+                    rental={r}
+                    onAccept={() => acceptRental.mutate(r.id, {
+                      onSuccess: () => toast.success("Rental accepted — 1 credit used"),
+                      onError: (e: any) => toast.error(e?.message ?? "Rental no longer available"),
+                    })}
+                    accepting={acceptRental.isPending}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Recent trips moved into the account side panel ("Recent trips"). */}
       </div>
 
@@ -619,6 +675,78 @@ function RideSummary({ ride }: { ride: RideRow }) {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Rental card ──────────────────────────────────────────────────────────────
+// Shown on the driver's Rides tab. `held` = a rental the driver already took
+// (release option); otherwise it's an available broadcast (accept option).
+function RentalCard({
+  rental: r, held, onAccept, onRelease, accepting, releasing,
+}: {
+  rental: RentalRow;
+  held?: boolean;
+  onAccept?: () => void;
+  onRelease?: () => void;
+  accepting?: boolean;
+  releasing?: boolean;
+}) {
+  return (
+    <Card className={held ? "border-gold/50 bg-gold/5" : "border-gold/30"}>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-sm flex items-center gap-2">
+              {r.customerName}
+              <Badge variant="outline" className="capitalize text-[10px]">{r.vehicleType}</Badge>
+            </div>
+            <div className="text-xs text-muted-foreground flex items-center gap-1">
+              <Phone className="h-3 w-3" /> {r.customerPhone}
+            </div>
+          </div>
+          <span className="flex items-center gap-0.5 font-bold text-foreground">
+            <IndianRupee className="h-3.5 w-3.5" />{r.basePrice}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+          <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {r.hours}h · {r.km}km</span>
+          <span className="text-muted-foreground">₹{r.extraPerKm}/extra km · ₹{r.extraPerHr}/extra hr</span>
+        </div>
+
+        <a
+          href={mapsUrlForAddress(r.pickupAddress)}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-start gap-2 text-sm hover:text-gold-dark"
+        >
+          <MapPin className="h-4 w-4 text-gold mt-0.5 shrink-0" />
+          <span className="min-w-0">{r.pickupAddress}</span>
+        </a>
+
+        {r.notes && <div className="text-xs text-muted-foreground italic">“{r.notes}”</div>}
+
+        {held ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40"
+            disabled={releasing}
+            onClick={onRelease}
+          >
+            <X className="h-3.5 w-3.5" /> Release rental
+          </Button>
+        ) : (
+          <Button
+            className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
+            disabled={accepting}
+            onClick={onAccept}
+          >
+            <Check className="h-3.5 w-3.5" /> Accept rental (1 credit)
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
