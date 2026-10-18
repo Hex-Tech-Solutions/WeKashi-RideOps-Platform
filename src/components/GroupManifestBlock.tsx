@@ -1,37 +1,68 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { RideTypeBadge } from "@/components/RideTypeLabel";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { rideArea } from "@/lib/rideArea";
 import type { EmployeeRow, RouteTemplateRow } from "@/lib/queries";
-import { Users, Car, Building2, ArrowRight, Trash2, MapPin } from "lucide-react";
+import { Users, Car, Building2, Trash2, MapPin, GripVertical, Radio, Loader2 } from "lucide-react";
+import { SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { useDroppable } from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+
+/** Composite drag id so the parent can route a drop: "<templateId>::<employeeId>". */
+export const rowId = (templateId: string, employeeId: string) => `${templateId}::${employeeId}`;
+export const parseRowId = (id: string) => {
+  const [templateId, employeeId] = id.split("::");
+  return { templateId, employeeId };
+};
 
 /**
- * A saved group rendered as a MoveInSync-style manifest block: a header with
- * the group name / type / pax count / vehicle / office, then the member rows
- * in order (Seq · Emp ID · Name · G · Landmark · Address). Employee details
- * are resolved from the roster the parent already loaded.
+ * A saved group as a MoveInSync-style manifest block with touch-friendly
+ * drag-and-drop (dnd-kit): drag rows to reorder within the group OR drag an
+ * employee from one group block into another. Login/logout and reorder persist
+ * to the saved group; "Book ride" hands it to the normal booking flow.
+ *
+ * The parent owns the DndContext; this block is a droppable sortable container.
  */
 export function GroupManifestBlock({
   template,
   employeesById,
-  onLoad,
+  onRideTypeChange,
+  onBook,
   onDelete,
+  saving = false,
 }: {
   template: RouteTemplateRow;
   employeesById: Map<string, EmployeeRow>;
-  onLoad: () => void;
+  onRideTypeChange: (rideType: "login" | "logout") => void;
+  onBook: () => void;
   onDelete: () => void;
+  saving?: boolean;
 }) {
   const ids = template.orderedEmployeeIds as string[];
   const members = ids.map((id) => employeesById.get(id)).filter((e): e is EmployeeRow => !!e);
   const isLogout = template.rideType === "logout";
 
+  // Whole block is a drop zone so an employee can be dropped onto an empty group.
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: `group:${template.id}` });
+  const sortableIds = members.map((e) => rowId(template.id, e.id));
+
   return (
-    <div className="rounded-lg border shadow-card overflow-hidden">
+    <div
+      ref={setDropRef}
+      className={`rounded-lg border shadow-card overflow-hidden transition-colors ${isOver ? "ring-2 ring-gold/60" : ""}`}
+    >
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 bg-muted/40 border-b">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 bg-muted/40 border-b">
         <span className="font-semibold text-sm">{template.name}</span>
-        <RideTypeBadge type={template.rideType} className="text-[10px] py-0" />
+        <Select value={template.rideType} onValueChange={(v) => onRideTypeChange(v as "login" | "logout")}>
+          <SelectTrigger className="h-7 w-[104px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="login"><span className="text-green-700 font-medium">Login</span></SelectItem>
+            <SelectItem value="logout"><span className="text-red-700 font-medium">Logout</span></SelectItem>
+          </SelectContent>
+        </Select>
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Users className="h-3.5 w-3.5" /> {members.length}
         </span>
@@ -41,13 +72,14 @@ export function GroupManifestBlock({
           </Badge>
         )}
         {template.officeLocation && (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
             <Building2 className="h-3.5 w-3.5" /> {template.officeLocation.name}
           </span>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" className="h-8 bg-gold text-gold-foreground hover:bg-gold/90" onClick={onLoad}>
-            Load group <ArrowRight className="h-3.5 w-3.5" />
+        <div className="ml-auto flex items-center gap-1.5">
+          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          <Button size="sm" className="h-8 bg-gold text-gold-foreground hover:bg-gold/90" onClick={onBook}>
+            <Radio className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Book ride</span>
           </Button>
           <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={onDelete}>
             <Trash2 className="h-4 w-4" />
@@ -55,45 +87,78 @@ export function GroupManifestBlock({
         </div>
       </div>
 
-      {/* Member manifest */}
-      <table className="w-full text-xs">
-        <thead className="text-[10px] uppercase tracking-wide text-muted-foreground border-b bg-background">
-          <tr>
-            <th className="w-12 px-2 py-1.5 text-left font-medium">Seq</th>
-            <th className="w-16 px-2 py-1.5 text-left font-medium">Emp ID</th>
-            <th className="text-left font-medium px-2 py-1.5">Name</th>
-            <th className="w-8 px-1 py-1.5 text-center">G</th>
-            <th className="text-left font-medium px-2 py-1.5">Landmark</th>
-            <th className="text-left font-medium px-2 py-1.5">Address</th>
-            <th className="w-10 px-1 py-1.5 text-center">{isLogout ? "Drop" : "Pick"}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {members.length === 0 ? (
-            <tr><td colSpan={7} className="px-2 py-4 text-center text-muted-foreground">No employees in this group.</td></tr>
-          ) : (
-            members.map((e, i) => (
-              <tr key={e.id} className="border-b last:border-0">
-                <td className="px-2 py-1.5">
-                  <span className="h-5 w-5 rounded-full bg-gold text-gold-foreground flex items-center justify-center text-[10px] font-bold">{i + 1}</span>
-                </td>
-                <td className="px-2 py-1.5 font-mono text-muted-foreground">{e.empId}</td>
-                <td className="px-2 py-1.5 font-medium">{e.name}</td>
-                <td className="px-1 py-1.5 text-center">
-                  {e.gender?.toUpperCase().startsWith("F")
-                    ? <span className="text-gold-dark font-semibold">F</span>
-                    : <span className="text-muted-foreground">M</span>}
-                </td>
-                <td className="px-2 py-1.5 font-semibold text-foreground">{rideArea(e.pickupAddress) ?? "—"}</td>
-                <td className="px-2 py-1.5 text-muted-foreground max-w-[220px] truncate" title={e.pickupAddress}>{e.pickupAddress}</td>
-                <td className="px-1 py-1.5 text-center">
-                  <MapPin className={`h-3.5 w-3.5 inline ${isLogout ? "text-sky-500" : "text-red-500"}`} />
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+      {/* Member manifest — drag rows to reorder or move between groups */}
+      <div className="overflow-x-auto">
+        {members.length === 0 ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            Empty group — drag an employee here.
+          </div>
+        ) : (
+          <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+            <div className="min-w-[520px]">
+              {/* header row */}
+              <div className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_40px] gap-1 text-[10px] uppercase tracking-wide text-muted-foreground border-b bg-background px-1 py-1.5">
+                <div>Seq</div><div>Emp ID</div><div>Name</div><div className="text-center">G</div><div>Landmark</div><div>Address</div><div className="text-center">{isLogout ? "Drop" : "Pick"}</div>
+              </div>
+              {members.map((e, i) => (
+                <SortableRow
+                  key={e.id}
+                  id={rowId(template.id, e.id)}
+                  seq={i + 1}
+                  employee={e}
+                  isLogout={isLogout}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SortableRow({
+  id,
+  seq,
+  employee: e,
+  isLogout,
+}: {
+  id: string;
+  seq: number;
+  employee: EmployeeRow;
+  isLogout: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_40px] gap-1 items-center border-b last:border-0 px-1 py-1.5 text-xs cursor-grab active:cursor-grabbing hover:bg-muted/40 touch-none"
+    >
+      <div className="flex items-center gap-1">
+        <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <span className="h-5 w-5 rounded-full bg-gold text-gold-foreground flex items-center justify-center text-[10px] font-bold">{seq}</span>
+      </div>
+      <div className="font-mono text-muted-foreground truncate">{e.empId}</div>
+      <div className="font-medium truncate">{e.name}</div>
+      <div className="text-center">
+        {e.gender?.toUpperCase().startsWith("F")
+          ? <span className="text-gold-dark font-semibold">F</span>
+          : <span className="text-muted-foreground">M</span>}
+      </div>
+      <div className="font-semibold text-foreground truncate">{rideArea(e.pickupAddress) ?? "—"}</div>
+      <div className="text-muted-foreground truncate" title={e.pickupAddress}>{e.pickupAddress}</div>
+      <div className="text-center">
+        <MapPin className={`h-3.5 w-3.5 inline ${isLogout ? "text-sky-500" : "text-red-500"}`} />
+      </div>
     </div>
   );
 }

@@ -29,7 +29,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditGroupDialog } from "@/components/EditGroupDialog";
 import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
 import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
-import { GroupManifestBlock } from "@/components/GroupManifestBlock";
+import { GroupManifestBlock, parseRowId } from "@/components/GroupManifestBlock";
+import { useNavigate } from "react-router-dom";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -143,6 +145,79 @@ export default function SavedGroups() {
   // route on a map before committing.
   const [editingTemplate, setEditingTemplate] = useState<RouteTemplateRow | null>(null);
 
+  // ── Drag-and-drop between/within group blocks ──────────────────────────────
+  const nav = useNavigate();
+  const [savingTemplateId, setSavingTemplateId] = useState<string | null>(null);
+  // PointerSensor with a small activation distance → works on mouse AND touch
+  // (Android), while still allowing taps on the dropdown/buttons inside rows.
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const persistTemplate = (t: RouteTemplateRow, data: { rideType?: "login" | "logout"; orderedEmployeeIds?: string[] }) => {
+    setSavingTemplateId(t.id);
+    updateTemplate.mutate(
+      { id: t.id, ...data },
+      {
+        onSuccess: () => setSavingTemplateId(null),
+        onError: (e: any) => { setSavingTemplateId(null); toast.error(e?.message ?? "Failed to save group"); },
+      },
+    );
+  };
+
+  const bookGroup = (t: RouteTemplateRow) =>
+    nav("/supervisor/routes", {
+      state: {
+        presetEmployeeIds: t.orderedEmployeeIds,
+        presetType: t.rideType,
+        presetOfficeLocationId: t.officeLocationId ?? undefined,
+        presetVehicleType: t.vehicleType ?? undefined,
+        presetStep: 2,
+      },
+    });
+
+  const handleGroupDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    const { templateId: srcTpl, employeeId } = parseRowId(String(active.id));
+
+    // Resolve the destination group: either a row id ("tpl::emp") or the
+    // whole-group droppable ("group:<id>").
+    let dstTpl: string;
+    let overEmpId: string | null = null;
+    const overId = String(over.id);
+    if (overId.startsWith("group:")) {
+      dstTpl = overId.slice("group:".length);
+    } else {
+      const parsed = parseRowId(overId);
+      dstTpl = parsed.templateId;
+      overEmpId = parsed.employeeId;
+    }
+
+    const src = templates.find((t) => t.id === srcTpl);
+    const dst = templates.find((t) => t.id === dstTpl);
+    if (!src || !dst) return;
+
+    if (srcTpl === dstTpl) {
+      // Reorder within the same group.
+      const ids = [...(src.orderedEmployeeIds as string[])];
+      const from = ids.indexOf(employeeId);
+      const to = overEmpId ? ids.indexOf(overEmpId) : ids.length - 1;
+      if (from < 0 || to < 0 || from === to) return;
+      const [moved] = ids.splice(from, 1);
+      ids.splice(to, 0, moved);
+      persistTemplate(src, { orderedEmployeeIds: ids });
+      return;
+    }
+
+    // Move employee from src group → dst group.
+    const srcIds = (src.orderedEmployeeIds as string[]).filter((id) => id !== employeeId);
+    const dstIds = [...(dst.orderedEmployeeIds as string[])];
+    if (dstIds.includes(employeeId)) return; // already there
+    const insertAt = overEmpId ? dstIds.indexOf(overEmpId) : dstIds.length;
+    dstIds.splice(insertAt < 0 ? dstIds.length : insertAt, 0, employeeId);
+    persistTemplate(src, { orderedEmployeeIds: srcIds });
+    persistTemplate(dst, { orderedEmployeeIds: dstIds });
+  };
+
   return (
     <div className="w-full">
       <PageHeader
@@ -204,17 +279,21 @@ export default function SavedGroups() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-4">
-              {templates.map((t) => (
-                <GroupManifestBlock
-                  key={t.id}
-                  template={t}
-                  employeesById={employeesById}
-                  onLoad={() => setEditingTemplate(t)}
-                  onDelete={() => setDeleteId(t.id)}
-                />
-              ))}
-            </div>
+            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+              <div className="space-y-4">
+                {templates.map((t) => (
+                  <GroupManifestBlock
+                    key={t.id}
+                    template={t}
+                    employeesById={employeesById}
+                    saving={savingTemplateId === t.id}
+                    onRideTypeChange={(rt) => persistTemplate(t, { rideType: rt })}
+                    onBook={() => bookGroup(t)}
+                    onDelete={() => setDeleteId(t.id)}
+                  />
+                ))}
+              </div>
+            </DndContext>
           )}
         </TabsContent>
 

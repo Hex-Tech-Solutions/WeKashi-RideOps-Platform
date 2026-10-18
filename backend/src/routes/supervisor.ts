@@ -246,7 +246,12 @@ router.patch('/route-templates/:id', async (req: AuthRequest, res: Response, nex
     if (!existing) throw new NotFoundError('Route template not found');
     if (existing.supervisorId !== req.user!.id) throw new ForbiddenError('Access denied');
 
-    const body = RouteTemplateSchema.partial().parse(req.body);
+    // PATCH allows an EMPTY orderedEmployeeIds (e.g. dragging the last employee
+    // out of a group during cross-group moves) — unlike POST which requires ≥1.
+    const PatchSchema = RouteTemplateSchema.partial().extend({
+      orderedEmployeeIds: z.array(z.string().uuid()).optional(),
+    });
+    const body = PatchSchema.parse(req.body);
     const template = await prisma.routeTemplate.update({
       where: { id: req.params.id },
       data: {
