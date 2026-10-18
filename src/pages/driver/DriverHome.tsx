@@ -12,7 +12,8 @@ import {
 } from "@/lib/queries";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind, CarFront, Clock, Phone } from "lucide-react";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind, CarFront, Phone } from "lucide-react";
+import { rideArea } from "@/lib/rideArea";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
@@ -49,10 +50,15 @@ export default function DriverHome() {
   // ── Rentals — fleet-wide bookings the driver opted into (Sedan/SUV) ───────
   const { data: rentalsAvail } = useDriverRentalsAvailable();
   const { data: rentalsMine } = useDriverRentalsMine();
-  const availableRentals = rentalsAvail?.rentals ?? [];
   const myRentals = rentalsMine?.rentals ?? [];
   const acceptRental = useAcceptRental();
   const releaseRental = useReleaseRental();
+  // Rentals the driver dismissed (declined) this session. Rentals have no
+  // per-driver offer row to reject server-side (they broadcast fleet-wide), so
+  // declining just hides it locally until the next app session — mirroring how
+  // a driver passes on a ride they don't want.
+  const [dismissedRentals, setDismissedRentals] = useState<Set<string>>(new Set());
+  const availableRentals = (rentalsAvail?.rentals ?? []).filter((r) => !dismissedRentals.has(r.id));
 
   // Scheduled-ride timing gates: a claimed scheduled ride only surfaces as an
   // ACTIVE ride 45 min before pickup (enough lead to navigate + confirm
@@ -483,6 +489,10 @@ export default function DriverHome() {
                       onSuccess: () => toast.success("Rental accepted — 1 credit used"),
                       onError: (e: any) => toast.error(e?.message ?? "Rental no longer available"),
                     })}
+                    onDecline={() => {
+                      setDismissedRentals((s) => new Set(s).add(r.id));
+                      toast("Rental dismissed");
+                    }}
                     accepting={acceptRental.isPending}
                   />
                 ))}
@@ -679,71 +689,103 @@ function RideSummary({ ride }: { ride: RideRow }) {
 }
 
 // ─── Rental card ──────────────────────────────────────────────────────────────
-// Shown on the driver's Rides tab. `held` = a rental the driver already took
-// (release option); otherwise it's an available broadcast (accept option).
+// Styled to match the regular broadcast card (DriverOfferCard): dark fare
+// header with the gold amount + badges, pickup block with the locality picked
+// out, a package meta row, then Accept + decline(X). `held` = a rental the
+// driver already took, where the X becomes a Release action (refunds credit).
 function RentalCard({
-  rental: r, held, onAccept, onRelease, accepting, releasing,
+  rental: r, held, onAccept, onDecline, onRelease, accepting, releasing,
 }: {
   rental: RentalRow;
   held?: boolean;
   onAccept?: () => void;
+  onDecline?: () => void;
   onRelease?: () => void;
   accepting?: boolean;
   releasing?: boolean;
 }) {
   return (
-    <Card className={held ? "border-gold/50 bg-gold/5" : "border-gold/30"}>
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-start gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-sm flex items-center gap-2">
-              {r.customerName}
-              <Badge variant="outline" className="capitalize text-[10px]">{r.vehicleType}</Badge>
+    <Card className="overflow-hidden border-gold/30">
+      {/* Fare header — mirrors the broadcast card */}
+      <div className="bg-foreground text-background px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-widest text-background/50 font-medium">You earn</div>
+            <div className="flex items-baseline gap-1 leading-none">
+              <span className="text-4xl font-extrabold text-gold tracking-tight">₹{r.basePrice}</span>
             </div>
-            <div className="text-xs text-muted-foreground flex items-center gap-1">
-              <Phone className="h-3 w-3" /> {r.customerPhone}
+            <div className="text-[11px] text-background/70 mt-0.5">
+              ₹{r.extraPerKm}/extra km · ₹{r.extraPerHr}/extra hr
             </div>
           </div>
-          <span className="flex items-center gap-0.5 font-bold text-foreground">
-            <IndianRupee className="h-3.5 w-3.5" />{r.basePrice}
-          </span>
+          <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[55%]">
+            <Badge className="bg-gold/20 text-gold border border-gold/40 gap-1 text-[10px] px-2 py-0.5 font-semibold">
+              <CarFront className="h-2.5 w-2.5" /> Rental
+            </Badge>
+            <Badge variant="outline" className="capitalize text-[10px] px-2 py-0.5 border-background/30 text-background">
+              {r.vehicleType}
+            </Badge>
+            <Badge variant="outline" className="text-[10px] px-2 py-0.5 border-background/30 text-background">
+              {r.hours}h · {r.km}km
+            </Badge>
+          </div>
+        </div>
+      </div>
+
+      <CardContent className="p-3 space-y-2.5">
+        {/* Customer */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-semibold text-sm">{r.customerName}</div>
+          <a href={`tel:${r.customerPhone}`} className="text-xs text-gold-dark flex items-center gap-1">
+            <Phone className="h-3 w-3" /> {r.customerPhone}
+          </a>
         </div>
 
-        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
-          <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {r.hours}h · {r.km}km</span>
-          <span className="text-muted-foreground">₹{r.extraPerKm}/extra km · ₹{r.extraPerHr}/extra hr</span>
-        </div>
-
+        {/* Pickup — locality picked out above the full address, same as broadcast */}
         <a
           href={mapsUrlForAddress(r.pickupAddress)}
           target="_blank"
           rel="noreferrer"
-          className="flex items-start gap-2 text-sm hover:text-gold-dark"
+          className="relative pl-4 block"
         >
-          <MapPin className="h-4 w-4 text-gold mt-0.5 shrink-0" />
-          <span className="min-w-0">{r.pickupAddress}</span>
+          <span className="absolute left-[3px] top-1.5 h-1.5 w-1.5 rounded-full bg-gold ring-2 ring-gold/20" />
+          {rideArea(r.pickupAddress) && (
+            <div className="text-sm font-semibold text-foreground leading-tight">{rideArea(r.pickupAddress)}</div>
+          )}
+          <div className="text-xs text-muted-foreground leading-snug break-words">{r.pickupAddress}</div>
         </a>
 
         {r.notes && <div className="text-xs text-muted-foreground italic">“{r.notes}”</div>}
 
+        {/* Actions — Accept + decline(X), or Release when held */}
         {held ? (
           <Button
             variant="outline"
-            size="sm"
-            className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40"
+            className="w-full h-10 text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40"
             disabled={releasing}
             onClick={onRelease}
           >
-            <X className="h-3.5 w-3.5" /> Release rental
+            <X className="h-4 w-4" /> Release rental (refunds credit)
           </Button>
         ) : (
-          <Button
-            className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
-            disabled={accepting}
-            onClick={onAccept}
-          >
-            <Check className="h-3.5 w-3.5" /> Accept rental (1 credit)
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90 h-10"
+              disabled={accepting}
+              onClick={onAccept}
+            >
+              <Check className="h-4 w-4" /> Accept rental (1 credit)
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-10 w-10 shrink-0 text-muted-foreground"
+              onClick={onDecline}
+              aria-label="Decline rental"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>
