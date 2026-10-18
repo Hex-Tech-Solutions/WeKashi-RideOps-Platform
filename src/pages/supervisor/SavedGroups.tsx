@@ -148,14 +148,23 @@ export default function SavedGroups() {
   const [editingTemplate, setEditingTemplate] = useState<RouteTemplateRow | null>(null);
   const [editAddressEmployee, setEditAddressEmployee] = useState<EmployeeRow | null>(null);
 
-  // Company filter for the groups list.
+  // Company filter for the groups list. A group's company comes from its
+  // members' companyLabel (all members share one company by the create rule) —
+  // the officeLocation field isn't always set, so derive from employees.
   const [groupCompany, setGroupCompany] = useState("all");
+  const companyOfTemplate = (t: RouteTemplateRow): string | null => {
+    for (const id of t.orderedEmployeeIds as string[]) {
+      const emp = employeesById.get(id);
+      if (emp?.companyLabel) return emp.companyLabel;
+    }
+    return t.officeLocation?.name ?? null;
+  };
   const groupCompanies = Array.from(
-    new Set(templates.map((t) => t.officeLocation?.name).filter(Boolean) as string[]),
+    new Set(templates.map((t) => companyOfTemplate(t)).filter(Boolean) as string[]),
   );
   const visibleTemplates = groupCompany === "all"
     ? templates
-    : templates.filter((t) => t.officeLocation?.name === groupCompany);
+    : templates.filter((t) => companyOfTemplate(t) === groupCompany);
 
   // ── Drag-and-drop between/within group blocks ──────────────────────────────
   const nav = useNavigate();
