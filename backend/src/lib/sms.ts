@@ -42,9 +42,10 @@ export class ConsoleSmssSender implements SmsSender {
  *   MSG91_RIDE_TEMPLATE_ID=<Template 1 — ride confirmation>
  *   MSG91_SENDER_ID=<approved sender id>            (optional)
  *
- * Flow variable names expected:
- *   Login template:  otp
- *   Ride template:   vehicle, board_otp, dboard_otp
+ * MSG91 uses positional variable names (##var1##, ##var2##, ...), so:
+ *   Login template:  var1 = OTP
+ *   Ride template:   var1 = vehicle, var2 = boarding OTP, var3 = de-boarding OTP
+ * These must match the order of the {#var#} placeholders in the DLT template.
  */
 export class Msg91SmsSender implements SmsSender {
   constructor(
@@ -75,17 +76,19 @@ export class Msg91SmsSender implements SmsSender {
   }
 
   async sendLoginOtp(phone: string, otp: string): Promise<void> {
-    await this.post(this.loginTemplateId, normalizeMobile(phone), { otp });
+    // Login template: "...login OTP is ##var1##..."
+    await this.post(this.loginTemplateId, normalizeMobile(phone), { var1: otp });
   }
 
   async sendRideOtp(
     phone: string,
     data: { vehicle: string; boardingOtp: string; deboardingOtp: string },
   ): Promise<void> {
+    // Ride template order: Vehicle ##var1## Boarding ##var2## De-Boarding ##var3##
     await this.post(this.rideTemplateId, normalizeMobile(phone), {
-      vehicle: data.vehicle,
-      board_otp: data.boardingOtp,
-      dboard_otp: data.deboardingOtp,
+      var1: data.vehicle,
+      var2: data.boardingOtp,
+      var3: data.deboardingOtp,
     });
   }
 }
