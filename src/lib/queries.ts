@@ -1844,8 +1844,50 @@ export interface RentalRow {
   status: "broadcasting" | "assigned" | "in_progress" | "completed" | "cancelled";
   notes: string | null;
   createdAt: string;
-  driver?: { fullName: string; phone: string } | null;
+  // Lifecycle timestamps + state (present once the ride progresses).
+  acceptedAt?: string | null;
+  arrivedAt?: string | null;
+  startedAt?: string | null;
+  overageStartedAt?: string | null;
+  overageAgreed?: boolean;
+  completedAt?: string | null;
+  // Frozen final figures (completed rentals).
+  distanceM?: number;
+  overageAmount?: number;
+  totalAmount?: number | null;
+  // OTPs — ONLY populated on the supervisor's list (driver never receives them).
+  pickupOtp?: string | null;
+  dropOtp?: string | null;
+  // Driver + vehicle details — supervisor view only.
+  driver?: {
+    fullName: string;
+    phone: string;
+    vehicleType?: string | null;
+    vehicle?: { regNo: string; fuelType: string } | null;
+  } | null;
   supervisor?: { fullName: string; org: string | null } | null;
+}
+
+/** Live progress of a rental ride (shared shape for driver + supervisor). */
+export interface RentalProgress {
+  status: RentalRow["status"];
+  elapsedMin: number;
+  distanceKm: number;
+  includedHours: number;
+  includedKm: number;
+  limitReached: boolean;
+  overageAgreed: boolean;
+  overageStartedAt: string | null;
+  overage: {
+    overHours: number;
+    overKm: number;
+    hoursAmount: number;
+    kmAmount: number;
+    overageAmount: number;
+  };
+  basePrice: number;
+  finalOverageAmount: number;
+  finalTotal: number;
 }
 
 // ── Supervisor ──
@@ -1953,6 +1995,66 @@ export function useAcceptRental() {
       qc.invalidateQueries({ queryKey: ["driver", "rentals"] });
       qc.invalidateQueries({ queryKey: ["driverCredits"] });
     },
+  });
+}
+
+// ── Rental Rides lifecycle (driver) ──
+export function useRentalArrived() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/driver/rentals/${id}/arrived`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "rentals"] }),
+  });
+}
+
+export function useStartRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, otp }: { id: string; otp: string }) =>
+      api<{ startedAt: string }>(`/driver/rentals/${id}/start`, { method: "POST", body: JSON.stringify({ otp }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "rentals"] }),
+  });
+}
+
+export function useAgreeRentalOverage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/driver/rentals/${id}/agree-overage`, { method: "POST" }),
+    onSuccess: (_d, id) => {
+      qc.invalidateQueries({ queryKey: ["driver", "rentals"] });
+      qc.invalidateQueries({ queryKey: ["rentalProgress", id] });
+    },
+  });
+}
+
+export function useCompleteRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, otp }: { id: string; otp: string }) =>
+      api<{ total: number }>(`/driver/rentals/${id}/complete`, { method: "POST", body: JSON.stringify({ otp }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", "rentals"] });
+      qc.invalidateQueries({ queryKey: ["driverCredits"] });
+    },
+  });
+}
+
+/** Send a GPS breadcrumb for an in-progress rental (the odometer source). */
+export function useLogRentalLocation() {
+  return useMutation({
+    mutationFn: ({ id, lat, lng }: { id: string; lat: number; lng: number }) =>
+      api(`/driver/rentals/${id}/location`, { method: "POST", body: JSON.stringify({ lat, lng }) }),
+  });
+}
+
+/** Live rental progress — polled. `role` picks the correct endpoint. */
+export function useRentalProgress(id: string | undefined, role: "driver" | "supervisor", enabled = true) {
+  return useQuery({
+    queryKey: ["rentalProgress", id],
+    queryFn: () => api<RentalProgress>(`/${role}/rentals/${id}/progress`),
+    enabled: !!id && enabled,
+    refetchInterval: 5_000,
+    staleTime: 0,
   });
 }
 

@@ -414,7 +414,7 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
 
 // ── Rentals ───────────────────────────────────────────────────────────────────
 import { listRentalPacks } from '../lib/rentalPacks';
-import { createRental, listRentalsForSupervisor, cancelRental, removeRental } from '../services/rental.service';
+import { createRental, listRentalsForSupervisor, cancelRental, removeRental, getRentalProgress } from '../services/rental.service';
 
 // GET /supervisor/rentals/packs — pricing catalog (optionally by vehicle type)
 router.get('/rentals/packs', async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -474,6 +474,21 @@ router.delete('/rentals/:id/remove', async (req: AuthRequest, res: Response, nex
   try {
     await removeRental(req.params.id, req.user!.id);
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /supervisor/rentals/:id/progress — live timer/distance/overage for a rental
+router.get('/rentals/:id/progress', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    // Ownership guard — a supervisor only sees their own rentals' progress.
+    const owned = await prisma.rental.findFirst({
+      where: { id: req.params.id, supervisorId: req.user!.id },
+      select: { id: true },
+    });
+    if (!owned) { res.status(404).json({ error: 'Rental not found', code: 'NOT_FOUND' }); return; }
+    res.json(await getRentalProgress(req.params.id));
   } catch (err) {
     next(err);
   }

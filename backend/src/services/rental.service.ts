@@ -5,9 +5,13 @@
 
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
-import { getRentalPack, type RentalVehicle } from '../lib/rentalPacks';
+import { getRentalPack, computeRentalOverage, type RentalVehicle } from '../lib/rentalPacks';
 import { NotFoundError, ValidationError, ConflictError } from '../types';
 import { logger } from '../lib/logger';
+import { randomInt } from 'crypto';
+
+// 4-digit OTPs, same format as employee pickup/drop OTPs.
+const gen4 = () => String(randomInt(1000, 10000));
 
 export interface CreateRentalInput {
   supervisorId: string;
@@ -29,11 +33,16 @@ export async function createRental(input: CreateRentalInput): Promise<{ id: stri
   }
 
   const hasPoint = input.pickupPoint != null;
+  // Pickup + drop OTPs are generated up front and surfaced only on the
+  // supervisor's Rental Ride card — the supervisor reads them out verbally.
+  const pickupOtp = gen4();
+  const dropOtp = gen4();
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     INSERT INTO rentals (
       id, supervisor_id, customer_name, customer_phone, vehicle_type, package_key,
       hours, km, base_price, extra_per_km, extra_per_hr,
-      pickup_address, pickup_point, scheduled_for, status, notes, created_at
+      pickup_address, pickup_point, scheduled_for, status, notes,
+      pickup_otp, drop_otp, created_at
     ) VALUES (
       gen_random_uuid(), ${input.supervisorId}, ${input.customerName}, ${input.customerPhone},
       ${input.vehicleType}, ${pack.key},
@@ -41,7 +50,8 @@ export async function createRental(input: CreateRentalInput): Promise<{ id: stri
       ${input.pickupAddress},
       ${hasPoint ? Prisma.sql`ST_SetSRID(ST_MakePoint(${input.pickupPoint!.lng}, ${input.pickupPoint!.lat}), 4326)::geography` : Prisma.sql`NULL`},
       ${input.scheduledFor ?? null},
-      'broadcasting', ${input.notes ?? null}, NOW()
+      'broadcasting', ${input.notes ?? null},
+      ${pickupOtp}, ${dropOtp}, NOW()
     )
     RETURNING id
   `;
@@ -49,11 +59,195 @@ export async function createRental(input: CreateRentalInput): Promise<{ id: stri
   return { id: rows[0].id };
 }
 
-// Supervisor's rentals (newest first).
+// ── Rental Rides lifecycle ────────────────────────────────────────────────────
+
+/**
+ * Driver confirms arrival at the pickup location (slider). Only valid on an
+ * assigned rental the driver holds. Idempotent — re-confirming is a no-op.
+ */
+export async function rentalArrived(rentalId: string, driverId: string): Promise<void> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    UPDATE rentals SET arrived_at = COALESCE(arrived_at, NOW())
+    WHERE id = ${rentalId} AND driver_id = ${driverId} AND status = 'assigned'
+    RETURNING id
+  `;
+  if (rows.length === 0) throw new NotFoundError('Rental not found or not in a state to confirm arrival');
+  logger.info({ rentalId, driverId }, 'Rental arrival confirmed');
+}
+
+/**
+ * Driver enters the pickup OTP (given verbally by the supervisor). On success
+ * the rental goes in_progress and the timer + GPS tracking start.
+ */
+export async function startRental(rentalId: string, driverId: string, otp: string): Promise<{ startedAt: string }> {
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    select: { driverId: true, status: true, pickupOtp: true, arrivedAt: true },
+  });
+  if (!rental || rental.driverId !== driverId) throw new NotFoundError('Rental not found');
+  if (rental.status !== 'assigned') throw new ValidationError('This rental is not ready to start');
+  if (!rental.arrivedAt) throw new ValidationError('Confirm arrival before entering the pickup OTP');
+  if (rental.pickupOtp !== otp) throw new ValidationError('Incorrect pickup OTP');
+
+  const updated = await prisma.rental.update({
+    where: { id: rentalId },
+    data: { status: 'in_progress', startedAt: new Date() },
+    select: { startedAt: true },
+  });
+  logger.info({ rentalId, driverId }, 'Rental started (pickup OTP verified)');
+  return { startedAt: updated.startedAt!.toISOString() };
+}
+
+/**
+ * Driver agrees to the overage pop-up once the package limit (hours or km) is
+ * reached. Stamps overage_started_at so both apps show when billing began.
+ */
+export async function agreeRentalOverage(rentalId: string, driverId: string): Promise<void> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    UPDATE rentals
+    SET overage_agreed = true, overage_started_at = COALESCE(overage_started_at, NOW())
+    WHERE id = ${rentalId} AND driver_id = ${driverId} AND status = 'in_progress'
+    RETURNING id
+  `;
+  if (rows.length === 0) throw new NotFoundError('Rental not found or not in progress');
+  logger.info({ rentalId, driverId }, 'Rental overage agreed');
+}
+
+/**
+ * Live progress for an in-progress rental: elapsed minutes, GPS-odometer
+ * distance, and the current overage. Used by both the driver and supervisor
+ * cards (polled). Distance is the summed geodesic length of the breadcrumb
+ * trail since pickup.
+ */
+export async function getRentalProgress(rentalId: string) {
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    select: {
+      packageKey: true, status: true, startedAt: true, completedAt: true,
+      overageAgreed: true, overageStartedAt: true, hours: true, km: true,
+      distanceM: true, overageAmount: true, totalAmount: true, basePrice: true,
+    },
+  });
+  if (!rental) throw new NotFoundError('Rental not found');
+
+  // Live GPS odometer: sum distance between consecutive breadcrumbs.
+  const dist = await prisma.$queryRaw<Array<{ meters: number }>>`
+    SELECT COALESCE(SUM(seg), 0)::float AS meters FROM (
+      SELECT ST_Distance(
+        point,
+        LAG(point) OVER (ORDER BY recorded_at)
+      ) AS seg
+      FROM rental_location_logs
+      WHERE rental_id = ${rentalId}
+    ) s
+  `;
+  const liveMeters = rental.status === 'completed' ? rental.distanceM : (dist[0]?.meters ?? 0);
+  const distanceKm = Math.round((liveMeters / 1000) * 10) / 10;
+
+  const startedAt = rental.startedAt ? rental.startedAt.getTime() : null;
+  const endRef = rental.completedAt ? rental.completedAt.getTime() : Date.now();
+  const elapsedMin = startedAt ? Math.max(0, Math.round((endRef - startedAt) / 60000)) : 0;
+
+  const overage = computeRentalOverage(rental.packageKey, elapsedMin, distanceKm);
+  const limitReached = elapsedMin >= rental.hours * 60 || distanceKm >= rental.km;
+
+  return {
+    status: rental.status,
+    elapsedMin,
+    distanceKm,
+    includedHours: rental.hours,
+    includedKm: rental.km,
+    limitReached,
+    overageAgreed: rental.overageAgreed,
+    overageStartedAt: rental.overageStartedAt?.toISOString() ?? null,
+    overage,
+    basePrice: rental.basePrice,
+    // When completed these are the frozen final values.
+    finalOverageAmount: rental.status === 'completed' ? rental.overageAmount : overage.overageAmount,
+    finalTotal: rental.status === 'completed' ? rental.totalAmount : rental.basePrice + overage.overageAmount,
+  };
+}
+
+/**
+ * Driver enters the drop OTP (verbal) to complete the rental. Freezes the final
+ * distance + overage + total. Completion is only allowed once the driver has
+ * agreed to overage IF the package limit was already crossed.
+ */
+export async function completeRental(rentalId: string, driverId: string, otp: string): Promise<{ total: number }> {
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    select: {
+      driverId: true, status: true, dropOtp: true, packageKey: true,
+      startedAt: true, hours: true, km: true, basePrice: true, overageAgreed: true,
+    },
+  });
+  if (!rental || rental.driverId !== driverId) throw new NotFoundError('Rental not found');
+  if (rental.status !== 'in_progress') throw new ValidationError('This rental is not in progress');
+  if (rental.dropOtp !== otp) throw new ValidationError('Incorrect drop OTP');
+
+  // Final GPS odometer.
+  const dist = await prisma.$queryRaw<Array<{ meters: number }>>`
+    SELECT COALESCE(SUM(seg), 0)::float AS meters FROM (
+      SELECT ST_Distance(point, LAG(point) OVER (ORDER BY recorded_at)) AS seg
+      FROM rental_location_logs WHERE rental_id = ${rentalId}
+    ) s
+  `;
+  const meters = dist[0]?.meters ?? 0;
+  const distanceKm = Math.round((meters / 1000) * 10) / 10;
+  const elapsedMin = rental.startedAt ? Math.max(0, Math.round((Date.now() - rental.startedAt.getTime()) / 60000)) : 0;
+  const overage = computeRentalOverage(rental.packageKey, elapsedMin, distanceKm);
+
+  // Gate: if the package limit was crossed, the driver must have agreed to the
+  // overage pop-up before the ride can be closed with a charge.
+  const limitReached = elapsedMin >= rental.hours * 60 || distanceKm >= rental.km;
+  if (limitReached && overage.overageAmount > 0 && !rental.overageAgreed) {
+    throw new ValidationError('Overage must be acknowledged before completing');
+  }
+
+  const total = rental.basePrice + overage.overageAmount;
+  await prisma.rental.update({
+    where: { id: rentalId },
+    data: {
+      status: 'completed',
+      completedAt: new Date(),
+      distanceM: meters,
+      overageHours: overage.overHours,
+      overageKm: overage.overKm,
+      overageAmount: overage.overageAmount,
+      totalAmount: total,
+    },
+  });
+  logger.info({ rentalId, driverId, distanceKm, overage: overage.overageAmount, total }, 'Rental completed (drop OTP verified)');
+  return { total };
+}
+
+/** Append a GPS breadcrumb for an in-progress rental (the odometer source). */
+export async function logRentalLocation(rentalId: string, driverId: string, lat: number, lng: number): Promise<void> {
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    select: { driverId: true, status: true },
+  });
+  if (!rental || rental.driverId !== driverId || rental.status !== 'in_progress') return; // silently ignore stale pings
+  await prisma.$executeRaw`
+    INSERT INTO rental_location_logs (id, rental_id, point, recorded_at)
+    VALUES (gen_random_uuid(), ${rentalId}, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, NOW())
+  `;
+}
+
+// Supervisor's rentals (newest first). Includes the full driver + vehicle
+// details and the OTPs — this is the ONLY place OTPs are surfaced, so the
+// supervisor can read them out to the driver.
 export async function listRentalsForSupervisor(supervisorId: string) {
   return prisma.rental.findMany({
     where: { supervisorId },
-    include: { driver: { select: { fullName: true, phone: true } } },
+    include: {
+      driver: {
+        select: {
+          fullName: true, phone: true, vehicleType: true,
+          vehicle: { select: { regNo: true, fuelType: true } },
+        },
+      },
+    },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -100,15 +294,28 @@ export async function listEligibleRentalsForDriver(driverId: string) {
 
   return prisma.rental.findMany({
     where: { status: 'broadcasting', vehicleType: driver.vehicleType },
-    include: { supervisor: { select: { fullName: true, org: true } } },
+    select: DRIVER_RENTAL_SELECT,
     orderBy: { createdAt: 'desc' },
   });
 }
+
+// Fields safe to return to the driver app. Critically this OMITS pickup_otp
+// and drop_otp — those live only on the supervisor's card; the driver types
+// them in. Includes the lifecycle state the driver card needs.
+const DRIVER_RENTAL_SELECT = {
+  id: true, customerName: true, customerPhone: true, vehicleType: true,
+  packageKey: true, hours: true, km: true, basePrice: true, extraPerKm: true,
+  extraPerHr: true, pickupAddress: true, scheduledFor: true, status: true,
+  notes: true, createdAt: true, acceptedAt: true, arrivedAt: true,
+  startedAt: true, overageStartedAt: true, overageAgreed: true, completedAt: true,
+  supervisor: { select: { fullName: true, org: true } },
+} satisfies Prisma.RentalSelect;
 
 // Rentals the driver currently holds (accepted / in progress).
 export async function listDriverRentals(driverId: string) {
   return prisma.rental.findMany({
     where: { driverId, status: { in: ['assigned', 'in_progress'] } },
+    select: DRIVER_RENTAL_SELECT,
     orderBy: { createdAt: 'desc' },
   });
 }

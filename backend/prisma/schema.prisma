@@ -104,9 +104,25 @@ model Rental {
   status         String    @default("broadcasting") // broadcasting | assigned | in_progress | completed | cancelled
   creditConsumed Boolean   @default(false) @map("credit_consumed")
   notes          String?
+
+  // ── Live ride lifecycle (Rental Rides) ──────────────────────────────────────
+  // OTPs are auto-generated at booking and read out verbally by the supervisor
+  // (shown only on the supervisor's Rental Ride card — no SMS).
+  pickupOtp      String?   @map("pickup_otp")        // 4-digit, driver enters at pickup
+  dropOtp        String?   @map("drop_otp")          // 4-digit, driver enters at drop
+  overageAgreed  Boolean   @default(false) @map("overage_agreed") // driver accepted the overage pop-up
+  distanceM      Float     @default(0) @map("distance_m")         // GPS odometer (metres) pickup→drop
+  overageHours   Float     @default(0) @map("overage_hours")      // billed extra hours (prorated)
+  overageKm      Float     @default(0) @map("overage_km")         // billed extra km (ceil)
+  overageAmount  Float     @default(0) @map("overage_amount")     // ₹ overage at completion
+  totalAmount    Float?    @map("total_amount")                   // base + overage, frozen at completion
+
   createdAt      DateTime  @default(now()) @map("created_at")
   acceptedAt     DateTime? @map("accepted_at")
-  completedAt    DateTime? @map("completed_at")
+  arrivedAt      DateTime? @map("arrived_at")        // driver confirmed arrival at pickup
+  startedAt      DateTime? @map("started_at")        // pickup OTP verified — timer + tracking start
+  overageStartedAt DateTime? @map("overage_started_at") // package limit hit + driver agreed
+  completedAt    DateTime? @map("completed_at")      // drop OTP verified — billing stops
 
   supervisor User    @relation("SupervisorRentals", fields: [supervisorId], references: [id])
   driver     Driver? @relation(fields: [driverId], references: [id])

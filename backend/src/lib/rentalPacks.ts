@@ -55,3 +55,48 @@ export function listRentalPacks(
     // matches the JSON — the card reads pack.basePrice.
     .map((p) => ({ ...p, basePrice: p.price, ...RENTAL_RATES[p.vehicleType] }));
 }
+
+export interface RentalOverage {
+  overHours: number;   // billable extra hours (prorated to the minute, 2 dp)
+  overKm: number;      // billable extra km (whole km, rounded up)
+  hoursAmount: number; // ₹ for the hours overage
+  kmAmount: number;    // ₹ for the km overage
+  overageAmount: number; // total ₹ overage
+}
+
+/**
+ * Compute a rental's overage, given the package and the actuals.
+ *
+ * Rules (confirmed with product):
+ *   • Hours are prorated by the minute:  extraPerHr × (overMinutes / 60).
+ *   • KM are billed per whole km over:   extraPerKm × ceil(overKm).
+ *   • Each dimension is billed independently — whichever limit is crossed
+ *     first starts accruing on that dimension; the other accrues only once it
+ *     too is exceeded.
+ *
+ * @param packKey    the rental's package key
+ * @param elapsedMin minutes since pickup-OTP (the live timer)
+ * @param distanceKm GPS-odometer distance since pickup, in km
+ */
+export function computeRentalOverage(
+  packKey: string,
+  elapsedMin: number,
+  distanceKm: number,
+): RentalOverage {
+  const pack = getRentalPack(packKey);
+  if (!pack) {
+    return { overHours: 0, overKm: 0, hoursAmount: 0, kmAmount: 0, overageAmount: 0 };
+  }
+
+  const includedMin = pack.hours * 60;
+  const overMin = Math.max(0, elapsedMin - includedMin);
+  const overHours = Math.round((overMin / 60) * 100) / 100;       // prorated, 2dp
+  const hoursAmount = Math.round(pack.extraPerHr * (overMin / 60));
+
+  const rawOverKm = Math.max(0, distanceKm - pack.km);
+  const overKm = Math.ceil(rawOverKm);                            // whole km over
+  const kmAmount = pack.extraPerKm * overKm;
+
+  const overageAmount = hoursAmount + kmAmount;
+  return { overHours, overKm, hoursAmount, kmAmount, overageAmount };
+}

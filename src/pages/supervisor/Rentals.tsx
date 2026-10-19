@@ -14,12 +14,14 @@ import {
 import { PlacesInput } from "@/components/PlacesInput";
 import {
   useRentalPacks, useRentals, useCreateRental, useCancelRental, useRemoveRental,
+  useRentalProgress,
   type RentalPack, type RentalRow,
 } from "@/lib/queries";
-import { ArrowRight, Route, Clock, IndianRupee, Car, Users, Phone, Trash2, Loader2, CalendarClock, X } from "lucide-react";
+import { ArrowRight, Route, Clock, IndianRupee, Car, Users, Phone, Trash2, Loader2, CalendarClock, X, KeyRound, Gauge, Timer, MapPin, CheckCircle2, CircleDot } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Rentals() {
+  const [section, setSection] = useState<"book" | "rides">("book");
   const [vehicleType, setVehicleType] = useState<"sedan" | "suv">("sedan");
   const { data: packsData } = useRentalPacks(vehicleType);
   const { data: rentalsData } = useRentals();
@@ -29,6 +31,10 @@ export default function Rentals() {
 
   const packs = packsData?.packs ?? [];
   const rentals = rentalsData?.rentals ?? [];
+
+  // Rides tab tracks everything that's progressed past broadcasting.
+  const rideStatuses = ["assigned", "in_progress", "completed"];
+  const rentalRides = rentals.filter((r) => rideStatuses.includes(r.status));
 
   const [bookPack, setBookPack] = useState<RentalPack | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
@@ -40,6 +46,28 @@ export default function Rentals() {
         description="Book a Sedan or SUV rental for a customer. Any eligible opted-in driver in the fleet can accept it."
       />
 
+      {/* Section switch — Book vs live Rental Rides */}
+      <Tabs value={section} onValueChange={(v) => setSection(v as "book" | "rides")} className="mb-5">
+        <TabsList>
+          <TabsTrigger value="book"><Car className="h-3.5 w-3.5 mr-1.5" /> Book</TabsTrigger>
+          <TabsTrigger value="rides">
+            <Route className="h-3.5 w-3.5 mr-1.5" /> Rental Rides
+            {rentalRides.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-gold text-gold-foreground text-[10px] font-bold">
+                {rentalRides.length}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {section === "rides" ? (
+        <RentalRidesSection rides={rentalRides} onRemove={(id) => removeRental.mutate(id, {
+          onSuccess: () => toast.success("Rental removed"),
+          onError: (e: any) => toast.error(e?.message ?? "Failed to remove"),
+        })} />
+      ) : (
+      <>
       {/* Vehicle type selector */}
       <Tabs value={vehicleType} onValueChange={(v) => setVehicleType(v as "sedan" | "suv")} className="mb-5">
         <TabsList>
@@ -79,6 +107,8 @@ export default function Rentals() {
             />
           ))}
         </div>
+      )}
+      </>
       )}
 
       {/* Book dialog */}
@@ -219,6 +249,159 @@ function RentalRowCard({ rental: r, onCancel, onRemove }: { rental: RentalRow; o
       </CardContent>
     </Card>
   );
+}
+
+// ─── Rental Rides (live tracking) ────────────────────────────────────────────
+function RentalRidesSection({ rides, onRemove }: { rides: RentalRow[]; onRemove: (id: string) => void }) {
+  if (rides.length === 0) {
+    return (
+      <Card className="shadow-card"><CardContent className="py-12 text-center text-sm text-muted-foreground">
+        No rental rides yet. Once a driver accepts a rental it shows up here with live tracking.
+      </CardContent></Card>
+    );
+  }
+  // Active rides first (assigned / in_progress), then completed — capped height.
+  const active = rides.filter((r) => r.status === "assigned" || r.status === "in_progress");
+  const done = rides.filter((r) => r.status === "completed");
+  return (
+    <div className="space-y-4 max-h-[640px] overflow-y-auto pr-1">
+      {active.map((r) => <RentalRideCard key={r.id} rental={r} />)}
+      {done.length > 0 && (
+        <>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium pt-1">Completed ({done.length})</div>
+          {done.map((r) => <RentalRideCard key={r.id} rental={r} onRemove={() => onRemove(r.id)} />)}
+        </>
+      )}
+    </div>
+  );
+}
+
+function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?: () => void }) {
+  // Poll live progress only while the ride is actually running.
+  const live = r.status === "in_progress";
+  const { data: progress } = useRentalProgress(r.id, "supervisor", live || r.status === "completed");
+
+  const statusMeta: Record<string, { label: string; cls: string; Icon: typeof CircleDot }> = {
+    assigned:    { label: "Assigned — en route", cls: "border-gold/50 text-gold-dark bg-gold/10", Icon: CircleDot },
+    in_progress: { label: "In progress", cls: "border-sky-500/40 text-sky-600 bg-sky-500/5", Icon: CircleDot },
+    completed:   { label: "Completed", cls: "border-success/40 text-success bg-success/5", Icon: CheckCircle2 },
+  };
+  const sm = statusMeta[r.status] ?? statusMeta.assigned;
+
+  const elapsed = progress ? fmtDuration(progress.elapsedMin) : null;
+  const overageLive = progress?.overage.overageAmount ?? 0;
+  const total = progress?.finalTotal ?? r.basePrice;
+
+  return (
+    <Card className="shadow-card overflow-hidden">
+      {/* Header: customer + status */}
+      <div className="bg-foreground text-background px-4 py-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-semibold text-sm flex items-center gap-2">
+            {r.customerName}
+            <Badge variant="outline" className="capitalize text-[10px] border-background/30 text-background">{r.vehicleType}</Badge>
+          </div>
+          <div className="text-[11px] text-background/70 flex items-center gap-1 mt-0.5">
+            <Phone className="h-3 w-3" /> {r.customerPhone}
+          </div>
+        </div>
+        <Badge variant="outline" className={`capitalize ${sm.cls}`}><sm.Icon className="h-3 w-3 mr-1" />{sm.label}</Badge>
+      </div>
+
+      <CardContent className="p-4 space-y-3">
+        {/* Driver + vehicle details */}
+        {r.driver ? (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <div><span className="text-muted-foreground">Driver</span> <span className="font-medium">{r.driver.fullName}</span></div>
+            <div><span className="text-muted-foreground">Mobile</span> <a href={`tel:${r.driver.phone}`} className="font-medium text-gold-dark">{r.driver.phone}</a></div>
+            <div><span className="text-muted-foreground">Vehicle No.</span> <span className="font-medium font-mono">{r.driver.vehicle?.regNo ?? "—"}</span></div>
+            <div><span className="text-muted-foreground">Model</span> <span className="font-medium capitalize">{r.driver.vehicleType ?? r.vehicleType}{r.driver.vehicle?.fuelType ? ` · ${r.driver.vehicle.fuelType}` : ""}</span></div>
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">Waiting for a driver…</div>
+        )}
+
+        {/* OTPs — supervisor reads these out to the driver */}
+        <div className="grid grid-cols-2 gap-3">
+          <OtpChip label="Pickup OTP" otp={r.pickupOtp} used={!!r.startedAt} />
+          <OtpChip label="Drop OTP" otp={r.dropOtp} used={r.status === "completed"} />
+        </div>
+
+        {/* Package + pickup */}
+        <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+          <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {r.hours}h · {r.km}km pack</span>
+          <span className="flex items-center gap-1 font-semibold text-foreground"><IndianRupee className="h-3 w-3" />{r.basePrice} base</span>
+        </div>
+        <div className="flex items-start gap-1.5 text-xs">
+          <MapPin className="h-3.5 w-3.5 text-gold mt-0.5 shrink-0" />
+          <span className="text-muted-foreground">{r.pickupAddress}</span>
+        </div>
+
+        {/* Live meters — timer + distance, shown once in progress/completed */}
+        {(r.status === "in_progress" || r.status === "completed") && progress && (
+          <div className="grid grid-cols-2 gap-3">
+            <Meter Icon={Timer} label="Elapsed" value={elapsed ?? "—"} sub={`of ${progress.includedHours}h`} warn={progress.elapsedMin >= progress.includedHours * 60} />
+            <Meter Icon={Gauge} label="Distance" value={`${progress.distanceKm} km`} sub={`of ${progress.includedKm} km`} warn={progress.distanceKm >= progress.includedKm} />
+          </div>
+        )}
+
+        {/* Overage + total */}
+        {(r.status === "in_progress" || r.status === "completed") && progress && (
+          <div className={`rounded-md px-3 py-2 text-sm flex items-center justify-between ${overageLive > 0 ? "bg-amber-500/10 border border-amber-500/30" : "bg-muted/50"}`}>
+            <div>
+              <div className="text-xs text-muted-foreground">Overage {progress.overageAgreed ? "" : r.status === "in_progress" && progress.limitReached ? "(awaiting driver OK)" : ""}</div>
+              <div className="font-semibold flex items-center gap-1"><IndianRupee className="h-3.5 w-3.5" />{progress.finalOverageAmount}</div>
+              {(progress.overage.overHours > 0 || progress.overage.overKm > 0) && (
+                <div className="text-[11px] text-muted-foreground">
+                  {progress.overage.overHours > 0 && `+${progress.overage.overHours}h (₹${progress.overage.hoursAmount})`}
+                  {progress.overage.overHours > 0 && progress.overage.overKm > 0 && " · "}
+                  {progress.overage.overKm > 0 && `+${progress.overage.overKm}km (₹${progress.overage.kmAmount})`}
+                </div>
+              )}
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-muted-foreground">Total</div>
+              <div className="font-bold text-lg flex items-center gap-0.5"><IndianRupee className="h-4 w-4" />{total}</div>
+            </div>
+          </div>
+        )}
+
+        {r.status === "completed" && onRemove && (
+          <Button variant="ghost" size="sm" className="w-full text-muted-foreground hover:text-destructive" onClick={onRemove}>
+            <X className="h-3.5 w-3.5" /> Remove from list
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OtpChip({ label, otp, used }: { label: string; otp?: string | null; used?: boolean }) {
+  return (
+    <div className={`rounded-md border px-3 py-2 ${used ? "border-success/40 bg-success/5" : "border-gold/40 bg-gold/5"}`}>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+        <KeyRound className="h-3 w-3" /> {label} {used && <CheckCircle2 className="h-3 w-3 text-success" />}
+      </div>
+      <div className="font-mono font-bold text-xl tracking-[0.3em]">{otp ?? "····"}</div>
+    </div>
+  );
+}
+
+function Meter({ Icon, label, value, sub, warn }: { Icon: typeof Timer; label: string; value: string; sub: string; warn?: boolean }) {
+  return (
+    <div className={`rounded-md px-3 py-2 ${warn ? "bg-amber-500/10 border border-amber-500/30" : "bg-muted/50"}`}>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1"><Icon className="h-3 w-3" /> {label}</div>
+      <div className="font-bold text-lg">{value}</div>
+      <div className="text-[11px] text-muted-foreground">{sub}</div>
+    </div>
+  );
+}
+
+// Format minutes as "Hh Mm".
+function fmtDuration(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 // ─── Book dialog ──────────────────────────────────────────────────────────────

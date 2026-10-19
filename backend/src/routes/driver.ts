@@ -31,6 +31,12 @@ import {
   listDriverRentals,
   acceptRental,
   releaseRental,
+  rentalArrived,
+  startRental,
+  agreeRentalOverage,
+  completeRental,
+  getRentalProgress,
+  logRentalLocation,
 } from '../services/rental.service';
 import type { AuthRequest } from '../types';
 import type { Server as IoServer } from 'socket.io';
@@ -321,6 +327,66 @@ router.post('/upi', async (req: AuthRequest, res: Response, next: NextFunction) 
   router.post('/rentals/:id/release', async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       res.json(await releaseRental(req.params.id, req.driver!.id));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/arrived — driver confirms arrival at pickup
+  router.post('/rentals/:id/arrived', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await rentalArrived(req.params.id, req.driver!.id);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/start — driver enters pickup OTP (timer starts)
+  router.post('/rentals/:id/start', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { otp } = z.object({ otp: z.string().min(4).max(6) }).parse(req.body);
+      res.json(await startRental(req.params.id, req.driver!.id, otp));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/agree-overage — driver accepts the overage pop-up
+  router.post('/rentals/:id/agree-overage', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await agreeRentalOverage(req.params.id, req.driver!.id);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/complete — driver enters drop OTP (billing stops)
+  router.post('/rentals/:id/complete', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { otp } = z.object({ otp: z.string().min(4).max(6) }).parse(req.body);
+      res.json(await completeRental(req.params.id, req.driver!.id, otp));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/driver/rentals/:id/progress — live timer/distance/overage
+  router.get('/rentals/:id/progress', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json(await getRentalProgress(req.params.id));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/location — GPS breadcrumb for the odometer
+  router.post('/rentals/:id/location', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { lat, lng } = LocationSchema.parse(req.body);
+      await logRentalLocation(req.params.id, req.driver!.id, lat, lng);
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }

@@ -7,13 +7,14 @@ import {
   useDriverMe, useDriverOffers, useDriverRides,
   useGoOnline, useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
   useRide, useMarkDriverArrived, useRouteMatrix, useDriverCancelRide, useReleaseQueuedRide,
-  useDriverRentalsAvailable, useDriverRentalsMine, useAcceptRental, useReleaseRental,
+  useDriverRentalsAvailable, useDriverRentalsMine, useAcceptRental,
   type RideRow, type RentalRow,
 } from "@/lib/queries";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind, CarFront, Phone } from "lucide-react";
 import { rideArea } from "@/lib/rideArea";
+import { DriverRentalRide } from "./DriverRentalRide";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
@@ -52,7 +53,6 @@ export default function DriverHome() {
   const { data: rentalsMine } = useDriverRentalsMine();
   const myRentals = rentalsMine?.rentals ?? [];
   const acceptRental = useAcceptRental();
-  const releaseRental = useReleaseRental();
   // Rentals the driver dismissed (declined) this session. Rentals have no
   // per-driver offer row to reject server-side (they broadcast fleet-wide), so
   // declining just hides it locally until the next app session — mirroring how
@@ -449,16 +449,7 @@ export default function DriverHome() {
                   <CarFront className="h-3.5 w-3.5 text-gold" /> Your rentals ({myRentals.length})
                 </div>
                 {myRentals.map((r) => (
-                  <RentalCard
-                    key={r.id}
-                    rental={r}
-                    held
-                    onRelease={() => releaseRental.mutate(r.id, {
-                      onSuccess: () => toast("Rental released — credit refunded"),
-                      onError: (e: any) => toast.error(e?.message ?? "Failed to release"),
-                    })}
-                    releasing={releaseRental.isPending}
-                  />
+                  <DriverRentalRide key={r.id} rental={r} />
                 ))}
               </div>
             )}
@@ -750,18 +741,15 @@ function RentalStack({
 // ─── Rental card ──────────────────────────────────────────────────────────────
 // Styled to match the regular broadcast card (DriverOfferCard): dark fare
 // header with the gold amount + badges, pickup block with the locality picked
-// out, a package meta row, then Accept + decline(X). `held` = a rental the
-// driver already took, where the X becomes a Release action (refunds credit).
+// out, a package meta row, then Accept + decline(X). Used for available
+// broadcast rentals only — held rentals render via DriverRentalRide.
 function RentalCard({
-  rental: r, held, onAccept, onDecline, onRelease, accepting, releasing,
+  rental: r, onAccept, onDecline, accepting,
 }: {
   rental: RentalRow;
-  held?: boolean;
   onAccept?: () => void;
   onDecline?: () => void;
-  onRelease?: () => void;
   accepting?: boolean;
-  releasing?: boolean;
 }) {
   return (
     <Card className="overflow-hidden border-gold/30">
@@ -823,36 +811,25 @@ function RentalCard({
 
         {r.notes && <div className="text-xs text-muted-foreground italic">“{r.notes}”</div>}
 
-        {/* Actions — Accept + decline(X), or Release when held */}
-        {held ? (
+        {/* Actions — Accept + decline(X) */}
+        <div className="flex gap-2">
+          <Button
+            className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90 h-10"
+            disabled={accepting}
+            onClick={onAccept}
+          >
+            <Check className="h-4 w-4" /> Accept rental (1 credit)
+          </Button>
           <Button
             variant="outline"
-            className="w-full h-10 text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40"
-            disabled={releasing}
-            onClick={onRelease}
+            size="icon"
+            className="h-10 w-10 shrink-0 text-muted-foreground"
+            onClick={onDecline}
+            aria-label="Decline rental"
           >
-            <X className="h-4 w-4" /> Release rental (refunds credit)
+            <X className="h-4 w-4" />
           </Button>
-        ) : (
-          <div className="flex gap-2">
-            <Button
-              className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90 h-10"
-              disabled={accepting}
-              onClick={onAccept}
-            >
-              <Check className="h-4 w-4" /> Accept rental (1 credit)
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-10 w-10 shrink-0 text-muted-foreground"
-              onClick={onDecline}
-              aria-label="Decline rental"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
+        </div>
       </CardContent>
     </Card>
   );
