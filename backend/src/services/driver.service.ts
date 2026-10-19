@@ -216,6 +216,15 @@ export async function findNearbyDrivers(
           AND q.status = 'assigned'
           AND q.queued_behind_ride_id IS NOT NULL
       )
+      -- Active-rental gate: a driver on a rental (accepted → until drop OTP) is
+      -- busy with a secondary service and must NOT receive normal broadcasts.
+      -- Rentals are open-ended (no fixed drop), so there's no "finishing"
+      -- exception — the driver frees up only when the rental completes.
+      AND NOT EXISTS (
+        SELECT 1 FROM rentals rt
+        WHERE rt.driver_id = drivers.id
+          AND rt.status IN ('assigned', 'in_progress')
+      )
       -- Credit gate: only drivers with at least one available ride credit
       AND EXISTS (
         SELECT 1 FROM credit_packs cp
@@ -279,6 +288,13 @@ export async function setDriverOnlineStatus(
 // this as a scrollable list. Soonest-expiring first, since those need action
 // first.
 export async function listDriverOffers(driverId: string) {
+  // Safety net: a driver busy on a rental sees no broadcasts, even if offer
+  // rows were created before they accepted the rental.
+  const onRental = await prisma.rental.count({
+    where: { driverId, status: { in: ['assigned', 'in_progress'] } },
+  });
+  if (onRental > 0) return [];
+
   const offers = await prisma.rideOffer.findMany({
     where: { driverId, response: 'pending', ride: { status: 'broadcasting' } },
     include: {
@@ -347,6 +363,10 @@ export async function listDriverOffers(driverId: string) {
 // on the Rides tab badge without re-deriving it from the (already uncapped)
 // offers list on every render.
 export async function countDriverOffers(driverId: string): Promise<number> {
+  const onRental = await prisma.rental.count({
+    where: { driverId, status: { in: ['assigned', 'in_progress'] } },
+  });
+  if (onRental > 0) return 0;
   return prisma.rideOffer.count({
     where: { driverId, response: 'pending', ride: { status: 'broadcasting' } },
   });

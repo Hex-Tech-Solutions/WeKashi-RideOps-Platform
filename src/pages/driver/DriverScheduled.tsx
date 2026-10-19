@@ -4,6 +4,7 @@ import { useScheduledRides, useDriverRides, useClaimRide, useReleaseRide } from 
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { DriverOfferCard } from "./DriverOfferCard";
+import { DriverRentalBrowse } from "./DriverRentalBrowse";
 
 export default function DriverScheduled() {
   const { data: mkt } = useScheduledRides();
@@ -74,6 +75,9 @@ export default function DriverScheduled() {
           </div>
         )}
       </section>
+
+      {/* Rentals — a secondary service a free driver can pick up. */}
+      <DriverRentalBrowse />
     </div>
   );
 }

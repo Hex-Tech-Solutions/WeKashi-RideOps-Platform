@@ -752,6 +752,13 @@ export async function nearbyDriversForRide(rideId: string, radiusKm: number) {
           AND q.status = 'assigned'
           AND q.queued_behind_ride_id IS NOT NULL
       )
+      -- Active-rental gate: skip drivers busy on a rental (mirrors the
+      -- broadcast gate in findNearbyDrivers).
+      AND NOT EXISTS (
+        SELECT 1 FROM rentals rt
+        WHERE rt.driver_id = d.id
+          AND rt.status IN ('assigned', 'in_progress')
+      )
       -- Credit gate: only drivers with at least one available ride credit
       AND EXISTS (
         SELECT 1 FROM credit_packs cp

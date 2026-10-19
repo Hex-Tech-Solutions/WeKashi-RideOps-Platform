@@ -7,13 +7,12 @@ import {
   useDriverMe, useDriverOffers, useDriverRides,
   useGoOnline, useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
   useRide, useMarkDriverArrived, useRouteMatrix, useDriverCancelRide, useReleaseQueuedRide,
-  useDriverRentalsAvailable, useDriverRentalsMine, useAcceptRental,
-  type RideRow, type RentalRow,
+  useDriverRentalsMine,
+  type RideRow,
 } from "@/lib/queries";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind, CarFront, Phone } from "lucide-react";
-import { rideArea } from "@/lib/rideArea";
+import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind, CarFront } from "lucide-react";
 import { DriverRentalRide } from "./DriverRentalRide";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
@@ -48,17 +47,11 @@ export default function DriverHome() {
   const offers = offersData?.offers ?? [];
   const rides = ridesData?.rides ?? [];
 
-  // ── Rentals — fleet-wide bookings the driver opted into (Sedan/SUV) ───────
-  const { data: rentalsAvail } = useDriverRentalsAvailable();
+  // ── Rentals — only the driver's ACTIVE (accepted/in-progress) rental shows
+  // on the Rides tab, as their current job. Browsing/claiming available rentals
+  // lives on the Scheduled tab (a secondary service). ────────────────────────
   const { data: rentalsMine } = useDriverRentalsMine();
   const myRentals = rentalsMine?.rentals ?? [];
-  const acceptRental = useAcceptRental();
-  // Rentals the driver dismissed (declined) this session. Rentals have no
-  // per-driver offer row to reject server-side (they broadcast fleet-wide), so
-  // declining just hides it locally until the next app session — mirroring how
-  // a driver passes on a ride they don't want.
-  const [dismissedRentals, setDismissedRentals] = useState<Set<string>>(new Set());
-  const availableRentals = (rentalsAvail?.rentals ?? []).filter((r) => !dismissedRentals.has(r.id));
 
   // Scheduled-ride timing gates: a claimed scheduled ride only surfaces as an
   // ACTIVE ride 45 min before pickup (enough lead to navigate + confirm
@@ -441,44 +434,17 @@ export default function DriverHome() {
             Only rendered while online, mirroring ride broadcasts. The server
             gates eligibility (opt-in, vehicle type, credits, not on a ride),
             so an empty list here means "nothing you can take right now". */}
-        {(myRentals.length > 0 || (online && availableRentals.length > 0)) && (
+        {/* Active rental — the driver's current job. Always shows regardless of
+            online state (once accepted it must not vanish on a GPS hiccup).
+            Browsing/claiming new rentals lives on the Scheduled tab. */}
+        {myRentals.length > 0 && (
           <div className="px-4 pb-2 space-y-3">
-            {/* Held rentals ALWAYS show, regardless of online state — once a
-                driver has accepted a rental it's their active job and must not
-                vanish if `isOnline` briefly flips (GPS hiccup / app resume). */}
-            {myRentals.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <CarFront className="h-3.5 w-3.5 text-gold" /> Your rentals ({myRentals.length})
-                </div>
-                {myRentals.map((r) => (
-                  <DriverRentalRide key={r.id} rental={r} />
-                ))}
-              </div>
-            )}
-
-            {online && availableRentals.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <CarFront className="h-3.5 w-3.5 text-gold" /> Rental broadcasts
-                  <span className="ml-0.5 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-gold text-gold-foreground text-[11px] font-bold">
-                    {availableRentals.length}
-                  </span>
-                </div>
-                <RentalStack
-                  rentals={availableRentals}
-                  accepting={acceptRental.isPending}
-                  onAccept={(id) => acceptRental.mutate(id, {
-                    onSuccess: () => toast.success("Rental accepted — 1 credit used"),
-                    onError: (e: any) => toast.error(e?.message ?? "Rental no longer available"),
-                  })}
-                  onDecline={(id) => {
-                    setDismissedRentals((s) => new Set(s).add(id));
-                    toast("Rental dismissed");
-                  }}
-                />
-              </div>
-            )}
+            <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <CarFront className="h-3.5 w-3.5 text-gold" /> Your rental ({myRentals.length})
+            </div>
+            {myRentals.map((r) => (
+              <DriverRentalRide key={r.id} rental={r} />
+            ))}
           </div>
         )}
 
@@ -677,164 +643,6 @@ function RideSummary({ ride }: { ride: RideRow }) {
         )}
       </div>
     </div>
-  );
-}
-
-// Format a rental's scheduled pickup for display. A rental with no scheduled
-// time is dispatched immediately, shown as "Now".
-function rentalPickup(scheduledFor?: string | null): string {
-  if (!scheduledFor) return "Now";
-  const d = new Date(scheduledFor);
-  if (isNaN(d.getTime())) return "Now";
-  return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-// ─── Rental stack ─────────────────────────────────────────────────────────────
-// Renders available rentals as a card deck instead of an infinite list: the
-// top rental is fully shown and actionable, with up to two cards peeking behind
-// it (max 3 visible layers) to signal "there are more". Accepting/declining the
-// top card surfaces the next one. The count lives in the section header badge.
-function RentalStack({
-  rentals, onAccept, onDecline, accepting,
-}: {
-  rentals: RentalRow[];
-  onAccept: (id: string) => void;
-  onDecline: (id: string) => void;
-  accepting?: boolean;
-}) {
-  const top = rentals[0];
-  if (!top) return null;
-  // Number of peek layers behind the top card (0, 1, or 2).
-  const peek = Math.min(rentals.length - 1, 2);
-
-  return (
-    <div className="relative" style={{ paddingBottom: peek * 10 }}>
-      {/* Peek layers — purely decorative, drawn behind + below the top card.
-          Rendered back-to-front so the nearest one overlaps the furthest. */}
-      {Array.from({ length: peek }).map((_, i) => {
-        const depth = peek - i; // 2 for the furthest, 1 for the nearest
-        return (
-          <div
-            key={`peek-${depth}`}
-            aria-hidden
-            className="absolute inset-x-0 top-0 rounded-xl border border-gold/20 bg-card shadow-card"
-            style={{
-              height: 56,
-              transform: `translateY(${depth * 10}px) scale(${1 - depth * 0.04})`,
-              zIndex: 0,
-              opacity: 1 - depth * 0.25,
-            }}
-          />
-        );
-      })}
-
-      {/* Top, interactive card */}
-      <div className="relative" style={{ zIndex: 1 }}>
-        <RentalCard
-          rental={top}
-          onAccept={() => onAccept(top.id)}
-          onDecline={() => onDecline(top.id)}
-          accepting={accepting}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ─── Rental card ──────────────────────────────────────────────────────────────
-// Styled to match the regular broadcast card (DriverOfferCard): dark fare
-// header with the gold amount + badges, pickup block with the locality picked
-// out, a package meta row, then Accept + decline(X). Used for available
-// broadcast rentals only — held rentals render via DriverRentalRide.
-function RentalCard({
-  rental: r, onAccept, onDecline, accepting,
-}: {
-  rental: RentalRow;
-  onAccept?: () => void;
-  onDecline?: () => void;
-  accepting?: boolean;
-}) {
-  return (
-    <Card className="overflow-hidden border-gold/30">
-      {/* Fare header — mirrors the broadcast card */}
-      <div className="bg-foreground text-background px-4 py-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-widest text-background/50 font-medium">You earn</div>
-            <div className="flex items-baseline gap-1 leading-none">
-              <span className="text-4xl font-extrabold text-gold tracking-tight">₹{r.basePrice}</span>
-            </div>
-            <div className="text-[11px] text-background/70 mt-0.5">
-              ₹{r.extraPerKm}/extra km · ₹{r.extraPerHr}/extra hr
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[55%]">
-            <Badge className="bg-gold/20 text-gold border border-gold/40 gap-1 text-[10px] px-2 py-0.5 font-semibold">
-              <CarFront className="h-2.5 w-2.5" /> Rental
-            </Badge>
-            <Badge variant="outline" className="capitalize text-[10px] px-2 py-0.5 border-background/30 text-background">
-              {r.vehicleType}
-            </Badge>
-            <Badge variant="outline" className="text-[10px] px-2 py-0.5 border-background/30 text-background">
-              {r.hours}h · {r.km}km
-            </Badge>
-          </div>
-        </div>
-      </div>
-
-      <CardContent className="p-3 space-y-2.5">
-        {/* Customer */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="font-semibold text-sm">{r.customerName}</div>
-          <a href={`tel:${r.customerPhone}`} className="text-xs text-gold-dark flex items-center gap-1">
-            <Phone className="h-3 w-3" /> {r.customerPhone}
-          </a>
-        </div>
-
-        {/* Pickup time — prominent row like the broadcast card's schedule row. */}
-        <div className="flex items-center gap-2 text-sm rounded-md bg-muted/50 px-3 py-2">
-          <Timer className="h-4 w-4 text-gold-dark" />
-          <span className="text-muted-foreground">Pickup</span>
-          <span className="font-bold text-foreground font-mono text-base">{rentalPickup(r.scheduledFor)}</span>
-        </div>
-
-        {/* Pickup — locality picked out above the full address, same as broadcast */}
-        <a
-          href={mapsUrlForAddress(r.pickupAddress)}
-          target="_blank"
-          rel="noreferrer"
-          className="relative pl-4 block"
-        >
-          <span className="absolute left-[3px] top-1.5 h-1.5 w-1.5 rounded-full bg-gold ring-2 ring-gold/20" />
-          {rideArea(r.pickupAddress) && (
-            <div className="text-sm font-semibold text-foreground leading-tight">{rideArea(r.pickupAddress)}</div>
-          )}
-          <div className="text-xs text-muted-foreground leading-snug break-words">{r.pickupAddress}</div>
-        </a>
-
-        {r.notes && <div className="text-xs text-muted-foreground italic">“{r.notes}”</div>}
-
-        {/* Actions — Accept + decline(X) */}
-        <div className="flex gap-2">
-          <Button
-            className="flex-1 bg-gold text-gold-foreground hover:bg-gold/90 h-10"
-            disabled={accepting}
-            onClick={onAccept}
-          >
-            <Check className="h-4 w-4" /> Accept rental (1 credit)
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-10 w-10 shrink-0 text-muted-foreground"
-            onClick={onDecline}
-            aria-label="Decline rental"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
