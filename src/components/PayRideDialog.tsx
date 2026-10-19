@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { QRCodeSVG } from "qrcode.react";
-import { useRidePayQr, useMarkRidePaid, type PendingPaymentRide } from "@/lib/queries";
+import { useRidePayQr, useMarkRidePaid, useMarkRentalPaid, type PendingPaymentRide } from "@/lib/queries";
 import {
   IndianRupee, CheckCircle2, Loader2, AlertCircle, Smartphone, Car,
 } from "lucide-react";
@@ -29,18 +29,38 @@ interface Props {
  * returns 409 and we show a clear message instead.
  */
 export function PayRideDialog({ ride, onClose }: Props) {
-  const { data: qr, isLoading, error } = useRidePayQr(ride?.id);
+  const isRental = ride?.kind === "rental";
+  // Rentals carry their pay intent inline on the list row, so skip the ride-only
+  // pay-qr fetch for them.
+  const { data: qr, isLoading, error } = useRidePayQr(isRental ? undefined : ride?.id);
   const markPaid = useMarkRidePaid();
+  const markRentalPaid = useMarkRentalPaid();
   const [markedPaid, setMarkedPaid] = useState(false);
   const [txnRef, setTxnRef] = useState("");
 
-  const amount = qr?.amount ?? ride?.amount ?? ((ride?.price ?? 0) + (ride?.escortCharge ?? 0));
-  const noUpi = !!error; // 409 when driver has no verified UPI
+  // For rentals, build the QR view from the row's own fields.
+  const rentalQr = isRental && ride?.upiIntent
+    ? { upiIntent: ride.upiIntent, payeeName: ride.payeeName ?? ride.driver?.fullName ?? "Driver", amount: ride.amount }
+    : null;
+  const effectiveQr = isRental ? rentalQr : qr;
+
+  const amount = effectiveQr?.amount ?? ride?.amount ?? ((ride?.price ?? 0) + (ride?.escortCharge ?? 0));
+  // Ride: 409 error means no UPI. Rental: no inline intent means no UPI.
+  const noUpi = isRental ? (!!ride && !ride.upiIntent) : !!error;
+  const loading = isRental ? false : isLoading;
+  const busy = isRental ? markRentalPaid.isPending : markPaid.isPending;
 
   const handleClose = () => { setMarkedPaid(false); setTxnRef(""); onClose(); };
 
   const submitPaid = () => {
     if (!ride) return;
+    if (isRental) {
+      markRentalPaid.mutate(ride.id, {
+        onSuccess: () => setMarkedPaid(true),
+        onError: (e: any) => toast.error(e?.message ?? "Could not mark as paid"),
+      });
+      return;
+    }
     if (!/^\d{4}$/.test(txnRef)) { toast.error("Enter the last 4 digits of the transaction ID"); return; }
     markPaid.mutate(
       { rideId: ride.id, txnRef },
@@ -116,7 +136,7 @@ export function PayRideDialog({ ride, onClose }: Props) {
                   </div>
                 )}
 
-                {isLoading && (
+                {loading && (
                   <div className="flex items-center justify-center py-8 text-muted-foreground gap-2">
                     <Loader2 className="h-5 w-5 animate-spin" /> Loading QR…
                   </div>
@@ -132,20 +152,28 @@ export function PayRideDialog({ ride, onClose }: Props) {
                   </div>
                 )}
 
-                {qr && !isLoading && (
+                {effectiveQr && !loading && (
                   <>
                     <div className="rounded-xl border-2 border-gold/30 bg-gold/5 p-4 flex flex-col items-center gap-3">
                       <div className="bg-white p-3 rounded-lg">
-                        <QRCodeSVG value={qr.upiIntent} size={180} includeMargin={false} />
+                        <QRCodeSVG value={effectiveQr.upiIntent} size={180} includeMargin={false} />
                       </div>
                       <div className="text-center">
                         <div className="text-xs text-muted-foreground uppercase tracking-wider">Pay to</div>
-                        <div className="font-semibold">{qr.payeeName}</div>
+                        <div className="font-semibold">{effectiveQr.payeeName}</div>
                         <div className="text-2xl font-bold flex items-center justify-center gap-0.5 mt-1">
-                          <IndianRupee className="h-5 w-5" />{qr.amount.toLocaleString()}
+                          <IndianRupee className="h-5 w-5" />{effectiveQr.amount.toLocaleString()}
                         </div>
                       </div>
                     </div>
+
+                    {/* Rental fare breakdown */}
+                    {isRental && (ride?.overageAmount ?? 0) > 0 && (
+                      <div className="rounded-lg border bg-muted/30 p-2.5 space-y-1 text-xs">
+                        <div className="flex justify-between text-muted-foreground"><span>Base package</span><span>₹{(ride?.basePrice ?? 0).toLocaleString()}</span></div>
+                        <div className="flex justify-between text-muted-foreground"><span>Overage</span><span>₹{(ride?.overageAmount ?? 0).toLocaleString()}</span></div>
+                      </div>
+                    )}
 
                     <div className="text-[11px] text-muted-foreground flex items-start gap-1.5">
                       <Smartphone className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -155,31 +183,33 @@ export function PayRideDialog({ ride, onClose }: Props) {
 
                     <Separator />
 
-                    {/* After paying, record the last 4 digits of the UPI UTR */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Last 4 digits of UTR ID</Label>
-                      <Input
-                        value={txnRef}
-                        onChange={(e) => setTxnRef(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                        inputMode="numeric"
-                        maxLength={4}
-                        placeholder="e.g. 4821"
-                        className="h-10 font-mono tracking-widest text-center"
-                      />
-                      <p className="text-[11px] text-muted-foreground">
-                        Find the UTR in your UPI app's payment receipt. The driver sees it to confirm they
-                        received the payment.
-                      </p>
-                    </div>
+                    {/* Rides capture a UTR ref; rentals are a simple confirm. */}
+                    {!isRental && (
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Last 4 digits of UTR ID</Label>
+                        <Input
+                          value={txnRef}
+                          onChange={(e) => setTxnRef(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                          inputMode="numeric"
+                          maxLength={4}
+                          placeholder="e.g. 4821"
+                          className="h-10 font-mono tracking-widest text-center"
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          Find the UTR in your UPI app's payment receipt. The driver sees it to confirm they
+                          received the payment.
+                        </p>
+                      </div>
+                    )}
 
                     <Button
                       className="w-full bg-gold text-gold-foreground hover:bg-gold/90 h-11 text-sm font-semibold"
                       onClick={submitPaid}
-                      disabled={markPaid.isPending || txnRef.length !== 4}
+                      disabled={busy || (!isRental && txnRef.length !== 4)}
                     >
-                      {markPaid.isPending
+                      {busy
                         ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
-                        : <><CheckCircle2 className="h-4 w-4" /> Save as paid</>}
+                        : <><CheckCircle2 className="h-4 w-4" /> {isRental ? "Mark as paid" : "Save as paid"}</>}
                     </Button>
                   </>
                 )}

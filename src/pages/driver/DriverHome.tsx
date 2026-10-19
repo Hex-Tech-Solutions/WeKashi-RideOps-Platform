@@ -441,8 +441,11 @@ export default function DriverHome() {
             Only rendered while online, mirroring ride broadcasts. The server
             gates eligibility (opt-in, vehicle type, credits, not on a ride),
             so an empty list here means "nothing you can take right now". */}
-        {online && (myRentals.length > 0 || availableRentals.length > 0) && (
+        {(myRentals.length > 0 || (online && availableRentals.length > 0)) && (
           <div className="px-4 pb-2 space-y-3">
+            {/* Held rentals ALWAYS show, regardless of online state — once a
+                driver has accepted a rental it's their active job and must not
+                vanish if `isOnline` briefly flips (GPS hiccup / app resume). */}
             {myRentals.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -454,7 +457,7 @@ export default function DriverHome() {
               </div>
             )}
 
-            {availableRentals.length > 0 && (
+            {online && availableRentals.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                   <CarFront className="h-3.5 w-3.5 text-gold" /> Rental broadcasts

@@ -31,10 +31,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-function fmtDuration(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+// Live ticking clock H:MM:SS (or MM:SS under an hour).
+function fmtClock(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
@@ -47,6 +51,22 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
 
   const inProgress = r.status === "in_progress";
   const { data: progress } = useRentalProgress(r.id, "driver", inProgress);
+
+  // Live ticking elapsed time — the server's elapsedMin only refreshes on the
+  // 5s poll, which looks frozen. Tick every second from startedAt so the timer
+  // visibly counts up. Falls back to the server value if startedAt is missing.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!inProgress) return;
+    const t = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [inProgress]);
+  const liveElapsedMin = r.startedAt
+    ? Math.max(0, Math.floor((nowTs - new Date(r.startedAt).getTime()) / 60000))
+    : progress?.elapsedMin ?? 0;
+  const liveElapsedSec = r.startedAt
+    ? Math.max(0, Math.floor((nowTs - new Date(r.startedAt).getTime()) / 1000))
+    : 0;
 
   const [pickupOtp, setPickupOtp] = useState("");
   const [dropOpen, setDropOpen] = useState(false);
@@ -64,14 +84,16 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
   }, [inProgress, r.id]);
 
   // When the package limit is first reached and the driver hasn't yet agreed,
-  // pop the overage dialog once.
+  // pop the overage dialog once. Use the live clock OR the server's distance
+  // flag so the prompt fires promptly on either dimension.
+  const limitReached = (progress?.limitReached ?? false) || (r.hours > 0 && liveElapsedMin >= r.hours * 60);
   const prompted = useRef(false);
   useEffect(() => {
-    if (inProgress && progress?.limitReached && !progress.overageAgreed && !prompted.current) {
+    if (inProgress && limitReached && !r.overageAgreed && !prompted.current) {
       prompted.current = true;
       setOverageOpen(true);
     }
-  }, [inProgress, progress?.limitReached, progress?.overageAgreed]);
+  }, [inProgress, limitReached, r.overageAgreed]);
 
   const submitStart = () => {
     if (pickupOtp.trim().length < 4) { toast.error("Enter the 4-digit pickup OTP"); return; }
@@ -190,7 +212,7 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
         {inProgress && progress && (
           <div className="space-y-2.5">
             <div className="grid grid-cols-2 gap-2">
-              <Meter Icon={Timer} label="Elapsed" value={fmtDuration(progress.elapsedMin)} sub={`of ${progress.includedHours}h`} warn={progress.elapsedMin >= progress.includedHours * 60} />
+              <Meter Icon={Timer} label="Elapsed" value={fmtClock(liveElapsedSec)} sub={`of ${progress.includedHours}h`} warn={liveElapsedMin >= progress.includedHours * 60} />
               <Meter Icon={Gauge} label="Distance" value={`${progress.distanceKm} km`} sub={`of ${progress.includedKm} km`} warn={progress.distanceKm >= progress.includedKm} />
             </div>
 

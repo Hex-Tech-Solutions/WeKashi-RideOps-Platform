@@ -59,6 +59,7 @@ router.get(
         const amount = r.totalAmount ?? ((r.price ?? 0) + (r.escortCharge ?? 0));
         const canPay = !!r.driver?.upiVerified && !!r.driver?.upiVpa;
         return {
+          kind: 'ride' as const,
           ...r,
           amount,
           upiIntent: canPay
@@ -73,7 +74,79 @@ router.get(
         };
       });
 
-      res.json({ rides: withQr });
+      // Completed, unpaid RENTALS owed to the driver (same direct-UPI model).
+      const rentals = await prisma.rental.findMany({
+        where: {
+          supervisorId: req.user!.id,
+          status: 'completed',
+          paymentStatus: 'unpaid',
+          driverId: { not: null },
+        },
+        select: {
+          id: true, packageKey: true, basePrice: true, overageAmount: true, totalAmount: true,
+          hours: true, km: true, distanceM: true, pickupAddress: true, customerName: true,
+          completedAt: true, paymentStatus: true,
+          driver: { select: { id: true, fullName: true, phone: true, upiVpa: true, upiVpaName: true, upiVerified: true } },
+        },
+        orderBy: { completedAt: 'desc' },
+      });
+
+      const rentalRows = rentals.map((r) => {
+        const amount = r.totalAmount ?? (r.basePrice + r.overageAmount);
+        const canPay = !!r.driver?.upiVerified && !!r.driver?.upiVpa;
+        return {
+          kind: 'rental' as const,
+          id: r.id,
+          type: 'rental',
+          price: r.basePrice,
+          escortCharge: 0,
+          totalAmount: r.totalAmount,
+          overageAmount: r.overageAmount,
+          basePrice: r.basePrice,
+          distanceKm: Math.round((r.distanceM / 1000) * 10) / 10,
+          pickupAddress: r.pickupAddress,
+          dropAddress: `${r.customerName} · ${r.hours}h/${r.km}km pack`,
+          completedAt: r.completedAt,
+          paymentStatus: r.paymentStatus,
+          driver: r.driver,
+          amount,
+          upiIntent: canPay
+            ? buildUpiIntent({
+                vpa: r.driver!.upiVpa!,
+                payeeName: r.driver!.upiVpaName ?? r.driver!.fullName,
+                amount,
+                note: `RideOps rental ${r.id.slice(-8)}`,
+              })
+            : null,
+          payeeName: r.driver?.upiVpaName ?? null,
+        };
+      });
+
+      res.json({ rides: [...withQr, ...rentalRows] });
+    } catch (err) { next(err); }
+  },
+);
+
+// ─── Supervisor: mark a completed rental paid ─────────────────────────────────
+router.post(
+  '/rentals/:id/mark-paid',
+  authenticate, requireRole('supervisor', 'admin'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const rental = await prisma.rental.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, status: true, supervisorId: true, paymentStatus: true },
+      });
+      if (!rental) { res.status(404).json({ error: 'Rental not found', code: 'NOT_FOUND' }); return; }
+      if (req.user!.role === 'supervisor' && rental.supervisorId !== req.user!.id) {
+        res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
+      }
+      if (rental.status !== 'completed') {
+        res.status(409).json({ error: 'Rental is not completed yet', code: 'CONFLICT' }); return;
+      }
+      if (rental.paymentStatus === 'paid') { res.json({ ok: true, alreadyPaid: true }); return; }
+      await prisma.rental.update({ where: { id: rental.id }, data: { paymentStatus: 'paid', paidAt: new Date() } });
+      res.json({ ok: true });
     } catch (err) { next(err); }
   },
 );

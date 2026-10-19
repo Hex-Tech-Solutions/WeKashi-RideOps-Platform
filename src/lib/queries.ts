@@ -1594,6 +1594,8 @@ export function useSavedGroupsReport() {
 // ─── Supervisor → Driver Payments ─────────────────────────────────────────────
 
 export interface PendingPaymentRide {
+  /** Discriminates a normal ride from a rental — drives which pay endpoints to hit. */
+  kind?: "ride" | "rental";
   id: string;
   type: string;
   price: number | null;
@@ -1605,6 +1607,9 @@ export interface PendingPaymentRide {
   dropAddress: string;
   completedAt: string | null;
   paymentStatus: string;
+  /** Rental-only: base fare + overage breakdown. */
+  basePrice?: number;
+  overageAmount?: number;
   /** upi://pay intent string, or null if the driver has no verified UPI. */
   upiIntent: string | null;
   payeeName: string | null;
@@ -1655,6 +1660,19 @@ export function useMarkRidePaid() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pendingPayments"] });
       qc.invalidateQueries({ queryKey: ["rides"] });
+    },
+  });
+}
+
+/** Mark a completed rental as paid (direct UPI). */
+export function useMarkRentalPaid() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<{ ok: boolean; alreadyPaid?: boolean }>(`/payments/rentals/${id}/mark-paid`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pendingPayments"] });
+      qc.invalidateQueries({ queryKey: ["rentals"] });
     },
   });
 }
@@ -1951,7 +1969,12 @@ export function useDriverRentalsAvailable() {
   return useQuery({
     queryKey: ["driver", "rentals", "available"],
     queryFn: () => api<{ rentals: RentalRow[] }>("/driver/rentals/available"),
-    refetchInterval: 10_000,
+    refetchInterval: 8_000,
+    // Never serve a stale snapshot — a cancelled/claimed rental must drop off
+    // the list, not linger from cache.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
   });
 }
 
@@ -1959,7 +1982,10 @@ export function useDriverRentalsMine() {
   return useQuery({
     queryKey: ["driver", "rentals", "mine"],
     queryFn: () => api<{ rentals: RentalRow[] }>("/driver/rentals/mine"),
-    refetchInterval: 15_000,
+    refetchInterval: 8_000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
   });
 }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PageHeader } from "@/components/RoleLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -287,6 +287,15 @@ function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?:
   const live = r.status === "in_progress";
   const { data: progress } = useRentalProgress(r.id, "supervisor", live || r.status === "completed");
 
+  // Live ticking clock from startedAt — the polled elapsedMin alone looks frozen.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+  const liveSec = live && r.startedAt ? Math.max(0, Math.floor((nowTs - new Date(r.startedAt).getTime()) / 1000)) : null;
+
   const statusMeta: Record<string, { label: string; cls: string; Icon: typeof CircleDot }> = {
     assigned:    { label: "Assigned — en route", cls: "border-gold/50 text-gold-dark bg-gold/10", Icon: CircleDot },
     in_progress: { label: "In progress", cls: "border-sky-500/40 text-sky-600 bg-sky-500/5", Icon: CircleDot },
@@ -294,7 +303,7 @@ function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?:
   };
   const sm = statusMeta[r.status] ?? statusMeta.assigned;
 
-  const elapsed = progress ? fmtDuration(progress.elapsedMin) : null;
+  const elapsed = liveSec != null ? fmtClock(liveSec) : progress ? fmtDuration(progress.elapsedMin) : null;
   const overageLive = progress?.overage.overageAmount ?? 0;
   const total = progress?.finalTotal ?? r.basePrice;
 
@@ -419,6 +428,16 @@ function fmtDuration(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// Live ticking clock H:MM:SS (or MM:SS under an hour).
+function fmtClock(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 // ─── Book dialog ──────────────────────────────────────────────────────────────

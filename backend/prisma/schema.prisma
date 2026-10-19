@@ -116,6 +116,8 @@ model Rental {
   overageKm      Float     @default(0) @map("overage_km")         // billed extra km (ceil)
   overageAmount  Float     @default(0) @map("overage_amount")     // ₹ overage at completion
   totalAmount    Float?    @map("total_amount")                   // base + overage, frozen at completion
+  paymentStatus  String    @default("unpaid") @map("payment_status") // unpaid | paid
+  paidAt         DateTime? @map("paid_at")
 
   createdAt      DateTime  @default(now()) @map("created_at")
   acceptedAt     DateTime? @map("accepted_at")
