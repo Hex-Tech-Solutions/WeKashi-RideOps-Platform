@@ -236,9 +236,11 @@ export async function logRentalLocation(rentalId: string, driverId: string, lat:
 
 // Supervisor's rentals (newest first). Includes the full driver + vehicle
 // details and the OTPs — this is the ONLY place OTPs are surfaced, so the
-// supervisor can read them out to the driver.
+// supervisor can read them out to the driver. For assigned rentals (driver en
+// route), also computes a rough driver→pickup ETA from the driver's last known
+// GPS position (straight-line distance; a cheap, no-API estimate).
 export async function listRentalsForSupervisor(supervisorId: string) {
-  return prisma.rental.findMany({
+  const rentals = await prisma.rental.findMany({
     where: { supervisorId },
     include: {
       driver: {
@@ -250,6 +252,30 @@ export async function listRentalsForSupervisor(supervisorId: string) {
     },
     orderBy: { createdAt: 'desc' },
   });
+
+  // Straight-line driver→pickup distance for assigned rentals with both points.
+  const assignedIds = rentals.filter((r) => r.status === 'assigned' && r.driverId).map((r) => r.id);
+  const etaByRental = new Map<string, { etaKm: number; etaMin: number }>();
+  if (assignedIds.length > 0) {
+    const rows = await prisma.$queryRaw<Array<{ id: string; meters: number | null }>>`
+      SELECT r.id,
+             ST_Distance(d.current_location, r.pickup_point) AS meters
+      FROM rentals r
+      JOIN drivers d ON d.id = r.driver_id
+      WHERE r.id IN (${Prisma.join(assignedIds)})
+        AND d.current_location IS NOT NULL
+        AND r.pickup_point IS NOT NULL
+    `;
+    for (const row of rows) {
+      if (row.meters == null) continue;
+      const etaKm = Math.round((row.meters / 1000) * 10) / 10;
+      // ~22 km/h average city speed → minutes; floor of 1 min.
+      const etaMin = Math.max(1, Math.round((etaKm / 22) * 60));
+      etaByRental.set(row.id, { etaKm, etaMin });
+    }
+  }
+
+  return rentals.map((r) => ({ ...r, eta: etaByRental.get(r.id) ?? null }));
 }
 
 /**

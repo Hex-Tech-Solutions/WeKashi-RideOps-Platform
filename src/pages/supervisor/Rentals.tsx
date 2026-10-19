@@ -17,7 +17,7 @@ import {
   useRentalProgress,
   type RentalPack, type RentalRow,
 } from "@/lib/queries";
-import { ArrowRight, Route, Clock, IndianRupee, Car, Users, Phone, Trash2, Loader2, CalendarClock, X, KeyRound, Gauge, Timer, MapPin, CheckCircle2, CircleDot } from "lucide-react";
+import { ArrowRight, Route, Clock, IndianRupee, Car, Users, Phone, Trash2, Loader2, CalendarClock, X, KeyRound, Gauge, Timer, MapPin, CheckCircle2, CircleDot, Navigation } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Rentals() {
@@ -263,13 +263,19 @@ function RentalRidesSection({ rides, onRemove }: { rides: RentalRow[]; onRemove:
   // Active rides first (assigned / in_progress), then completed — capped height.
   const active = rides.filter((r) => r.status === "assigned" || r.status === "in_progress");
   const done = rides.filter((r) => r.status === "completed");
+  // Lay cards out in a responsive grid so they read as cards (max ~2 per row on
+  // wide screens), not full-width rows.
   return (
-    <div className="space-y-4 max-h-[640px] overflow-y-auto pr-1">
-      {active.map((r) => <RentalRideCard key={r.id} rental={r} />)}
+    <div className="max-h-[680px] overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {active.map((r) => <RentalRideCard key={r.id} rental={r} />)}
+      </div>
       {done.length > 0 && (
         <>
-          <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium pt-1">Completed ({done.length})</div>
-          {done.map((r) => <RentalRideCard key={r.id} rental={r} onRemove={() => onRemove(r.id)} />)}
+          <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium pt-4 pb-2">Completed ({done.length})</div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            {done.map((r) => <RentalRideCard key={r.id} rental={r} onRemove={() => onRemove(r.id)} />)}
+          </div>
         </>
       )}
     </div>
@@ -326,6 +332,17 @@ function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?:
           <OtpChip label="Pickup OTP" otp={r.pickupOtp} used={!!r.startedAt} />
           <OtpChip label="Drop OTP" otp={r.dropOtp} used={r.status === "completed"} />
         </div>
+
+        {/* Driver ETA to pickup — only while en route (assigned) */}
+        {r.status === "assigned" && (
+          <div className="rounded-md bg-gold/10 border border-gold/30 px-3 py-2 flex items-center gap-2 text-sm">
+            <Navigation className="h-4 w-4 text-gold-dark" />
+            <span className="text-muted-foreground">Driver ETA to pickup</span>
+            <span className="ml-auto font-semibold text-foreground">
+              {r.eta ? `${r.eta.etaMin} min · ${r.eta.etaKm} km` : "Locating…"}
+            </span>
+          </div>
+        )}
 
         {/* Package + pickup */}
         <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">

@@ -1865,6 +1865,8 @@ export interface RentalRow {
     vehicleType?: string | null;
     vehicle?: { regNo: string; fuelType: string } | null;
   } | null;
+  // Rough driver→pickup ETA while assigned (supervisor view only).
+  eta?: { etaKm: number; etaMin: number } | null;
   supervisor?: { fullName: string; org: string | null } | null;
 }
 
