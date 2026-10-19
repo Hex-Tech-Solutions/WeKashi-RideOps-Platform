@@ -54,14 +54,17 @@ export function PayRideDialog({ ride, onClose }: Props) {
 
   const submitPaid = () => {
     if (!ride) return;
+    if (!/^\d{4}$/.test(txnRef)) { toast.error("Enter the last 4 digits of the transaction ID"); return; }
     if (isRental) {
-      markRentalPaid.mutate(ride.id, {
-        onSuccess: () => setMarkedPaid(true),
-        onError: (e: any) => toast.error(e?.message ?? "Could not mark as paid"),
-      });
+      markRentalPaid.mutate(
+        { id: ride.id, txnRef },
+        {
+          onSuccess: () => setMarkedPaid(true),
+          onError: (e: any) => toast.error(e?.message ?? "Could not mark as paid"),
+        },
+      );
       return;
     }
-    if (!/^\d{4}$/.test(txnRef)) { toast.error("Enter the last 4 digits of the transaction ID"); return; }
     markPaid.mutate(
       { rideId: ride.id, txnRef },
       {
@@ -183,33 +186,32 @@ export function PayRideDialog({ ride, onClose }: Props) {
 
                     <Separator />
 
-                    {/* Rides capture a UTR ref; rentals are a simple confirm. */}
-                    {!isRental && (
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Last 4 digits of UTR ID</Label>
-                        <Input
-                          value={txnRef}
-                          onChange={(e) => setTxnRef(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                          inputMode="numeric"
-                          maxLength={4}
-                          placeholder="e.g. 4821"
-                          className="h-10 font-mono tracking-widest text-center"
-                        />
-                        <p className="text-[11px] text-muted-foreground">
-                          Find the UTR in your UPI app's payment receipt. The driver sees it to confirm they
-                          received the payment.
-                        </p>
-                      </div>
-                    )}
+                    {/* Both rides and rentals capture a UTR ref so the driver
+                        can confirm receipt. */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Last 4 digits of UTR ID</Label>
+                      <Input
+                        value={txnRef}
+                        onChange={(e) => setTxnRef(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder="e.g. 4821"
+                        className="h-10 font-mono tracking-widest text-center"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Find the UTR in your UPI app's payment receipt. The driver sees it to confirm they
+                        received the payment.
+                      </p>
+                    </div>
 
                     <Button
                       className="w-full bg-gold text-gold-foreground hover:bg-gold/90 h-11 text-sm font-semibold"
                       onClick={submitPaid}
-                      disabled={busy || (!isRental && txnRef.length !== 4)}
+                      disabled={busy || txnRef.length !== 4}
                     >
                       {busy
                         ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
-                        : <><CheckCircle2 className="h-4 w-4" /> {isRental ? "Mark as paid" : "Save as paid"}</>}
+                        : <><CheckCircle2 className="h-4 w-4" /> Save as paid</>}
                     </Button>
                   </>
                 )}

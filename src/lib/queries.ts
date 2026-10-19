@@ -1664,12 +1664,15 @@ export function useMarkRidePaid() {
   });
 }
 
-/** Mark a completed rental as paid (direct UPI). */
+/** Mark a completed rental as paid (direct UPI), recording the UTR last-4. */
 export function useMarkRentalPaid() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<{ ok: boolean; alreadyPaid?: boolean }>(`/payments/rentals/${id}/mark-paid`, { method: "POST" }),
+    mutationFn: ({ id, txnRef }: { id: string; txnRef: string }) =>
+      api<{ ok: boolean; alreadyPaid?: boolean }>(`/payments/rentals/${id}/mark-paid`, {
+        method: "POST",
+        body: JSON.stringify({ txnRef }),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["pendingPayments"] });
       qc.invalidateQueries({ queryKey: ["rentals"] });
@@ -1986,6 +1989,50 @@ export function useDriverRentalsMine() {
     staleTime: 0,
     refetchOnWindowFocus: true,
     refetchOnMount: "always",
+  });
+}
+
+/** Completed rentals for the driver's trip history. */
+export interface RentalHistoryRow {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  vehicleType: "sedan" | "suv";
+  packageKey: string;
+  hours: number;
+  km: number;
+  basePrice: number;
+  extraPerKm: number;
+  extraPerHr: number;
+  pickupAddress: string;
+  status: string;
+  notes: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  distanceM: number;
+  overageHours: number;
+  overageKm: number;
+  overageAmount: number;
+  totalAmount: number | null;
+  paymentStatus: string;
+  paymentRef: string | null;
+  paidAt: string | null;
+  paymentReceivedAt: string | null;
+}
+
+export function useDriverRentalHistory() {
+  return useQuery({
+    queryKey: ["driver", "rentals", "history"],
+    queryFn: () => api<{ rentals: RentalHistoryRow[] }>("/driver/rentals/history"),
+    refetchInterval: 20_000,
+  });
+}
+
+export function useMarkRentalReceived() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/driver/rentals/${id}/received`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "rentals", "history"] }),
   });
 }
 

@@ -117,7 +117,9 @@ model Rental {
   overageAmount  Float     @default(0) @map("overage_amount")     // ₹ overage at completion
   totalAmount    Float?    @map("total_amount")                   // base + overage, frozen at completion
   paymentStatus  String    @default("unpaid") @map("payment_status") // unpaid | paid
+  paymentRef     String?   @map("payment_ref")        // last 4 digits of the UPI UTR
   paidAt         DateTime? @map("paid_at")
+  paymentReceivedAt DateTime? @map("payment_received_at") // driver confirmed receipt
 
   createdAt      DateTime  @default(now()) @map("created_at")
   acceptedAt     DateTime? @map("accepted_at")

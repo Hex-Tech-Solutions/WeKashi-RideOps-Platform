@@ -16,6 +16,7 @@
 
 import { Router, Response, NextFunction, Request } from 'express';
 import express from 'express';
+import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -127,12 +128,15 @@ router.get(
   },
 );
 
-// ─── Supervisor: mark a completed rental paid ─────────────────────────────────
+// ─── Supervisor: mark a completed rental paid (records the UTR last-4) ────────
 router.post(
   '/rentals/:id/mark-paid',
   authenticate, requireRole('supervisor', 'admin'),
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      const { txnRef } = z
+        .object({ txnRef: z.string().trim().regex(/^\d{4}$/, 'Enter the last 4 digits of the transaction ID') })
+        .parse(req.body);
       const rental = await prisma.rental.findUnique({
         where: { id: req.params.id },
         select: { id: true, status: true, supervisorId: true, paymentStatus: true },
@@ -145,7 +149,7 @@ router.post(
         res.status(409).json({ error: 'Rental is not completed yet', code: 'CONFLICT' }); return;
       }
       if (rental.paymentStatus === 'paid') { res.json({ ok: true, alreadyPaid: true }); return; }
-      await prisma.rental.update({ where: { id: rental.id }, data: { paymentStatus: 'paid', paidAt: new Date() } });
+      await prisma.rental.update({ where: { id: rental.id }, data: { paymentStatus: 'paid', paymentRef: txnRef, paidAt: new Date() } });
       res.json({ ok: true });
     } catch (err) { next(err); }
   },

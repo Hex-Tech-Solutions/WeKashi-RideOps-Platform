@@ -13,6 +13,11 @@ import { randomInt } from 'crypto';
 // 4-digit OTPs, same format as employee pickup/drop OTPs.
 const gen4 = () => String(randomInt(1000, 10000));
 
+// Minimum per-segment distance (metres) that counts toward the odometer.
+// Below this, a GPS reading is treated as stationary jitter, not real travel —
+// without this a parked vehicle accumulates phantom kilometres.
+const GPS_JITTER_M = 15;
+
 export interface CreateRentalInput {
   supervisorId: string;
   customerName: string;
@@ -130,7 +135,9 @@ export async function getRentalProgress(rentalId: string) {
   });
   if (!rental) throw new NotFoundError('Rental not found');
 
-  // Live GPS odometer: sum distance between consecutive breadcrumbs.
+  // Live GPS odometer: sum distance between consecutive breadcrumbs, but DROP
+  // segments under GPS_JITTER_M — a stationary phone's GPS drifts a few metres
+  // per reading, and summing that noise manufactures phantom kilometres.
   const dist = await prisma.$queryRaw<Array<{ meters: number }>>`
     SELECT COALESCE(SUM(seg), 0)::float AS meters FROM (
       SELECT ST_Distance(
@@ -140,6 +147,7 @@ export async function getRentalProgress(rentalId: string) {
       FROM rental_location_logs
       WHERE rental_id = ${rentalId}
     ) s
+    WHERE seg >= ${GPS_JITTER_M}
   `;
   const liveMeters = rental.status === 'completed' ? rental.distanceM : (dist[0]?.meters ?? 0);
   const distanceKm = Math.round((liveMeters / 1000) * 10) / 10;
@@ -185,12 +193,13 @@ export async function completeRental(rentalId: string, driverId: string, otp: st
   if (rental.status !== 'in_progress') throw new ValidationError('This rental is not in progress');
   if (rental.dropOtp !== otp) throw new ValidationError('Incorrect drop OTP');
 
-  // Final GPS odometer.
+  // Final GPS odometer — same jitter floor as the live query.
   const dist = await prisma.$queryRaw<Array<{ meters: number }>>`
     SELECT COALESCE(SUM(seg), 0)::float AS meters FROM (
       SELECT ST_Distance(point, LAG(point) OVER (ORDER BY recorded_at)) AS seg
       FROM rental_location_logs WHERE rental_id = ${rentalId}
     ) s
+    WHERE seg >= ${GPS_JITTER_M}
   `;
   const meters = dist[0]?.meters ?? 0;
   const distanceKm = Math.round((meters / 1000) * 10) / 10;
@@ -344,6 +353,35 @@ export async function listDriverRentals(driverId: string) {
     select: DRIVER_RENTAL_SELECT,
     orderBy: { createdAt: 'desc' },
   });
+}
+
+// Completed rentals for the driver's trip history — includes the final figures
+// and the payment receipt (UTR last-4 + received flag). Still omits OTPs.
+export async function listDriverRentalHistory(driverId: string, limit = 30) {
+  return prisma.rental.findMany({
+    where: { driverId, status: 'completed' },
+    select: {
+      id: true, customerName: true, customerPhone: true, vehicleType: true,
+      packageKey: true, hours: true, km: true, basePrice: true, extraPerKm: true,
+      extraPerHr: true, pickupAddress: true, status: true, notes: true,
+      startedAt: true, completedAt: true, distanceM: true,
+      overageHours: true, overageKm: true, overageAmount: true, totalAmount: true,
+      paymentStatus: true, paymentRef: true, paidAt: true, paymentReceivedAt: true,
+    },
+    orderBy: { completedAt: 'desc' },
+    take: limit,
+  });
+}
+
+// Driver confirms they received the direct UPI payment for a completed rental.
+export async function markRentalReceived(rentalId: string, driverId: string): Promise<void> {
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    select: { driverId: true, paymentStatus: true },
+  });
+  if (!rental || rental.driverId !== driverId) throw new NotFoundError('Rental not found');
+  if (rental.paymentStatus !== 'paid') throw new ValidationError('No payment recorded yet');
+  await prisma.rental.update({ where: { id: rentalId }, data: { paymentReceivedAt: new Date() } });
 }
 
 /**

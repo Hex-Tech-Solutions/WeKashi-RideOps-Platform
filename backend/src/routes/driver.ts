@@ -29,6 +29,8 @@ import {
   setRentalOptIn,
   listEligibleRentalsForDriver,
   listDriverRentals,
+  listDriverRentalHistory,
+  markRentalReceived,
   acceptRental,
   releaseRental,
   rentalArrived,
@@ -309,6 +311,25 @@ router.post('/upi', async (req: AuthRequest, res: Response, next: NextFunction) 
   router.get('/rentals/mine', async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       res.json({ rentals: await listDriverRentals(req.driver!.id) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /api/driver/rentals/history — completed rentals for the trip history
+  router.get('/rentals/history', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json({ rentals: await listDriverRentalHistory(req.driver!.id) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/received — driver confirms payment received
+  router.post('/rentals/:id/received', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await markRentalReceived(req.params.id, req.driver!.id);
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }
