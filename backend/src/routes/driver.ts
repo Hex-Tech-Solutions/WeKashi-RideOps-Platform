@@ -396,6 +396,15 @@ router.post('/upi', async (req: AuthRequest, res: Response, next: NextFunction) 
   // GET /api/driver/rentals/:id/progress — live timer/distance/overage
   router.get('/rentals/:id/progress', async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      // Ownership guard — a driver may only read progress for a rental they
+      // hold. Without this, any driver could read any rental's live timing,
+      // distance and billing by guessing an id.
+      const { prisma } = await import('../lib/prisma');
+      const owned = await prisma.rental.findFirst({
+        where: { id: req.params.id, driverId: req.driver!.id },
+        select: { id: true },
+      });
+      if (!owned) { res.status(404).json({ error: 'Rental not found', code: 'NOT_FOUND' }); return; }
       res.json(await getRentalProgress(req.params.id));
     } catch (err) {
       next(err);

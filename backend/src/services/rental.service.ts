@@ -36,6 +36,11 @@ export async function createRental(input: CreateRentalInput): Promise<{ id: stri
   if (pack.vehicleType !== input.vehicleType) {
     throw new ValidationError('Package does not match the selected vehicle type');
   }
+  // A scheduled rental can't be in the past (allow a 1-minute skew). Mirrors the
+  // normal scheduled-ride rule; a blank scheduledFor means "dispatch now".
+  if (input.scheduledFor && input.scheduledFor.getTime() < Date.now() - 60_000) {
+    throw new ValidationError('Scheduled pickup time cannot be in the past');
+  }
 
   const hasPoint = input.pickupPoint != null;
   // Pickup + drop OTPs are generated up front and surfaced only on the
@@ -178,15 +183,16 @@ export async function getRentalProgress(rentalId: string) {
 
 /**
  * Driver enters the drop OTP (verbal) to complete the rental. Freezes the final
- * distance + overage + total. Completion is only allowed once the driver has
- * agreed to overage IF the package limit was already crossed.
+ * distance + overage + total. The drop OTP always completes the ride — the
+ * passenger may end it early (under the pack) or late (over the pack); any
+ * overage is billed into the final total. There is no agreement gate.
  */
 export async function completeRental(rentalId: string, driverId: string, otp: string): Promise<{ total: number }> {
   const rental = await prisma.rental.findUnique({
     where: { id: rentalId },
     select: {
       driverId: true, status: true, dropOtp: true, packageKey: true,
-      startedAt: true, hours: true, km: true, basePrice: true, overageAgreed: true,
+      startedAt: true, hours: true, km: true, basePrice: true,
     },
   });
   if (!rental || rental.driverId !== driverId) throw new NotFoundError('Rental not found');
@@ -206,13 +212,11 @@ export async function completeRental(rentalId: string, driverId: string, otp: st
   const elapsedMin = rental.startedAt ? Math.max(0, Math.round((Date.now() - rental.startedAt.getTime()) / 60000)) : 0;
   const overage = computeRentalOverage(rental.packageKey, elapsedMin, distanceKm);
 
-  // Gate: if the package limit was crossed, the driver must have agreed to the
-  // overage pop-up before the ride can be closed with a charge.
-  const limitReached = elapsedMin >= rental.hours * 60 || distanceKm >= rental.km;
-  if (limitReached && overage.overageAmount > 0 && !rental.overageAgreed) {
-    throw new ValidationError('Overage must be acknowledged before completing');
-  }
-
+  // The drop OTP ALWAYS completes the ride — the passenger ends it whenever
+  // they want, under or over the pack limit. Any overage is simply billed into
+  // the final total; it is never a precondition. The overage pop-up on the
+  // driver app is a notification only (overageAgreed is an informational stamp,
+  // not a gate).
   const total = rental.basePrice + overage.overageAmount;
   await prisma.rental.update({
     where: { id: rentalId },
@@ -439,13 +443,18 @@ export async function acceptRental(rentalId: string, driverId: string): Promise<
  */
 export async function releaseRental(rentalId: string, driverId: string): Promise<{ released: true }> {
   await prisma.$transaction(async (tx) => {
+    // Only a rental that has NOT started yet (status 'assigned') can be
+    // released back to the marketplace. Releasing an in-progress rental would
+    // strand the customer mid-trip and discard the timer/odometer so far — the
+    // driver must complete it (drop OTP) instead. The UI only shows Release in
+    // the assigned stage; this makes the backend enforce the same rule.
     const rows = await tx.$queryRaw<Array<{ credit_consumed: boolean }>>`
       SELECT credit_consumed FROM rentals
       WHERE id = ${rentalId} AND driver_id = ${driverId}
-        AND status IN ('assigned', 'in_progress')
+        AND status = 'assigned'
       FOR UPDATE
     `;
-    if (rows.length === 0) throw new NotFoundError('Rental not found or not yours');
+    if (rows.length === 0) throw new NotFoundError('Rental not found, not yours, or already in progress');
 
     // Refund the burned credit. Refund to the OLDEST-expiring active pack —
     // the SAME ordering acceptRental burns from — so repeated accept/release
@@ -484,8 +493,8 @@ export async function releaseRental(rentalId: string, driverId: string): Promise
 
     await tx.$executeRaw`
       UPDATE rentals
-      SET status = 'broadcasting', driver_id = NULL, accepted_at = NULL, credit_consumed = false
-      WHERE id = ${rentalId}
+      SET status = 'broadcasting', driver_id = NULL, accepted_at = NULL, arrived_at = NULL, credit_consumed = false
+      WHERE id = ${rentalId} AND status = 'assigned'
     `;
   });
   logger.info({ rentalId, driverId }, 'Rental released by driver');

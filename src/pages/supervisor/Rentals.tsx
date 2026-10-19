@@ -375,7 +375,7 @@ function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?:
         {(r.status === "in_progress" || r.status === "completed") && progress && (
           <div className={`rounded-md px-3 py-2 text-sm flex items-center justify-between ${overageLive > 0 ? "bg-amber-500/10 border border-amber-500/30" : "bg-muted/50"}`}>
             <div>
-              <div className="text-xs text-muted-foreground">Overage {progress.overageAgreed ? "" : r.status === "in_progress" && progress.limitReached ? "(awaiting driver OK)" : ""}</div>
+              <div className="text-xs text-muted-foreground">Overage</div>
               <div className="font-semibold flex items-center gap-1"><IndianRupee className="h-3.5 w-3.5" />{progress.finalOverageAmount}</div>
               {(progress.overage.overHours > 0 || progress.overage.overKm > 0) && (
                 <div className="text-[11px] text-muted-foreground">

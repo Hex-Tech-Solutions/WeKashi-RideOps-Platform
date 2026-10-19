@@ -83,9 +83,11 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inProgress, r.id]);
 
-  // When the package limit is first reached and the driver hasn't yet agreed,
-  // pop the overage dialog once. Use the live clock OR the server's distance
-  // flag so the prompt fires promptly on either dimension.
+  // When the package limit is reached, pop the overage dialog ONCE as a
+  // notification — "you're over the pack, extra km/hr now bill at these rates."
+  // It never blocks anything: the driver can dismiss it and still complete the
+  // ride with the drop OTP at any time. Use the live clock OR the server's
+  // distance flag so the notice fires promptly on either dimension.
   const limitReached = (progress?.limitReached ?? false) || (r.hours > 0 && liveElapsedMin >= r.hours * 60);
   const prompted = useRef(false);
   useEffect(() => {
@@ -218,7 +220,7 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
 
             {progress.overage.overageAmount > 0 && (
               <div className="rounded-md px-3 py-2 text-sm bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Overage {progress.overageAgreed ? "running" : "pending OK"}</span>
+                <span className="text-xs text-muted-foreground">Overage</span>
                 <span className="font-semibold flex items-center gap-0.5"><IndianRupee className="h-3.5 w-3.5" />{progress.overage.overageAmount}</span>
               </div>
             )}
@@ -228,6 +230,9 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
               <span className="font-bold text-lg flex items-center gap-0.5"><IndianRupee className="h-4 w-4" />{progress.finalTotal}</span>
             </div>
 
+            {/* The drop OTP is ALWAYS available — the passenger ends the ride
+                whenever they want, under or over the pack. Overage (if any) is
+                billed into the final total. */}
             <Button className="w-full h-11 bg-foreground text-background hover:bg-foreground/90" onClick={() => setDropOpen(true)}>
               <KeyRound className="h-4 w-4" /> Enter drop OTP to complete
             </Button>
@@ -235,29 +240,30 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
         )}
       </CardContent>
 
-      {/* Overage acknowledgement pop-up */}
+      {/* Overage notification — informational only. Dismissing it does NOT
+          block completion; the drop OTP stays available throughout. */}
       <Dialog open={overageOpen} onOpenChange={setOverageOpen}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
             <DialogTitle className="text-base">Package limit reached</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            You've reached the {r.hours}h / {r.km}km package. From here, additional
-            charges apply: <span className="font-medium text-foreground">₹{r.extraPerKm}/km</span> and{" "}
-            <span className="font-medium text-foreground">₹{r.extraPerHr}/hr</span> (prorated). The supervisor
-            has been notified. Continue?
+            You've reached the {r.hours}h / {r.km}km package. Any extra now bills at{" "}
+            <span className="font-medium text-foreground">₹{r.extraPerKm}/km</span> and{" "}
+            <span className="font-medium text-foreground">₹{r.extraPerHr}/hr</span> (prorated) and is added to
+            your fare. You can end the ride any time with the drop OTP.
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOverageOpen(false)}>Not now</Button>
+            <Button variant="outline" onClick={() => setOverageOpen(false)}>Dismiss</Button>
             <Button
               className="bg-amber-500 text-white hover:bg-amber-600"
               disabled={agree.isPending}
               onClick={() => agree.mutate(r.id, {
-                onSuccess: () => { toast("Overage billing started"); setOverageOpen(false); },
+                onSuccess: () => { toast("Got it — extra distance/time is added to the fare"); setOverageOpen(false); },
                 onError: (e: any) => toast.error(e?.message ?? "Failed"),
               })}
             >
-              Agree & continue
+              Got it
             </Button>
           </DialogFooter>
         </DialogContent>
