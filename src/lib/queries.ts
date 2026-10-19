@@ -1876,6 +1876,11 @@ export interface RentalRow {
   distanceM?: number;
   overageAmount?: number;
   totalAmount?: number | null;
+  // Payment status reflection (completed rentals) — paid on the Payments screen.
+  paymentStatus?: string;
+  paymentRef?: string | null;
+  paidAt?: string | null;
+  paymentReceivedAt?: string | null;
   // OTPs — ONLY populated on the supervisor's list (driver never receives them).
   pickupOtp?: string | null;
   dropOtp?: string | null;

@@ -392,6 +392,25 @@ function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?:
           </div>
         )}
 
+        {/* Payment status — reflects the shared Payments flow (paid there). */}
+        {r.status === "completed" && (
+          <div className="rounded-md px-3 py-2 text-xs flex items-center justify-between border bg-muted/30">
+            {r.paymentStatus === "paid" ? (
+              <>
+                <span className="flex items-center gap-1.5 text-success font-medium">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {r.paymentReceivedAt ? "Paid · driver confirmed" : "Paid"}
+                </span>
+                {r.paymentRef && <span className="font-mono text-muted-foreground">UTR ••••{r.paymentRef}</span>}
+              </>
+            ) : (
+              <span className="flex items-center gap-1.5 text-warning font-medium">
+                <IndianRupee className="h-3.5 w-3.5" /> Awaiting payment — settle on the Payments screen
+              </span>
+            )}
+          </div>
+        )}
+
         {r.status === "completed" && onRemove && (
           <Button variant="ghost" size="sm" className="w-full text-muted-foreground hover:text-destructive" onClick={onRemove}>
             <X className="h-3.5 w-3.5" /> Remove from list
