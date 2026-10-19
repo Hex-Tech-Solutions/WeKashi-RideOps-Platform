@@ -113,10 +113,16 @@ export async function createDriverSos(input: {
   let vendorId: string | null = null;
 
   if (rideId) {
+    // Only trust a client-supplied rideId if THIS driver is actually on it —
+    // otherwise a driver could route an SOS (with their name/phone/GPS) to an
+    // unrelated supervisor. If it isn't theirs, ignore it and fall through to
+    // the driver-scoped resolution below.
     const ride = await prisma.ride.findUnique({ where: { id: rideId } });
-    if (ride) {
+    if (ride && ride.driverId === input.driverId) {
       supervisorId = ride.supervisorId;
       vendorId = ride.vendorId;
+    } else {
+      rideId = undefined;
     }
   }
 

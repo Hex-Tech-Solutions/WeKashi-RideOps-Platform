@@ -29,10 +29,16 @@ export function watchDevicePosition(onUpdate: (c: Coords) => void): () => void {
     let watchId: string | null = null;
     let cancelled = false;
     import("@capacitor/geolocation").then(async ({ Geolocation }) => {
-      if (cancelled) return;
-      watchId = await Geolocation.watchPosition({ enableHighAccuracy: true }, (pos) => {
+      const id = await Geolocation.watchPosition({ enableHighAccuracy: true }, (pos) => {
         if (pos) onUpdate({ lat: pos.coords.latitude, lng: pos.coords.longitude });
       });
+      watchId = id;
+      // If the component already unmounted while watchPosition was resolving,
+      // the cleanup ran with watchId still null and could not clear this watch
+      // — leaking a native GPS watch. Clear it now that we have the id.
+      if (cancelled) {
+        void Geolocation.clearWatch({ id });
+      }
     });
     return () => {
       cancelled = true;

@@ -52,22 +52,41 @@ export class ApiError extends Error {
   }
 }
 
-async function tryRefresh(): Promise<boolean> {
-  const refresh = tokenStore.refresh;
-  if (!refresh) return false;
-  try {
-    const res = await fetch(`${BASE}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: refresh }),
-    });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { accessToken: string; refreshToken: string };
-    tokenStore.set(data.accessToken, data.refreshToken, tokenStore.getUser());
-    return true;
-  } catch {
-    return false;
-  }
+// Single-flight refresh: when the access token expires, the app's many
+// parallel polling queries all 401 at nearly the same instant. Without a shared
+// in-flight promise each would POST /auth/refresh with the SAME refresh token;
+// with refresh-token rotation the first succeeds and invalidates the token, and
+// the rest fail and clear the (now valid) session — causing intermittent forced
+// logouts. All concurrent callers now await ONE refresh.
+let refreshInFlight: Promise<boolean> | null = null;
+
+function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const refresh = tokenStore.refresh;
+    if (!refresh) return false;
+    try {
+      const res = await fetch(`${BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: refresh }),
+      });
+      if (!res.ok) return false;
+      const data = (await res.json()) as { accessToken: string; refreshToken: string };
+      tokenStore.set(data.accessToken, data.refreshToken, tokenStore.getUser());
+      return true;
+    } catch {
+      return false;
+    } finally {
+      // Release the lock on the next microtask so late-arriving concurrent
+      // 401s within this tick still share this result, but a subsequent real
+      // expiry later can refresh again.
+      setTimeout(() => { refreshInFlight = null; }, 0);
+    }
+  })();
+
+  return refreshInFlight;
 }
 
 interface ApiOptions extends RequestInit {

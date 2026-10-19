@@ -442,6 +442,24 @@ export async function advanceRideStatus(
     updateData.completedAt = new Date();
   }
 
+  // Completion guard: a ride with passengers can only be completed once every
+  // non-no-show passenger has been dropped (and, for escort rides, the escort
+  // verified dropped). maybeComplete() enforces this for the auto-complete
+  // (logout) path; this covers the DRIVER/SUPERVISOR-driven completion path
+  // (notably login rides) which previously could close with undelivered pax.
+  // Rides with no ride_pax rows (e.g. legacy/pax-less) are unaffected.
+  if (newStatus === 'completed') {
+    const blockers = await prisma.ridePax.count({
+      where: { rideId, noShow: false, droppedAt: null },
+    });
+    if (blockers > 0) {
+      throw new ValidationError('All passengers must be dropped (or marked no-show) before completing the ride');
+    }
+    if (ride.escortRequired && !ride.escortDroppedAt) {
+      throw new ValidationError('Verify the escort drop-off before completing the ride');
+    }
+  }
+
   // On completion, burn exactly one ride credit (oldest-expiring pack first)
   // in the same transaction that stamps completion, so the state is consistent
   // and the burn is idempotent. No credit is consumed for any other status.
@@ -795,7 +813,23 @@ export async function manualAssignRide(
 
   // Manual assign must respect the one-active-ride invariant exactly like
   // acceptRide, or it becomes a loophole that double-books a busy driver.
+  const ASSIGNABLE = ['scheduled', 'pending', 'expired', 'broadcasting', 'cancelled'];
   const queued = await prisma.$transaction(async (tx) => {
+    // Lock the TARGET ride row and re-validate its status inside the txn. The
+    // findUnique above is a stale pre-transaction read; without this lock a
+    // concurrent driver acceptRide (which locks the row) could assign the ride
+    // out from under us and we'd clobber it. SKIP LOCKED → if a concurrent txn
+    // holds it, treat as no-longer-available.
+    const lockRows = await tx.$queryRaw<Array<{ status: string }>>`
+      SELECT status FROM rides WHERE id = ${rideId} FOR UPDATE SKIP LOCKED
+    `;
+    if (lockRows.length === 0) {
+      throw new ConflictError('Ride is being modified by another request — try again');
+    }
+    if (!ASSIGNABLE.includes(lockRows[0].status)) {
+      throw new ConflictError(`Ride is no longer assignable (status: ${lockRows[0].status})`);
+    }
+
     // Credit gate — same as an accept.
     const credits = await availableCredits(driverId);
     if (credits < 1) {
@@ -847,6 +881,7 @@ export async function manualAssignRide(
           accepted_at = NOW(),
           queued_behind_ride_id = ${isQueued ? active!.id : null}
       WHERE id = ${rideId}
+        AND status IN ('scheduled', 'pending', 'expired', 'broadcasting', 'cancelled')
     `;
     return isQueued;
   });
@@ -960,11 +995,43 @@ export async function sweepStaleScheduledRides(io?: IoServer): Promise<void> {
 
   // 2) Expire truly-stale rides: unclaimed scheduled ones past their time, and
   //    claimed ones never started more than 1h after their time (driver no-show).
+  //
+  //    For the claimed no-show case the ride may be a driver's ACTIVE ride with
+  //    another ride QUEUED behind it. Expiring it in bulk would orphan that
+  //    queued ride forever (its queued_behind_ride_id points at a now-expired
+  //    ride and nothing promotes it). So: expire each such ride inside a
+  //    transaction and promote any ride queued behind it, then send the
+  //    deferred passenger OTPs for whatever got promoted.
+
+  // Unclaimed scheduled rides never had a driver — safe to bulk-expire.
   await prisma.$executeRaw`
     UPDATE rides SET status = 'expired'
-    WHERE (status = 'scheduled' AND scheduled_for IS NOT NULL AND scheduled_for < NOW())
-       OR (status = 'assigned' AND scheduled_for IS NOT NULL AND scheduled_for < NOW() - INTERVAL '1 hour')
+    WHERE status = 'scheduled' AND scheduled_for IS NOT NULL AND scheduled_for < NOW()
   `;
+
+  // Claimed-but-never-started no-shows: expire one-by-one with queued promotion.
+  const staleAssigned = await prisma.$queryRaw<Array<{ id: string; driver_id: string | null }>>`
+    SELECT id, driver_id FROM rides
+    WHERE status = 'assigned'
+      AND queued_behind_ride_id IS NULL
+      AND scheduled_for IS NOT NULL
+      AND scheduled_for < NOW() - INTERVAL '1 hour'
+  `;
+  for (const r of staleAssigned) {
+    try {
+      const promotedRideId = await prisma.$transaction(async (tx) => {
+        const rows = await tx.$executeRaw`
+          UPDATE rides SET status = 'expired'
+          WHERE id = ${r.id} AND status = 'assigned'
+        `;
+        if (Number(rows) === 0 || !r.driver_id) return null;
+        return promoteQueuedRide(tx, r.id, r.driver_id);
+      });
+      if (promotedRideId) await sendPaxOtpSms(promotedRideId);
+    } catch (err) {
+      logger.error({ err, rideId: r.id }, 'Failed to expire stale assigned ride / promote queued');
+    }
+  }
 }
 
 export async function listRides(filters: {

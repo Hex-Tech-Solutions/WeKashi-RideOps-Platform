@@ -12,14 +12,22 @@ import {
 import { listDocumentsForVendor, setDocumentStatus, countPendingDocsForVendor } from '../services/document.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
+import { ForbiddenError } from '../types';
 import type { AuthRequest } from '../types';
 import type { Server as IoServer } from 'socket.io';
 
+// Resolve the caller's vendor id for ownership scoping.
+//   - admin  → undefined (intentionally unscoped: admin sees all)
+//   - vendor → their vendor id, or THROW if it can't be resolved.
+// Fail-closed: previously this returned undefined on a failed lookup, which
+// silently DISABLED the ownership check in the document/status services and
+// let a mis-provisioned vendor act on any tenant's drivers.
 async function vendorIdFor(req: AuthRequest): Promise<string | undefined> {
   if (req.user?.role !== 'vendor') return undefined;
   const { prisma } = await import('../lib/prisma');
-  const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
-  return vendor?.id;
+  const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id }, select: { id: true } });
+  if (!vendor) throw new ForbiddenError('No vendor account is associated with this user');
+  return vendor.id;
 }
 
 const CreateDriverSchema = z.object({
@@ -53,9 +61,9 @@ export function createDriversRouter(io: IoServer): Router {
 
         let vendorId: string | undefined;
         if (req.user?.role === 'vendor') {
-          const { prisma } = await import('../lib/prisma');
-          const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
-          vendorId = vendor?.id;
+          // Fail-closed: throws if the vendor record can't be resolved, so a
+          // broken vendor can't fall through to an unscoped (all-tenants) list.
+          vendorId = await vendorIdFor(req);
         } else {
           // Admin can filter by vendorId
           vendorId = req.query.vendorId as string | undefined;
@@ -152,12 +160,8 @@ export function createDriversRouter(io: IoServer): Router {
       try {
         const { status } = UpdateStatusSchema.parse(req.body);
 
-        let vendorId: string | undefined;
-        if (req.user?.role === 'vendor') {
-          const { prisma } = await import('../lib/prisma');
-          const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
-          vendorId = vendor?.id;
-        }
+        // Fail-closed vendor scoping (admin → undefined, sees all).
+        const vendorId = await vendorIdFor(req);
 
         const driver = await updateDriverStatus(req.params.id, status, vendorId);
         res.json(driver);

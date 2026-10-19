@@ -26,7 +26,10 @@ router.get('/incidents', requireRole('admin', 'supervisor'), async (req: AuthReq
     const status = req.query.status as string | undefined;
     const rideId = req.query.rideId as string | undefined;
 
-    const result = await listIncidents({ rideId, status, page, limit });
+    // Supervisors are scoped to incidents on their own rides; admins see all.
+    const supervisorId = req.user?.role === 'supervisor' ? req.user.id : undefined;
+
+    const result = await listIncidents({ rideId, status, supervisorId, page, limit });
     res.json(result);
   } catch (err) {
     next(err);

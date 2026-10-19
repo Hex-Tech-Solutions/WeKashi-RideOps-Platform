@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma';
-import { NotFoundError } from '../types';
+import { NotFoundError, ConflictError } from '../types';
 
 export interface CreatePayoutInput {
   vendorId: string;
@@ -20,6 +20,17 @@ export async function countCompletedRides(vendorId: string, period?: string): Pr
 }
 
 export async function createPayout(input: CreatePayoutInput) {
+  // Guard against duplicate payouts for the same vendor + period. Without this
+  // a double-submit (or two admins) could create multiple payouts for one month,
+  // each independently computing rate × rides.
+  const dup = await prisma.payout.findFirst({
+    where: { vendorId: input.vendorId, period: input.period },
+    select: { id: true },
+  });
+  if (dup) {
+    throw new ConflictError('A payout already exists for this vendor and period');
+  }
+
   let amount = input.amount ?? 0;
   // When a per-ride rate is given, compute the amount from that period's completed rides.
   if (input.ratePerRide != null) {
@@ -91,6 +102,11 @@ export async function attachPayoutFile(id: string, fileUrl: string) {
 export async function markPayoutPaid(id: string) {
   const payout = await prisma.payout.findUnique({ where: { id } });
   if (!payout) throw new NotFoundError('Payout not found');
+
+  // Idempotent: once paid, the frozen amount + paidAt must not change. Without
+  // this, re-marking recomputed the amount against the CURRENT ride count and
+  // could silently alter an already-settled payout.
+  if (payout.status === 'paid') return payout;
 
   // Freeze the live-computed amount at payout time for rate-based payouts.
   let amount = payout.amount;

@@ -14,6 +14,8 @@ export async function createIncident(input: CreateIncidentInput) {
 export async function listIncidents(filters: {
   rideId?: string;
   status?: string;
+  /** When set, restrict to incidents on rides owned by this supervisor. */
+  supervisorId?: string;
   page?: number;
   limit?: number;
 }) {
@@ -24,6 +26,9 @@ export async function listIncidents(filters: {
   const where: Record<string, unknown> = {};
   if (filters.rideId) where.rideId = filters.rideId;
   if (filters.status) where.status = filters.status;
+  // Tenant isolation: a supervisor only sees incidents for their own rides.
+  // Admin passes no supervisorId and sees everything.
+  if (filters.supervisorId) where.ride = { supervisorId: filters.supervisorId };
 
   const [incidents, total] = await Promise.all([
     prisma.safetyIncident.findMany({

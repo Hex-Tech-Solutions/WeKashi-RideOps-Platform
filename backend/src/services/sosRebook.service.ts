@@ -14,9 +14,12 @@
 import { prisma } from '../lib/prisma';
 import { startRideBroadcast } from '../lib/broadcastSweeper';
 import { findNearbyDrivers } from './driver.service';
-import { createRidePax } from './ridePax.service';
 import { addIssueMessage } from './issue.service';
 import { NotFoundError, ValidationError } from '../types';
+import { randomInt } from 'crypto';
+
+// 4-digit OTP, same generator as ridePax.service (crypto-secure).
+const gen4 = () => String(randomInt(1000, 10000));
 import { logger } from '../lib/logger';
 import { computeFare } from '../lib/pricing';
 import { redis } from '../lib/redis';
@@ -111,10 +114,10 @@ export async function sosRebook(
     throw new ValidationError('No passengers left to rebook — all are already dropped or marked no-show');
   }
 
-  // ── 6. Force-cancel original ride ─────────────────────────────────────────
-  await prisma.ride.update({ where: { id: rideId }, data: { status: 'cancelled' } });
-  await redis.del(`ride:broadcast:${rideId}`);
-  logger.info({ rideId, issueId }, 'SOS rebook: original ride force-cancelled');
+  // NOTE: the original ride is NOT cancelled here. Cancelling it before the
+  // replacement exists meant that any failure in steps 7-9 (geo reads, fare
+  // calc, insert) left the passengers with NO ride and no rollback. The cancel
+  // now happens atomically with the new-ride insert in step 9.
 
   // ── 7. Determine pickup point ─────────────────────────────────────────────
   let pickupLat: number;
@@ -168,44 +171,69 @@ export async function sosRebook(
   const paxCount = employeesToRebook.length;
   const capacity = originalRide.capacity;
 
-  // ── 9. Create new ride ────────────────────────────────────────────────────
-  const newRideRows = await prisma.$queryRaw<Array<{ id: string }>>`
-    INSERT INTO rides (
-      id, type, status, supervisor_id, vendor_id,
-      pickup_point, drop_point, pickup_address, drop_address,
-      distance_km, price, vehicle_type,
-      pax_count, capacity,
-      broadcast_started_at, broadcast_expires_at, created_at
-    ) VALUES (
-      gen_random_uuid(),
-      ${ride_type}::"RideType",
-      'broadcasting'::"RideStatus",
-      ${supervisorId},
-      ${vendor_id ?? null},
-      ST_SetSRID(ST_MakePoint(${pickupLng}, ${pickupLat}), 4326)::geography,
-      ST_SetSRID(ST_MakePoint(${drop_lng}, ${drop_lat}), 4326)::geography,
-      ${pickupAddress},
-      ${drop_address},
-      ${estimatedKm},
-      ${price},
-      ${originalRide.vehicleType ?? null},
-      ${paxCount},
-      ${capacity},
-      NOW(),
-      NOW() + INTERVAL '1 minute',
-      NOW()
-    )
-    RETURNING id
-  `;
-
-  const newRideId = newRideRows[0].id;
+  // ── 9. Atomically cancel the original ride + create the replacement ───────
+  // All-or-nothing: if any write here fails, the original ride stays intact so
+  // the passengers are never left stranded with no ride.
   const orderedEmployeeIds = employeesToRebook.map((p) => p.employeeId);
+  const newRideId = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      UPDATE rides SET status = 'cancelled' WHERE id = ${rideId}
+    `;
 
-  await prisma.rideEmployee.createMany({
-    data: orderedEmployeeIds.map((employeeId) => ({ rideId: newRideId, employeeId })),
-    skipDuplicates: true,
+    const newRideRows = await tx.$queryRaw<Array<{ id: string }>>`
+      INSERT INTO rides (
+        id, type, status, supervisor_id, vendor_id,
+        pickup_point, drop_point, pickup_address, drop_address,
+        distance_km, price, vehicle_type,
+        pax_count, capacity,
+        broadcast_started_at, broadcast_expires_at, created_at
+      ) VALUES (
+        gen_random_uuid(),
+        ${ride_type}::"RideType",
+        'broadcasting'::"RideStatus",
+        ${supervisorId},
+        ${vendor_id ?? null},
+        ST_SetSRID(ST_MakePoint(${pickupLng}, ${pickupLat}), 4326)::geography,
+        ST_SetSRID(ST_MakePoint(${drop_lng}, ${drop_lat}), 4326)::geography,
+        ${pickupAddress},
+        ${drop_address},
+        ${estimatedKm},
+        ${price},
+        ${originalRide.vehicleType ?? null},
+        ${paxCount},
+        ${capacity},
+        NOW(),
+        NOW() + INTERVAL '1 minute',
+        NOW()
+      )
+      RETURNING id
+    `;
+    const createdId = newRideRows[0].id;
+
+    // ride_employees links
+    for (const employeeId of orderedEmployeeIds) {
+      await tx.$executeRaw`
+        INSERT INTO ride_employees (ride_id, employee_id)
+        VALUES (${createdId}, ${employeeId})
+        ON CONFLICT DO NOTHING
+      `;
+    }
+
+    // Per-passenger OTP legs (inline — mirrors createRidePax, but on the tx).
+    for (let i = 0; i < orderedEmployeeIds.length; i++) {
+      await tx.$executeRaw`
+        INSERT INTO ride_pax (id, ride_id, employee_id, seq, pickup_otp, drop_otp)
+        VALUES (gen_random_uuid(), ${createdId}, ${orderedEmployeeIds[i]}, ${i}, ${gen4()}, ${gen4()})
+        ON CONFLICT DO NOTHING
+      `;
+    }
+
+    return createdId;
   });
-  await createRidePax(newRideId, orderedEmployeeIds);
+
+  // Original ride is now cancelled (committed) — clear its broadcast key.
+  await redis.del(`ride:broadcast:${rideId}`);
+  logger.info({ rideId, newRideId, issueId }, 'SOS rebook: original cancelled + replacement created atomically');
 
   // ── 10. Post system message in SOS chat ───────────────────────────────────
   const chatMessage = boarded.length > 0

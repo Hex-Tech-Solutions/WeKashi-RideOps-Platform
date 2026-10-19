@@ -30,8 +30,11 @@ export function RoleLayout({ role, user, nav, children }: RoleLayoutProps) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const auth = useAuth();
-  const displayName = auth.user?.user_metadata?.full_name || auth.user?.email?.split("@")[0] || user.name;
-  const displaySub = auth.user?.email || user.sub;
+  // Use the real authenticated user's fields. (Previously this read Supabase-era
+  // `user_metadata`/`email` that don't exist on AuthUser, so it silently always
+  // fell back to the props — and tripped 3 TS errors.)
+  const displayName = auth.user?.fullName || user.name;
+  const displaySub = auth.profile?.org || user.sub;
   const initials = (displayName || "U").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
 
   const [collapsed, setCollapsed] = useState(() => {

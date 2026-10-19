@@ -21,7 +21,22 @@ import { logger } from './logger';
 const appId = process.env.CASHFREE_APP_ID ?? '';
 const secretKey = process.env.CASHFREE_SECRET_KEY ?? '';
 const env = (process.env.CASHFREE_ENV ?? 'sandbox').toLowerCase();
-const webhookSecret = process.env.CASHFREE_WEBHOOK_SECRET ?? secretKey;
+// Webhooks are signed with the DEDICATED webhook secret (Dashboard → Webhooks),
+// NOT the API secret key. The old `?? secretKey` fallback silently produced a
+// wrong key, so every real webhook failed signature verification and pack
+// activation quietly fell back to the client-confirm path only. Resolve it
+// strictly; fail loudly in production when Cashfree is configured but the
+// webhook secret is missing.
+const webhookSecret = process.env.CASHFREE_WEBHOOK_SECRET ?? '';
+if (process.env.NODE_ENV === 'production' && appId && secretKey && !webhookSecret) {
+  throw new Error('FATAL: CASHFREE_WEBHOOK_SECRET must be set in production (Cashfree Dashboard → Developers → Webhooks). It is NOT the API secret key.');
+}
+if (appId && secretKey && !webhookSecret) {
+  logger.warn('CASHFREE_WEBHOOK_SECRET not set — webhook signature verification will reject all webhooks until it is configured.');
+}
+
+// Reject webhook timestamps older than this (replay-protection window).
+const WEBHOOK_MAX_AGE_MS = 5 * 60 * 1000;
 
 // Pin the API version the payloads below are written against.
 const API_VERSION = '2023-08-01';
@@ -150,6 +165,15 @@ export async function getOrderStatus(orderId: string): Promise<CashfreeOrderStat
  */
 export function verifyWebhookSignature(rawBody: string, signature: string, timestamp: string): boolean {
   if (!webhookSecret) return false;
+
+  // Replay protection: Cashfree's x-webhook-timestamp is epoch SECONDS. Reject
+  // anything outside a 5-minute window (covers clock skew; blocks replays of an
+  // old captured request). Non-numeric/absent timestamps are rejected.
+  const tsSec = Number(timestamp);
+  if (!Number.isFinite(tsSec)) return false;
+  const ageMs = Math.abs(Date.now() - tsSec * 1000);
+  if (ageMs > WEBHOOK_MAX_AGE_MS) return false;
+
   const payload = `${timestamp}${rawBody}`;
   const expected = crypto.createHmac('sha256', webhookSecret).update(payload).digest('base64');
   const a = Buffer.from(expected);

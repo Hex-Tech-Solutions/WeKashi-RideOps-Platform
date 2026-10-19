@@ -42,6 +42,9 @@ function getSock(): Socket {
       autoConnect: true,
     });
   }
+  // Refresh the auth token before (re)connecting — avoids a stale token after
+  // a rotation silently stopping live GPS updates.
+  (_sock.auth as { token: string }).token = tokenStore.access ?? "";
   return _sock;
 }
 

@@ -12,24 +12,45 @@ async function sweepStaleScheduledRides(): Promise<void> {
 let sweeperInterval: NodeJS.Timeout | null = null;
 let ioInstance: IoServer | null = null;
 
+let sweeperStopped = false;
+
 export function initBroadcastSweeper(io: IoServer): void {
   ioInstance = io;
+  sweeperStopped = false;
 
   if (sweeperInterval) {
-    clearInterval(sweeperInterval);
+    clearTimeout(sweeperInterval);
+    sweeperInterval = null;
   }
 
-  sweeperInterval = setInterval(async () => {
-    await sweepExpiredBroadcasts();
-    await sweepStaleScheduledRides();
-  }, 30_000);
+  // Self-scheduling loop instead of setInterval: a sweep that runs longer than
+  // the 30s tick can no longer overlap itself (which caused duplicate promotion
+  // work), and a rejected promise can't escape as an unhandled rejection — the
+  // whole body is awaited inside one try/catch and the NEXT run is only
+  // scheduled after this one settles.
+  const tick = async (): Promise<void> => {
+    try {
+      await sweepExpiredBroadcasts();
+      await sweepStaleScheduledRides();
+    } catch (err) {
+      logger.error({ err }, 'Broadcast sweeper tick failed');
+    } finally {
+      if (!sweeperStopped) {
+        sweeperInterval = setTimeout(() => { void tick(); }, 30_000);
+      }
+    }
+  };
 
-  logger.info('Broadcast sweeper started (interval: 30s)');
+  // Kick off the first run after one interval (preserves prior timing).
+  sweeperInterval = setTimeout(() => { void tick(); }, 30_000);
+
+  logger.info('Broadcast sweeper started (interval: 30s, non-overlapping)');
 }
 
 export function stopBroadcastSweeper(): void {
+  sweeperStopped = true;
   if (sweeperInterval) {
-    clearInterval(sweeperInterval);
+    clearTimeout(sweeperInterval);
     sweeperInterval = null;
     logger.info('Broadcast sweeper stopped');
   }

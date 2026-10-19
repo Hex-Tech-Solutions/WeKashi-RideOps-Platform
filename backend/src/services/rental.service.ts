@@ -417,7 +417,15 @@ export async function acceptRental(rentalId: string, driverId: string): Promise<
       if (pack.length === 0) {
         throw new ValidationError('No ride credits available — buy a pack to accept rentals');
       }
-      await tx.$executeRaw`UPDATE credit_packs SET credits_remaining = credits_remaining - 1 WHERE id = ${pack[0].id}`;
+      // Decrement and flip to 'exhausted' at zero — consistent with
+      // consumeOneCredit (ride completion), so a drained pack isn't left
+      // showing 'active' with 0 credits.
+      await tx.$executeRaw`
+        UPDATE credit_packs
+        SET credits_remaining = credits_remaining - 1,
+            status = CASE WHEN credits_remaining - 1 <= 0 THEN 'exhausted' ELSE status END
+        WHERE id = ${pack[0].id}
+      `;
       await tx.$executeRaw`UPDATE rentals SET credit_consumed = true WHERE id = ${rentalId}`;
     }
   });
@@ -439,16 +447,38 @@ export async function releaseRental(rentalId: string, driverId: string): Promise
     `;
     if (rows.length === 0) throw new NotFoundError('Rental not found or not yours');
 
-    // Refund the credit to the driver's newest active pack.
+    // Refund the burned credit. Refund to the OLDEST-expiring active pack —
+    // the SAME ordering acceptRental burns from — so repeated accept/release
+    // churn can no longer migrate credits onto longer-lived packs (which was a
+    // free validity-extension loophole). Reactivate the pack if the decrement
+    // had exhausted it.
     if (rows[0].credit_consumed) {
-      const pack = await tx.$queryRaw<Array<{ id: string }>>`
+      let pack = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM credit_packs
-        WHERE driver_id = ${driverId} AND status = 'active' AND expires_at > NOW()
-        ORDER BY expires_at DESC, created_at DESC
+        WHERE driver_id = ${driverId}
+          AND status IN ('active', 'exhausted')
+          AND expires_at > NOW()
+        ORDER BY expires_at ASC, created_at ASC
         LIMIT 1 FOR UPDATE SKIP LOCKED
       `;
+      // Fallback: no unexpired pack to receive it — don't DESTROY the credit.
+      // Put it back on the driver's most recent pack (reactivated), so the
+      // refund is never silently lost.
+      if (pack.length === 0) {
+        pack = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM credit_packs
+          WHERE driver_id = ${driverId}
+          ORDER BY expires_at DESC, created_at DESC
+          LIMIT 1 FOR UPDATE SKIP LOCKED
+        `;
+      }
       if (pack.length > 0) {
-        await tx.$executeRaw`UPDATE credit_packs SET credits_remaining = credits_remaining + 1 WHERE id = ${pack[0].id}`;
+        await tx.$executeRaw`
+          UPDATE credit_packs
+          SET credits_remaining = credits_remaining + 1,
+              status = CASE WHEN status = 'exhausted' THEN 'active' ELSE status END
+          WHERE id = ${pack[0].id}
+        `;
       }
     }
 

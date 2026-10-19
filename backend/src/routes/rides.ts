@@ -265,12 +265,26 @@ export function createRidesRouter(io: IoServer): Router {
   // GET /rides/:id/detail — full detail for completed-ride sheet
   router.get('/:id/detail', async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const detail = await getRideDetail(req.params.id);
-      // Drivers can only see their own rides
-      if (req.driver && detail.driver?.id !== req.driver.id) {
-        res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' });
-        return;
+      // Ownership scoping — identical rules to GET /rides/:id. Resolved from the
+      // lightweight ride record (owner ids) so the detail payload shape is
+      // unchanged. Without this, any supervisor/vendor could read any tenant's
+      // ride detail (full PII + GPS trail) by guessing a ride id.
+      const owner = await getRide(req.params.id);
+      if (req.driver && owner.driverId !== req.driver.id) {
+        res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
       }
+      if (req.user?.role === 'supervisor' && owner.supervisorId !== req.user.id) {
+        res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
+      }
+      if (req.user?.role === 'vendor') {
+        const { prisma } = await import('../lib/prisma');
+        const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id }, select: { id: true } });
+        if (owner.vendorId !== vendor?.id) {
+          res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
+        }
+      }
+
+      const detail = await getRideDetail(req.params.id);
       res.json(detail);
     } catch (err) {
       next(err);

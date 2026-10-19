@@ -37,6 +37,10 @@ function getSupervisorSocket(): Socket {
       autoConnect: true,
     });
   }
+  // Always refresh the auth token before (re)connecting so a reconnect after a
+  // token rotation doesn't keep presenting the stale token (which would make
+  // the server drop live GPS until a full reload).
+  (supervisorSocket.auth as { token: string }).token = tokenStore.access ?? "";
   return supervisorSocket;
 }
 
