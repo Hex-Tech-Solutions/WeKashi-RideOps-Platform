@@ -87,7 +87,7 @@ export default function DriverLogin() {
           <div className="h-14 w-14 rounded-2xl bg-gold flex items-center justify-center mb-3">
             <Car className="h-7 w-7 text-gold-foreground" />
           </div>
-          <div className="font-bold text-xl">RideOps Driver</div>
+          <div className="font-bold text-xl">Wekashi Cabs</div>
           <div className="text-sm text-muted-foreground">
             {step === "otp" ? "Enter the OTP sent to your phone" : "Sign in or create a new account"}
           </div>

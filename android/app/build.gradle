@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "dev.rideops.driver"
+    namespace "in.wekashi.driver"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "dev.rideops.driver"
+        applicationId "in.wekashi.driver"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

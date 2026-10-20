@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Car, Radio, Wallet, ShieldCheck, Check, ArrowRight, ArrowLeft } from "lucide-react";
 
 const SLIDES = [
-  { icon: Car, title: "Welcome to RideOps Driver", body: "Get matched with nearby corporate rides and earn on your schedule.", tint: "bg-gold/15 text-gold" },
+  { icon: Car, title: "Welcome to Wekashi Cabs", body: "Get matched with nearby corporate rides and earn on your schedule.", tint: "bg-gold/15 text-gold" },
   { icon: Radio, title: "Go online, get broadcasts", body: "Flip online and receive ride requests near you in real time. First to accept wins the trip.", tint: "bg-blue-500/15 text-blue-500" },
   { icon: Wallet, title: "Drive & earn", body: "Start the trip, complete it, and watch your earnings add up — tracked automatically.", tint: "bg-success/15 text-success" },
 ];

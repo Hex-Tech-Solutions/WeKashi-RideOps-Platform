@@ -1,4 +1,4 @@
-package dev.rideops.driver;
+package in.wekashi.driver;
 
 import android.os.Bundle;
 import android.webkit.WebView;
@@ -7,8 +7,8 @@ import android.webkit.WebSettings;
 import com.getcapacitor.BridgeActivity;
 
 /**
- * RideOps Driver — thin native shell that loads the hosted driver console in a
- * WebView (see capacitor.config.ts server.url).
+ * Wekashi Cabs (driver) — thin native shell that loads the hosted driver
+ * console in a WebView (see capacitor.config.ts server.url).
  *
  * The WebView's HTTP cache is configured so the app always picks up the latest
  * deploy instead of pinning a stale bundle:

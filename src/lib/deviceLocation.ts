@@ -67,7 +67,7 @@ export function watchDevicePosition(onUpdate: (c: Coords) => void): () => void {
         // Presence of backgroundMessage is what enables background delivery, and
         // Android shows it in the required persistent notification.
         backgroundMessage: "Sharing your live location while you're online.",
-        backgroundTitle: "RideOps Driver",
+        backgroundTitle: "Wekashi Cabs",
         requestPermissions: true,
         stale: false,
         distanceFilter: BG_DISTANCE_FILTER_M,

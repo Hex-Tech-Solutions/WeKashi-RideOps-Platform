@@ -63,7 +63,7 @@ export default function DriverShell() {
           <div className="h-8 w-8 rounded-lg bg-gold flex items-center justify-center">
             <Car className="h-4 w-4 text-gold-foreground" />
           </div>
-          <div className="font-bold">RideOps Driver</div>
+          <div className="font-bold">Wekashi Cabs</div>
 
           {/* Online status */}
           <span className={`inline-flex items-center gap-1.5 text-xs ${online ? "text-success" : "text-muted-foreground"}`}>

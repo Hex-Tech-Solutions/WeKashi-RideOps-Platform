@@ -106,7 +106,7 @@ Until configured, OTPs are **logged to the api container** (and the dev bypass
 Replaces the driver app's 8-second polling with instant push.
 
 1. Create a **Firebase project** → add an **Android app** with package
-   `dev.rideops.driver` → download `google-services.json`.
+   `in.wekashi.driver` → download `google-services.json`.
 2. Project Settings → **Service accounts** → generate a private key
    (`fcm-service-account.json`).
 3. Copy it to the EC2 box and mount it into the api container:
