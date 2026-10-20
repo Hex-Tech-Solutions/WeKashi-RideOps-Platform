@@ -28,8 +28,13 @@ import { format } from "date-fns";
  * this the batched matrix call would fire on every one of those polls.
  */
 const APPROACH_TTL_MS = 120_000;
-import { getDevicePosition, watchDevicePosition } from "@/lib/deviceLocation";
+import { getDevicePosition, watchDevicePosition, sendOfflineBeacon, openAppSettings } from "@/lib/deviceLocation";
+import { tokenStore } from "@/lib/api";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
+
+// One-time flag: we only nudge the driver about background reliability once per
+// device, the first time they go online, so it isn't nagging on every toggle.
+const BATTERY_PROMPT_KEY = "wekashi_bg_reliability_prompted";
 
 export default function DriverHome() {
   const { data: me } = useDriverMe();
@@ -184,6 +189,30 @@ export default function DriverHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
+  // Best-effort "going offline" beacon: if the driver gracefully backgrounds or
+  // closes the app while online, tell the server immediately rather than waiting
+  // for the 3-min staleness sweep. pagehide is the most reliable unload signal
+  // in the Android WebView. A hard swipe-kill won't fire this — the server
+  // sweeper is the real guarantee; this just speeds up the graceful case.
+  useEffect(() => {
+    if (!online) return;
+    const onHide = () => sendOfflineBeacon(tokenStore.access);
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [online]);
+
+  // First-run background-reliability nudge: the first time a driver goes online
+  // on this device, offer to open app settings so they can allow "all the time"
+  // location + exempt the app from battery optimization. Without that, Android
+  // OEMs kill the backgrounded app and freeze live tracking during navigation.
+  const [showBatteryPrompt, setShowBatteryPrompt] = useState(false);
+  useEffect(() => {
+    if (!online) return;
+    if (localStorage.getItem(BATTERY_PROMPT_KEY)) return;
+    setShowBatteryPrompt(true);
+    localStorage.setItem(BATTERY_PROMPT_KEY, "1");
+  }, [online]);
+
   // Logout rides board everyone at the office up front, so departure is gated
   // on boarding verification. Login rides pick up employee-by-employee during
   // the trip, so there's nothing to verify before starting.
@@ -225,6 +254,29 @@ export default function DriverHome() {
 
   return (
     <div>
+      {/* First-run background-reliability nudge (native only — settings open is a no-op on web) */}
+      <Dialog open={showBatteryPrompt} onOpenChange={setShowBatteryPrompt}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Keep tracking alive in the background</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              While you're online, Wekashi Cabs shares your live location — even when
+              you switch to Google Maps to navigate. For this to keep working, please:
+            </p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Set location permission to <span className="font-medium text-foreground">Allow all the time</span>.</li>
+              <li>Turn <span className="font-medium text-foreground">off</span> battery optimization for this app.</li>
+            </ul>
+            <p className="text-xs">Without this, your phone may stop sharing location when the app is in the background.</p>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="ghost" onClick={() => setShowBatteryPrompt(false)}>Later</Button>
+            <Button onClick={() => { void openAppSettings(); setShowBatteryPrompt(false); }}>Open settings</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div>
         {/* Online toggle */}
         <div className="p-4">

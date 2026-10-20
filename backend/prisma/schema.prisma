@@ -45,6 +45,10 @@ model Driver {
   kycStatus       KycStatus    @default(pending) @map("kyc_status")
   currentLocation Unsupported("geography(Point, 4326)")? @map("current_location")
   isOnline        Boolean      @default(false) @map("is_online")
+  /// Heartbeat timestamp — refreshed on every GPS flush while online. The
+  /// broadcast sweeper flips a driver offline if this goes stale (> 3 min),
+  /// so a swiped/crashed/dead-signal app can't linger as a ghost-online driver.
+  locationUpdatedAt DateTime?  @map("location_updated_at")
   rating          Float        @default(5.0)
   vehicleId       String?      @map("vehicle_id")
   vehicleType     String?      @map("vehicle_type") // hatchback | sedan | suv
@@ -78,6 +82,7 @@ model Driver {
 
   @@index([vendorId])
   @@index([isOnline, status])
+  @@index([isOnline, locationUpdatedAt])
   @@map("drivers")
 }
 

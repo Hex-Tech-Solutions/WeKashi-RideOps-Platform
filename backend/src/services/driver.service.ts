@@ -279,7 +279,11 @@ export async function setDriverOnlineStatus(
 ): Promise<void> {
   await prisma.driver.update({
     where: { id: driverId },
-    data: { isOnline },
+    // Going online seeds the heartbeat immediately so there's never an
+    // is_online=true / location_updated_at=NULL window the sweeper can't reason
+    // about. Going offline clears it. While online, the 60s location flush keeps
+    // it fresh (see locationBuffer.ts).
+    data: { isOnline, locationUpdatedAt: isOnline ? new Date() : null },
   });
 }
 

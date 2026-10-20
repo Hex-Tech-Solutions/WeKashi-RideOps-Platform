@@ -112,7 +112,8 @@ export async function flushLocationBuffer(): Promise<void> {
         await prisma.$executeRawUnsafe(`
           UPDATE drivers
           SET current_location = CASE ${cases} ELSE current_location END,
-              is_online = true
+              is_online = true,
+              location_updated_at = NOW()
           WHERE id IN (${ids})
         `);
       }

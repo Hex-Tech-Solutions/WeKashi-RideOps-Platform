@@ -96,6 +96,43 @@ export function watchDevicePosition(onUpdate: (c: Coords) => void): () => void {
   return startForegroundWatch(onUpdate);
 }
 
+// ─── Battery-optimization / permissions settings ──────────────────────────────
+//
+// Opens the app's Android settings page (where "Allow all the time" location and
+// battery-optimization exemption live). No-op on web. Used by the first-run
+// background-reliability prompt — Android OEMs (Xiaomi/Oppo/etc.) aggressively
+// kill backgrounded apps unless the user exempts them, which otherwise freezes
+// live tracking the moment the driver switches to Google Maps.
+export async function openAppSettings(): Promise<void> {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable("BackgroundGeolocation")) return;
+  try {
+    await bgGeo().openSettings();
+  } catch {
+    // openSettings can reject if no activity handles the intent — ignore.
+  }
+}
+
+// ─── Best-effort "going offline" beacon ───────────────────────────────────────
+//
+// Fired when the app is gracefully backgrounded/closed (pagehide) while online.
+// Tells the server to flip the driver offline immediately instead of waiting for
+// the 3-min staleness sweep. Uses fetch keepalive so the request survives page
+// unload (sendBeacon can't carry the Authorization header). This is only a fast
+// path for GRACEFUL exits — a hard swipe-kill won't fire it, which is exactly why
+// the server-side staleness sweeper remains the real guarantee.
+export function sendOfflineBeacon(accessToken: string | null): void {
+  if (!accessToken) return;
+  try {
+    void fetch("/api/driver/offline", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      keepalive: true,
+    });
+  } catch {
+    // Unload path — nothing we can do if it fails; the sweeper backstops it.
+  }
+}
+
 // Browser navigator.geolocation watch — foreground only. Used on the web and as
 // a fallback if the native background plugin can't start.
 function startForegroundWatch(onUpdate: (c: Coords) => void): () => void {

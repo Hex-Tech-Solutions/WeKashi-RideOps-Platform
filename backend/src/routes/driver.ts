@@ -106,6 +106,10 @@ router.get('/scheduled', async (req: AuthRequest, res: Response, next: NextFunct
 router.post('/online', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { lat, lng } = LocationSchema.parse(req.body);
+    // Flip the DB flag + seed the heartbeat immediately — don't wait up to 60s
+    // for the location flush, otherwise the driver appears offline to matching
+    // right after going online.
+    await setDriverOnlineStatus(req.driver!.id, true);
     await updateDriverLocation(req.driver!.id, lat, lng, io);
     res.json({ isOnline: true });
   } catch (err) {
