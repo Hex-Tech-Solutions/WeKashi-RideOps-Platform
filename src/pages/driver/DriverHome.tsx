@@ -166,9 +166,20 @@ export default function DriverHome() {
   }, [online, offerKey]);
 
   // While online, watch the device GPS and push live location to the server.
+  // On native this is a BACKGROUND watch (foreground service) so the live map
+  // + trip odometer keep updating even while the driver is in Google Maps.
+  // Posts are time-throttled to ~10s so a tight distance filter doesn't spam
+  // the endpoint; the backend further throttles the supervisor socket (3s) and
+  // batches DB writes (60s flush).
   useEffect(() => {
     if (!online) return;
-    const stop = watchDevicePosition((c) => updateLocation.mutate(c));
+    let lastPostTs = 0;
+    const stop = watchDevicePosition((c) => {
+      const now = Date.now();
+      if (now - lastPostTs < 10_000) return;
+      lastPostTs = now;
+      updateLocation.mutate(c);
+    });
     return stop;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);

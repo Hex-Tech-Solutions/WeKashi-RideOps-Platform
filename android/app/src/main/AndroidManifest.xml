@@ -38,8 +38,16 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Live driver location (navigator.geolocation in the WebView) -->
+    <!-- Live driver location. FINE/COARSE cover foreground use; BACKGROUND lets
+         the location foreground-service keep emitting while the driver is in
+         another app (e.g. Google Maps for navigation) so the live map + trip
+         odometer don't go stale. FOREGROUND_SERVICE[_LOCATION] are required on
+         Android 10+/14+ to run the persistent-notification location service. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>
