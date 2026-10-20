@@ -4,11 +4,25 @@
 // (release) a rental they accepted, returning it to the marketplace.
 
 import { prisma } from '../lib/prisma';
+import { redis } from '../lib/redis';
 import { Prisma } from '@prisma/client';
 import { getRentalPack, computeRentalOverage, type RentalVehicle } from '../lib/rentalPacks';
 import { NotFoundError, ValidationError, ConflictError } from '../types';
 import { logger } from '../lib/logger';
 import { randomInt } from 'crypto';
+
+// A driver's dismissed rentals persist across refreshes (so a declined card
+// doesn't reappear) via a Redis set keyed by driver. Entries auto-expire after
+// a day — long enough to outlast a rental's broadcast window, short enough not
+// to accumulate forever. The filter is applied in listEligibleRentalsForDriver.
+const DISMISS_TTL_SEC = 24 * 60 * 60;
+const dismissKey = (driverId: string) => `rental:dismissed:${driverId}`;
+
+export async function dismissRentalForDriver(driverId: string, rentalId: string): Promise<void> {
+  const key = dismissKey(driverId);
+  await redis.sadd(key, rentalId);
+  await redis.expire(key, DISMISS_TTL_SEC);
+}
 
 // 4-digit OTPs, same format as employee pickup/drop OTPs.
 const gen4 = () => String(randomInt(1000, 10000));
@@ -234,6 +248,71 @@ export async function completeRental(rentalId: string, driverId: string, otp: st
   return { total };
 }
 
+/**
+ * Driver closes a rental because the customer never showed up. Only valid on a
+ * rental the driver holds that has NOT started (status 'assigned') — once the
+ * pickup OTP is entered the trip is underway and must be completed normally.
+ *
+ * The rental is marked completed and billed at HALF the base price to
+ * compensate the driver for turning up; the burned credit is NOT refunded (the
+ * driver still did the work of accepting + driving to pickup). Flows through the
+ * same post-completion pipeline (Payments + history) as any completed rental.
+ * Returns the half-fare total + the supervisorId so the caller can notify them.
+ */
+export async function closeRentalNoShow(
+  rentalId: string,
+  driverId: string,
+): Promise<{ total: number; supervisorId: string }> {
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    select: { driverId: true, status: true, basePrice: true, supervisorId: true },
+  });
+  if (!rental || rental.driverId !== driverId) throw new NotFoundError('Rental not found');
+  if (rental.status !== 'assigned') {
+    throw new ValidationError('A no-show can only be reported before the ride starts');
+  }
+
+  // Half the base package price, rounded to the rupee.
+  const total = Math.round(rental.basePrice / 2);
+  await prisma.rental.update({
+    where: { id: rentalId },
+    data: {
+      status: 'completed',
+      noShow: true,
+      completedAt: new Date(),
+      distanceM: 0,
+      overageHours: 0,
+      overageKm: 0,
+      overageAmount: 0,
+      totalAmount: total,
+    },
+  });
+  logger.info({ rentalId, driverId, total }, 'Rental closed as customer no-show (half fare)');
+  return { total, supervisorId: rental.supervisorId };
+}
+
+/**
+ * Expire rentals that were never accepted by their scheduled pickup time.
+ * A broadcasting rental with a scheduledFor in the past is retired to
+ * 'expired' (parallel to how unclaimed scheduled rides are swept). No credit is
+ * involved (nobody accepted it). Returns the affected rentals so the caller can
+ * notify each supervisor.
+ */
+export async function expireStaleRentals(): Promise<Array<{ id: string; supervisorId: string }>> {
+  const stale = await prisma.$queryRaw<Array<{ id: string; supervisor_id: string }>>`
+    UPDATE rentals
+    SET status = 'expired'
+    WHERE status = 'broadcasting'
+      AND scheduled_for IS NOT NULL
+      AND scheduled_for < NOW()
+    RETURNING id, supervisor_id
+  `;
+  if (stale.length > 0) {
+    logger.info({ count: stale.length }, 'Expired unaccepted rentals past their scheduled time');
+  }
+  return stale.map((r) => ({ id: r.id, supervisorId: r.supervisor_id }));
+}
+
 /** Append a GPS breadcrumb for an in-progress rental (the odometer source). */
 export async function logRentalLocation(rentalId: string, driverId: string, lat: number, lng: number): Promise<void> {
   const rental = await prisma.rental.findUnique({
@@ -331,11 +410,20 @@ export async function listEligibleRentalsForDriver(driverId: string) {
   });
   if (active > 0) return [];
 
-  return prisma.rental.findMany({
-    where: { status: 'broadcasting', vehicleType: driver.vehicleType },
+  // Drop rentals this driver has dismissed (persisted in Redis so a declined
+  // card stays hidden across refreshes).
+  const dismissed = await redis.smembers(dismissKey(driverId));
+
+  const rentals = await prisma.rental.findMany({
+    where: {
+      status: 'broadcasting',
+      vehicleType: driver.vehicleType,
+      ...(dismissed.length > 0 ? { id: { notIn: dismissed } } : {}),
+    },
     select: DRIVER_RENTAL_SELECT,
     orderBy: { createdAt: 'desc' },
   });
+  return rentals;
 }
 
 // Fields safe to return to the driver app. Critically this OMITS pickup_otp
@@ -370,6 +458,7 @@ export async function listDriverRentalHistory(driverId: string, limit = 30) {
       extraPerHr: true, pickupAddress: true, status: true, notes: true,
       startedAt: true, completedAt: true, distanceM: true,
       overageHours: true, overageKm: true, overageAmount: true, totalAmount: true,
+      noShow: true,
       paymentStatus: true, paymentRef: true, paidAt: true, paymentReceivedAt: true,
     },
     orderBy: { completedAt: 'desc' },
@@ -519,8 +608,8 @@ export async function removeRental(rentalId: string, supervisorId: string): Prom
   const rental = await prisma.rental.findUnique({ where: { id: rentalId }, select: { supervisorId: true, status: true } });
   if (!rental) throw new NotFoundError('Rental not found');
   if (rental.supervisorId !== supervisorId) throw new ValidationError('Access denied');
-  if (rental.status !== 'cancelled' && rental.status !== 'completed') {
-    throw new ValidationError('Only cancelled or completed rentals can be deleted');
+  if (!['cancelled', 'completed', 'expired'].includes(rental.status)) {
+    throw new ValidationError('Only cancelled, completed or expired rentals can be deleted');
   }
   await prisma.rental.delete({ where: { id: rentalId } });
 }

@@ -37,6 +37,8 @@ import {
   startRental,
   agreeRentalOverage,
   completeRental,
+  closeRentalNoShow,
+  dismissRentalForDriver,
   getRentalProgress,
   logRentalLocation,
 } from '../services/rental.service';
@@ -388,6 +390,29 @@ router.post('/upi', async (req: AuthRequest, res: Response, next: NextFunction) 
     try {
       const { otp } = z.object({ otp: z.string().min(4).max(6) }).parse(req.body);
       res.json(await completeRental(req.params.id, req.driver!.id, otp));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/no-show — customer never showed; close at half
+  // fare. The supervisor's rental list polls every 15s, so the no-show banner +
+  // half-fare total surface there automatically (no socket push needed).
+  router.post('/rentals/:id/no-show', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { total } = await closeRentalNoShow(req.params.id, req.driver!.id);
+      res.json({ ok: true, total });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/driver/rentals/:id/dismiss — hide a broadcasting rental for this
+  // driver (persists across refresh; does not affect other drivers).
+  router.post('/rentals/:id/dismiss', async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await dismissRentalForDriver(req.driver!.id, req.params.id);
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }

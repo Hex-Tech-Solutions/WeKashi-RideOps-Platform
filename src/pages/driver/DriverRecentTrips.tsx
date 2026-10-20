@@ -112,7 +112,9 @@ function RentalHistoryCard({ rental: r, expanded, onToggle }: { rental: RentalHi
               {r.customerName}
               <Badge variant="outline" className="capitalize text-[9px] px-1.5">{r.vehicleType}</Badge>
             </div>
-            <div className="text-xs text-muted-foreground">Rental · {r.hours}h/{r.km}km · completed</div>
+            <div className="text-xs text-muted-foreground">
+              Rental · {r.hours}h/{r.km}km · {r.noShow ? "customer no-show (half fare)" : "completed"}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="font-semibold">₹{total}</span>

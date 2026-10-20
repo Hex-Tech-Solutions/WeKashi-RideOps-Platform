@@ -13,7 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  useDriverRentalsAvailable, useAcceptRental,
+  useDriverRentalsAvailable, useAcceptRental, useDismissRental,
   mapsUrlForAddress, type RentalRow,
 } from "@/lib/queries";
 import { rideArea } from "@/lib/rideArea";
@@ -30,6 +30,9 @@ function rentalPickup(scheduledFor?: string | null): string {
 export function DriverRentalBrowse() {
   const { data } = useDriverRentalsAvailable();
   const acceptRental = useAcceptRental();
+  const dismissRental = useDismissRental();
+  // Local set gives instant feedback; the backend dismiss persists it so the
+  // card stays hidden across refreshes (server also filters it out).
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const available = (data?.rentals ?? []).filter((r) => !dismissed.has(r.id));
 
@@ -55,7 +58,11 @@ export function DriverRentalBrowse() {
             onSuccess: () => toast.success("Rental accepted — see it under Rides"),
             onError: (e: any) => toast.error(e?.message ?? "Rental no longer available"),
           })}
-          onDecline={(id) => { setDismissed((s) => new Set(s).add(id)); toast("Rental dismissed"); }}
+          onDecline={(id) => {
+            setDismissed((s) => new Set(s).add(id));
+            dismissRental.mutate(id);
+            toast("Rental hidden");
+          }}
         />
       )}
     </section>
@@ -112,12 +119,12 @@ function RentalCard({
       <div className="bg-foreground text-background px-4 py-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-widest text-background/50 font-medium">You earn</div>
+            <div className="text-[10px] uppercase tracking-widest text-background/50 font-medium">Est. earnings</div>
             <div className="flex items-baseline gap-1 leading-none">
               <span className="text-4xl font-extrabold text-gold tracking-tight">₹{r.basePrice}</span>
             </div>
             <div className="text-[11px] text-background/70 mt-0.5">
-              ₹{r.extraPerKm}/extra km · ₹{r.extraPerHr}/extra hr
+              +₹{r.extraPerKm}/extra km · ₹{r.extraPerHr}/extra hr
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[55%]">

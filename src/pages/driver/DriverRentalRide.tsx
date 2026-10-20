@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   useRentalArrived, useStartRental, useAgreeRentalOverage, useCompleteRental,
-  useLogRentalLocation, useRentalProgress, useReleaseRental,
+  useLogRentalLocation, useRentalProgress, useReleaseRental, useRentalNoShow,
   mapsUrlForAddress, type RentalRow,
 } from "@/lib/queries";
 import { getDevicePosition, watchDevicePosition } from "@/lib/deviceLocation";
@@ -48,6 +48,7 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
   const complete = useCompleteRental();
   const logLoc = useLogRentalLocation();
   const release = useReleaseRental();
+  const noShow = useRentalNoShow();
 
   const inProgress = r.status === "in_progress";
   const { data: progress } = useRentalProgress(r.id, "driver", inProgress);
@@ -125,7 +126,7 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
       {/* Header */}
       <div className="bg-foreground text-background px-4 py-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-widest text-background/50 font-medium">Rental · you earn</div>
+          <div className="text-[10px] uppercase tracking-widest text-background/50 font-medium">Rental · est. earnings</div>
           <div className="flex items-baseline gap-1 leading-none">
             <span className="text-3xl font-extrabold text-gold tracking-tight">
               ₹{progress?.finalTotal ?? r.basePrice}
@@ -195,18 +196,36 @@ export function DriverRentalRide({ rental: r }: { rental: RentalRow }) {
                 </div>
               </div>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full text-muted-foreground hover:text-destructive"
-              disabled={release.isPending}
-              onClick={() => release.mutate(r.id, {
-                onSuccess: () => toast("Rental released — credit refunded"),
-                onError: (e: any) => toast.error(e?.message ?? "Failed"),
-              })}
-            >
-              <X className="h-3.5 w-3.5" /> Release rental
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="flex-1 text-muted-foreground hover:text-destructive"
+                disabled={release.isPending || noShow.isPending}
+                onClick={() => release.mutate(r.id, {
+                  onSuccess: () => toast("Rental released — credit refunded"),
+                  onError: (e: any) => toast.error(e?.message ?? "Failed"),
+                })}
+              >
+                <X className="h-3.5 w-3.5" /> Release
+              </Button>
+              {/* Customer no-show: only meaningful once the driver has reached
+                  pickup. Closes at half fare and notifies the supervisor. */}
+              {hasArrived && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 border-amber-500/40 text-amber-600 hover:bg-amber-500/10"
+                  disabled={noShow.isPending || release.isPending}
+                  onClick={() => noShow.mutate(r.id, {
+                    onSuccess: (res) => toast.success(`Marked no-show — you're paid ₹${res.total} (half fare)`),
+                    onError: (e: any) => toast.error(e?.message ?? "Failed"),
+                  })}
+                >
+                  Customer no-show
+                </Button>
+              )}
+            </div>
           </div>
         )}
 

@@ -9,6 +9,14 @@ async function sweepStaleScheduledRides(): Promise<void> {
   await sweep(ioInstance ?? undefined);
 }
 
+// Expire rentals never accepted by their scheduled pickup time. The supervisor's
+// rental list polls every 15s, so the 'expired' status surfaces there on its own
+// — no socket push needed. Lazy import for the circular-dependency reason.
+async function sweepStaleRentals(): Promise<void> {
+  const { expireStaleRentals } = await import('../services/rental.service');
+  await expireStaleRentals();
+}
+
 let sweeperInterval: NodeJS.Timeout | null = null;
 let ioInstance: IoServer | null = null;
 
@@ -32,6 +40,7 @@ export function initBroadcastSweeper(io: IoServer): void {
     try {
       await sweepExpiredBroadcasts();
       await sweepStaleScheduledRides();
+      await sweepStaleRentals();
     } catch (err) {
       logger.error({ err }, 'Broadcast sweeper tick failed');
     } finally {

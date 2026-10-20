@@ -1862,7 +1862,8 @@ export interface RentalRow {
   extraPerHr: number;
   pickupAddress: string;
   scheduledFor: string | null;
-  status: "broadcasting" | "assigned" | "in_progress" | "completed" | "cancelled";
+  status: "broadcasting" | "assigned" | "in_progress" | "completed" | "cancelled" | "expired";
+  noShow?: boolean;
   notes: string | null;
   createdAt: string;
   // Lifecycle timestamps + state (present once the ride progresses).
@@ -2011,6 +2012,7 @@ export interface RentalHistoryRow {
   extraPerHr: number;
   pickupAddress: string;
   status: string;
+  noShow?: boolean;
   notes: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -2038,6 +2040,27 @@ export function useMarkRentalReceived() {
   return useMutation({
     mutationFn: (id: string) => api(`/driver/rentals/${id}/received`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "rentals", "history"] }),
+  });
+}
+
+/** Driver hides a broadcasting rental (persists across refresh, per-driver). */
+export function useDismissRental() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/driver/rentals/${id}/dismiss`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "rentals", "available"] }),
+  });
+}
+
+/** Driver closes an accepted-but-unstarted rental as a customer no-show (half fare). */
+export function useRentalNoShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<{ ok: boolean; total: number }>(`/driver/rentals/${id}/no-show`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", "rentals"] });
+      qc.invalidateQueries({ queryKey: ["driver", "rentals", "history"] });
+    },
   });
 }
 

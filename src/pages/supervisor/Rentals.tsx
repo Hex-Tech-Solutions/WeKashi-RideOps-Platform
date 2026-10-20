@@ -204,9 +204,13 @@ function RentalRowCard({ rental: r, onCancel, onRemove }: { rental: RentalRow; o
     r.status === "broadcasting" ? "border-gold/50 text-gold-dark bg-gold/10"
     : r.status === "completed" ? "border-success/40 text-success bg-success/5"
     : r.status === "cancelled" ? "border-destructive/40 text-destructive bg-destructive/5"
+    : r.status === "expired" ? "border-muted-foreground/40 text-muted-foreground bg-muted/40"
     : "border-foreground/30 text-foreground";
 
-  const removable = r.status === "cancelled" || r.status === "completed";
+  // Label 'expired' clearly ("no driver accepted it in time").
+  const statusLabel = r.status === "expired" ? "expired — not accepted" : r.status.replace("_", " ");
+
+  const removable = r.status === "cancelled" || r.status === "completed" || r.status === "expired";
   const pickup = r.scheduledFor
     ? new Date(r.scheduledFor).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })
     : "Now";
@@ -227,7 +231,7 @@ function RentalRowCard({ rental: r, onCancel, onRemove }: { rental: RentalRow; o
           <span className="flex items-center gap-1" title="Pickup time"><CalendarClock className="h-3.5 w-3.5" /> {pickup}</span>
           <span className="truncate max-w-[200px]" title={r.pickupAddress}>{r.pickupAddress}</span>
         </div>
-        <Badge variant="outline" className={`capitalize ${statusColor}`}>{r.status.replace("_", " ")}</Badge>
+        <Badge variant="outline" className={`capitalize ${statusColor}`}>{statusLabel}</Badge>
         {r.driver && (
           <span className="text-xs text-muted-foreground flex items-center gap-1">
             <Users className="h-3.5 w-3.5" /> {r.driver.fullName}
@@ -324,6 +328,13 @@ function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?:
       </div>
 
       <CardContent className="p-4 space-y-3">
+        {/* Customer no-show — closed by the driver, billed at half fare. */}
+        {r.noShow && (
+          <div className="rounded-md px-3 py-2 text-xs bg-amber-500/10 border border-amber-500/30 text-amber-700 font-medium">
+            Customer no-show — closed by the driver and billed at half fare to compensate them.
+          </div>
+        )}
+
         {/* Driver + vehicle details */}
         {r.driver ? (
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">

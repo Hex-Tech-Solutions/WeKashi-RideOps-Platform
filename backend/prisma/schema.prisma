@@ -101,8 +101,13 @@ model Rental {
   pickupAddress  String    @map("pickup_address")
   pickupPoint    Unsupported("geography(Point, 4326)")? @map("pickup_point")
   scheduledFor   DateTime? @map("scheduled_for")
-  status         String    @default("broadcasting") // broadcasting | assigned | in_progress | completed | cancelled
+  status         String    @default("broadcasting") // broadcasting | assigned | in_progress | completed | cancelled | expired
   creditConsumed Boolean   @default(false) @map("credit_consumed")
+  /// Driver closed the rental because the customer never showed. The rental is
+  /// marked completed and billed at HALF the base price to compensate the
+  /// driver; the burned credit is NOT refunded. Surfaced so the supervisor
+  /// card + history can label it distinctly.
+  noShow         Boolean   @default(false) @map("no_show")
   notes          String?
 
   // ── Live ride lifecycle (Rental Rides) ──────────────────────────────────────
