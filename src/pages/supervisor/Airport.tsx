@@ -10,6 +10,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PlacesInput } from "@/components/PlacesInput";
+import { OfficeMapPicker } from "@/components/OfficeMapPicker";
 import {
   useAirportRides, useCreateAirportRide, useCancelAirportRide, useComputeRoute,
   type AirportRideRow,
@@ -53,6 +54,7 @@ function AirportBookingForm() {
   const [paxPhone, setPaxPhone] = useState("");
   const [vehicleType, setVehicleType] = useState<VehicleType>("sedan");
   const [scheduleAt, setScheduleAt] = useState<string>("");
+  const [mapOpen, setMapOpen] = useState(false);
 
   // Distance + toll from the backend Routes API, recomputed whenever the city
   // point, terminal, or direction changes. The fixed terminal is one end.
@@ -86,7 +88,7 @@ function AirportBookingForm() {
 
   const reset = () => {
     setCity(null); setPaxName(""); setPaxPhone("");
-    setScheduleAt(""); setRoute(null);
+    setScheduleAt(""); setRoute(null); setMapOpen(false);
   };
 
   const submit = (scheduled: boolean) => {
@@ -162,14 +164,33 @@ function AirportBookingForm() {
           </div>
         </div>
 
-        {/* City point */}
+        {/* City point — type-ahead search, with a drag-and-drop map to fine-tune. */}
         <div>
-          <Label className="text-xs">{cityLabel}</Label>
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">{cityLabel}</Label>
+            <button
+              type="button"
+              onClick={() => setMapOpen((o) => !o)}
+              className="text-[11px] text-gold-dark hover:underline flex items-center gap-1"
+            >
+              <MapPin className="h-3 w-3" /> {mapOpen ? "Hide map" : "Adjust on map"}
+            </button>
+          </div>
           <PlacesInput
+            key={`places-${city ? `${city.lat},${city.lng}` : "empty"}`}
+            defaultValue={city?.address}
             placeholder={`Search ${cityLabel.toLowerCase()}`}
             onSelect={(v) => setCity(v)}
           />
           {city && <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1"><MapPin className="h-3 w-3" /> {city.address}</div>}
+          {mapOpen && (
+            <div className="mt-2">
+              <OfficeMapPicker
+                initial={city}
+                onChange={(v) => setCity(v)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Passenger details */}
