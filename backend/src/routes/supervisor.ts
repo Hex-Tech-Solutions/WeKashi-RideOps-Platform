@@ -414,7 +414,22 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
 
 // ── Rentals ───────────────────────────────────────────────────────────────────
 import { listRentalPacks } from '../lib/rentalPacks';
-import { createRental, listRentalsForSupervisor, cancelRental, removeRental, getRentalProgress } from '../services/rental.service';
+import { createRental, listRentalsForSupervisor, cancelRental, removeRental, getRentalProgress, getRentalDetail } from '../services/rental.service';
+
+// GET /supervisor/rentals/:id/detail — full rental detail incl. GPS trail for
+// the completed-rental review map + receipt. Ownership-guarded.
+router.get('/rentals/:id/detail', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const owned = await prisma.rental.findFirst({
+      where: { id: req.params.id, supervisorId: req.user!.id },
+      select: { id: true },
+    });
+    if (!owned) { res.status(404).json({ error: 'Rental not found', code: 'NOT_FOUND' }); return; }
+    res.json(await getRentalDetail(req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── Airport rides ─────────────────────────────────────────────────────────────
 // Creation/broadcast lives in the rides router (it has the io instance). This

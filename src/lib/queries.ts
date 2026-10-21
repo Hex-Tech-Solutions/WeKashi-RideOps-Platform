@@ -1665,6 +1665,78 @@ export function usePendingPayments() {
   });
 }
 
+export interface PaidPaymentRow {
+  kind: "ride" | "rental";
+  id: string;
+  type: string;
+  amount: number;
+  price: number | null;
+  escortCharge: number | null;
+  tollCharge?: number | null;
+  totalAmount: number | null;
+  distanceKm: number | null;
+  pickupAddress: string;
+  dropAddress: string;
+  completedAt: string | null;
+  paymentStatus: string;
+  paymentRef: string | null;
+  paidAt: string | null;
+  paymentReceivedAt: string | null;
+  driver: { id: string; fullName: string; phone: string } | null;
+}
+
+export function usePaymentHistory() {
+  return useQuery({
+    queryKey: ["paymentHistory"],
+    queryFn: () => api<{ rides: PaidPaymentRow[] }>("/payments/history"),
+    refetchInterval: 60_000,
+  });
+}
+
+// ── Rental detail (trail + receipt) ──────────────────────────────────────────
+export interface RentalDetail {
+  id: string;
+  status: string;
+  customerName: string;
+  customerPhone: string;
+  vehicleType: string;
+  packageKey: string;
+  hours: number;
+  km: number;
+  basePrice: number;
+  pickupAddress: string;
+  pickupLat: number | null;
+  pickupLng: number | null;
+  scheduledFor: string | null;
+  createdAt: string;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  elapsedSec: number;
+  distanceM: number;
+  distanceKm: number;
+  overageHours: number;
+  overageKm: number;
+  overageAmount: number;
+  totalAmount: number | null;
+  noShow: boolean;
+  paymentStatus: string;
+  paymentRef: string | null;
+  paidAt: string | null;
+  paymentReceivedAt: string | null;
+  driver: { fullName: string; phone: string; vehicleType: string | null; vehicle: { regNo: string; fuelType: string } | null } | null;
+  supervisor: { fullName: string; org: string | null; phone: string | null } | null;
+  locationTrail: { lat: number; lng: number; recordedAt: string }[];
+}
+
+export function useRentalDetail(rentalId?: string) {
+  return useQuery({
+    queryKey: ["rentalDetail", rentalId],
+    queryFn: () => api<RentalDetail>(`/supervisor/rentals/${rentalId}/detail`),
+    enabled: !!rentalId,
+  });
+}
+
 // ─── Supervisor pay-QR (direct UPI, untracked) ────────────────────────────────
 
 export interface RidePayQr {

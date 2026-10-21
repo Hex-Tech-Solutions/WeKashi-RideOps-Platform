@@ -326,6 +326,80 @@ export async function logRentalLocation(rentalId: string, driverId: string, lat:
   `;
 }
 
+/**
+ * Full detail for a completed (or in-progress) rental, including the GPS
+ * breadcrumb TRAIL recorded during the trip — the rental analogue of
+ * getRideDetail. Lets the supervisor review the exact route driven and export
+ * a receipt, matching what normal/airport rides offer.
+ */
+export async function getRentalDetail(rentalId: string) {
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    include: {
+      driver: {
+        select: {
+          fullName: true, phone: true, vehicleType: true,
+          vehicle: { select: { regNo: true, fuelType: true } },
+        },
+      },
+      supervisor: { select: { fullName: true, org: true, phone: true } },
+    },
+  });
+  if (!rental) throw new NotFoundError('Rental not found');
+
+  // Pickup point (geography) + the ordered breadcrumb trail.
+  const pickupRows = await prisma.$queryRaw<Array<{ lat: number | null; lng: number | null }>>`
+    SELECT ST_Y(pickup_point::geometry) AS lat, ST_X(pickup_point::geometry) AS lng
+    FROM rentals WHERE id = ${rentalId}
+  `;
+  const trail = await prisma.$queryRaw<Array<{ lat: number; lng: number; recorded_at: Date }>>`
+    SELECT ST_Y(point::geometry) AS lat, ST_X(point::geometry) AS lng, recorded_at
+    FROM rental_location_logs
+    WHERE rental_id = ${rentalId}
+    ORDER BY recorded_at ASC
+  `;
+
+  // Elapsed — in whole seconds, so a sub-minute trip is not shown as 0.
+  const startedAt = rental.startedAt ? rental.startedAt.getTime() : null;
+  const endRef = rental.completedAt ? rental.completedAt.getTime() : Date.now();
+  const elapsedSec = startedAt ? Math.max(0, Math.round((endRef - startedAt) / 1000)) : 0;
+
+  return {
+    id: rental.id,
+    status: rental.status,
+    customerName: rental.customerName,
+    customerPhone: rental.customerPhone,
+    vehicleType: rental.vehicleType,
+    packageKey: rental.packageKey,
+    hours: rental.hours,
+    km: rental.km,
+    basePrice: rental.basePrice,
+    pickupAddress: rental.pickupAddress,
+    pickupLat: pickupRows[0]?.lat ?? null,
+    pickupLng: pickupRows[0]?.lng ?? null,
+    scheduledFor: rental.scheduledFor,
+    createdAt: rental.createdAt,
+    acceptedAt: rental.acceptedAt,
+    startedAt: rental.startedAt,
+    completedAt: rental.completedAt,
+    elapsedSec,
+    distanceM: rental.distanceM,
+    distanceKm: Math.round((rental.distanceM / 1000) * 10) / 10,
+    overageHours: rental.overageHours,
+    overageKm: rental.overageKm,
+    overageAmount: rental.overageAmount,
+    totalAmount: rental.totalAmount,
+    noShow: rental.noShow,
+    paymentStatus: rental.paymentStatus,
+    paymentRef: rental.paymentRef,
+    paidAt: rental.paidAt,
+    paymentReceivedAt: rental.paymentReceivedAt,
+    driver: rental.driver,
+    supervisor: rental.supervisor,
+    locationTrail: trail.map((t) => ({ lat: t.lat, lng: t.lng, recordedAt: t.recorded_at })),
+  };
+}
+
 // Supervisor's rentals (newest first). Includes the full driver + vehicle
 // details and the OTPs — this is the ONLY place OTPs are surfaced, so the
 // supervisor can read them out to the driver. For assigned rentals (driver en

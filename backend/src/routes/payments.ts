@@ -128,6 +128,86 @@ router.get(
   },
 );
 
+// ─── Supervisor: payment history (settled) ────────────────────────────────────
+// Completed rides AND rentals the supervisor has already marked PAID. Without
+// this, a paid ride dropped out of /pending and vanished from the console — the
+// settled record was never shown again. This retains it as history (UTR last-4,
+// paid time, driver acknowledgment).
+router.get(
+  '/history',
+  authenticate, requireRole('supervisor'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const rides = await prisma.ride.findMany({
+        where: {
+          supervisorId: req.user!.id,
+          status: 'completed',
+          paymentStatus: 'paid',
+          driverId: { not: null },
+        },
+        select: {
+          id: true, type: true, price: true, escortCharge: true, tollCharge: true,
+          totalAmount: true, distanceKm: true, pickupAddress: true, dropAddress: true,
+          completedAt: true, paymentStatus: true, paymentRef: true, paidAt: true, paymentReceivedAt: true,
+          driver: { select: { id: true, fullName: true, phone: true } },
+        },
+        orderBy: { paidAt: 'desc' },
+        take: 200,
+      });
+
+      const rideRows = rides.map((r) => ({
+        kind: 'ride' as const,
+        ...r,
+        amount: r.totalAmount ?? ((r.price ?? 0) + (r.escortCharge ?? 0)),
+      }));
+
+      const rentals = await prisma.rental.findMany({
+        where: {
+          supervisorId: req.user!.id,
+          status: 'completed',
+          paymentStatus: 'paid',
+          driverId: { not: null },
+        },
+        select: {
+          id: true, packageKey: true, basePrice: true, overageAmount: true, totalAmount: true,
+          hours: true, km: true, distanceM: true, pickupAddress: true, customerName: true,
+          completedAt: true, paymentStatus: true, paymentRef: true, paidAt: true, paymentReceivedAt: true,
+          driver: { select: { id: true, fullName: true, phone: true } },
+        },
+        orderBy: { paidAt: 'desc' },
+        take: 200,
+      });
+
+      const rentalRows = rentals.map((r) => ({
+        kind: 'rental' as const,
+        id: r.id,
+        type: 'rental',
+        price: r.basePrice,
+        escortCharge: 0,
+        totalAmount: r.totalAmount,
+        amount: r.totalAmount ?? (r.basePrice + r.overageAmount),
+        distanceKm: Math.round((r.distanceM / 1000) * 10) / 10,
+        pickupAddress: r.pickupAddress,
+        dropAddress: `${r.customerName} · ${r.hours}h/${r.km}km pack`,
+        completedAt: r.completedAt,
+        paymentStatus: r.paymentStatus,
+        paymentRef: r.paymentRef,
+        paidAt: r.paidAt,
+        paymentReceivedAt: r.paymentReceivedAt,
+        driver: r.driver,
+      }));
+
+      // Merge + sort by paidAt desc across both kinds.
+      const all = [...rideRows, ...rentalRows].sort((a, b) => {
+        const ta = a.paidAt ? new Date(a.paidAt).getTime() : 0;
+        const tb = b.paidAt ? new Date(b.paidAt).getTime() : 0;
+        return tb - ta;
+      });
+      res.json({ rides: all });
+    } catch (err) { next(err); }
+  },
+);
+
 // ─── Supervisor: mark a completed rental paid (records the UTR last-4) ────────
 router.post(
   '/rentals/:id/mark-paid',

@@ -12,6 +12,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PlacesInput } from "@/components/PlacesInput";
+import { RentalDetailSheet } from "@/components/RentalDetailSheet";
 import {
   useRentalPacks, useRentals, useCreateRental, useCancelRental, useRemoveRental,
   useRentalProgress,
@@ -287,6 +288,7 @@ function RentalRidesSection({ rides, onRemove }: { rides: RentalRow[]; onRemove:
 }
 
 function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?: () => void }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   // Poll live progress only while the ride is actually running.
   const live = r.status === "in_progress";
   const { data: progress } = useRentalProgress(r.id, "supervisor", live || r.status === "completed");
@@ -422,12 +424,19 @@ function RentalRideCard({ rental: r, onRemove }: { rental: RentalRow; onRemove?:
           </div>
         )}
 
+        {r.status === "completed" && (
+          <Button variant="outline" size="sm" className="w-full" onClick={() => setDetailOpen(true)}>
+            <Navigation className="h-3.5 w-3.5" /> View trail &amp; receipt
+          </Button>
+        )}
+
         {r.status === "completed" && onRemove && (
           <Button variant="ghost" size="sm" className="w-full text-muted-foreground hover:text-destructive" onClick={onRemove}>
             <X className="h-3.5 w-3.5" /> Remove from list
           </Button>
         )}
       </CardContent>
+      <RentalDetailSheet rentalId={detailOpen ? r.id : undefined} onClose={() => setDetailOpen(false)} />
     </Card>
   );
 }
