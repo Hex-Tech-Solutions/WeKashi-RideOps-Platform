@@ -105,9 +105,19 @@ export async function updateDriverStatus(
     data: { status },
   });
 
-  // Ensure the joining-bonus credit exists once a driver is activated (safety
-  // net for drivers onboarded before the bonus existed). Grant-once guarded.
-  if (status === 'active') {
+  // ── Session revocation ─────────────────────────────────────────────────────
+  // Blacklisting/expiring a driver must cut off access immediately, not after
+  // their 7-day refresh token runs out. We (a) revoke every refresh token so
+  // they can't mint a new access token, and (b) set a short-lived Redis block
+  // key that authenticate() checks, so their CURRENT (<=15 min) access token is
+  // rejected on the very next request. Re-activating clears the block.
+  const { revokeDriverAccess, clearDriverBlock } = await import('./sessionRevocation');
+  if (status === 'blacklisted' || status === 'expired') {
+    await revokeDriverAccess(id);
+  } else if (status === 'active') {
+    await clearDriverBlock(id);
+    // Ensure the joining-bonus credit exists once a driver is activated (safety
+    // net for drivers onboarded before the bonus existed). Grant-once guarded.
     await grantJoiningBonus(id);
   }
 

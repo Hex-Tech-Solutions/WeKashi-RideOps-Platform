@@ -3,7 +3,7 @@ import { verifyAccessToken } from '../lib/jwt';
 import { UnauthorizedError } from '../types';
 import type { AuthRequest } from '../types';
 
-export function authenticate(req: AuthRequest, res: Response, next: NextFunction): void {
+export async function authenticate(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Missing or invalid Authorization header', code: 'UNAUTHORIZED' });
@@ -14,6 +14,13 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
   try {
     const payload = verifyAccessToken(token);
     if (payload.role === 'driver') {
+      // Session revocation: a blacklisted/expired driver is blocked immediately
+      // (Redis flag), without waiting for their access token to expire.
+      const { isDriverBlocked } = await import('../services/sessionRevocation');
+      if (await isDriverBlocked(payload.sub)) {
+        res.status(401).json({ error: 'Account suspended', code: 'ACCOUNT_SUSPENDED' });
+        return;
+      }
       req.driver = {
         id: payload.sub,
         role: 'driver',
