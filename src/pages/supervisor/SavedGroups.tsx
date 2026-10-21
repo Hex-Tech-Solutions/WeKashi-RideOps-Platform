@@ -33,7 +33,6 @@ import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
 import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
 import { GroupManifestBlock, parseRowId } from "@/components/GroupManifestBlock";
 import { GroupAllocationWorkspace } from "@/components/GroupAllocationWorkspace";
-import { useNavigate } from "react-router-dom";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { LayoutGrid } from "lucide-react";
 
@@ -171,7 +170,6 @@ export default function SavedGroups() {
     : templates.filter((t) => companyOfTemplate(t) === groupCompany);
 
   // ── Drag-and-drop between/within group blocks ──────────────────────────────
-  const nav = useNavigate();
   const [savingTemplateId, setSavingTemplateId] = useState<string | null>(null);
   // PointerSensor with a small activation distance → works on mouse AND touch
   // (Android), while still allowing taps on the dropdown/buttons inside rows.
@@ -187,17 +185,6 @@ export default function SavedGroups() {
       },
     );
   };
-
-  const bookGroup = (t: RouteTemplateRow) =>
-    nav("/supervisor/routes", {
-      state: {
-        presetEmployeeIds: t.orderedEmployeeIds,
-        presetType: t.rideType,
-        presetOfficeLocationId: t.officeLocationId ?? undefined,
-        presetVehicleType: t.vehicleType ?? undefined,
-        presetStep: 2,
-      },
-    });
 
   const handleGroupDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -350,7 +337,7 @@ export default function SavedGroups() {
                       employeesById={employeesById}
                       saving={savingTemplateId === t.id}
                       onRideTypeChange={(rt) => persistTemplate(t, { rideType: rt })}
-                      onBook={() => bookGroup(t)}
+                      onBook={() => setEditingTemplate(t)}
                       onDelete={() => setDeleteId(t.id)}
                       onEditAddress={(emp) => setEditAddressEmployee(emp)}
                     />

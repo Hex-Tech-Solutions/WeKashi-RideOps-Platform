@@ -283,6 +283,12 @@ export function GroupAllocationWorkspace({
     setMergeFrom(null);
   };
 
+  const removeMember = (groupId: string, empId: string) => {
+    setDraft((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, memberIds: g.memberIds.filter((id) => id !== empId) } : g)),
+    );
+  };
+
   const removeEmptyGroups = () => {
     const emptyCount = draft.filter((g) => g.memberIds.length === 0).length;
     if (emptyCount === 0) { toast.info("No empty groups to remove"); return; }
@@ -392,6 +398,7 @@ export function GroupAllocationWorkspace({
                     onToggleShown={() => toggleShown(grp.id)}
                     onStartMerge={() => setMergeFrom(grp.id)}
                     onMergeInto={() => doMerge(grp.id)}
+                    onRemoveMember={(empId) => removeMember(grp.id, empId)}
                   />
                 ))}
                 {draft.length === 0 && (
@@ -452,6 +459,7 @@ function GroupColumn({
   onToggleShown,
   onStartMerge,
   onMergeInto,
+  onRemoveMember,
 }: {
   group: DraftGroup;
   color: string;
@@ -462,6 +470,7 @@ function GroupColumn({
   onToggleShown: () => void;
   onStartMerge: () => void;
   onMergeInto: () => void;
+  onRemoveMember: (empId: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `group:${group.id}` });
   const members = group.memberIds
@@ -506,7 +515,14 @@ function GroupColumn({
         <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
           <div className="divide-y">
             {members.map((e, i) => (
-              <MemberRow key={e.id} id={rowDragId(group.id, e.id)} seq={i + 1} employee={e} color={color} />
+              <MemberRow
+                key={e.id}
+                id={rowDragId(group.id, e.id)}
+                seq={i + 1}
+                employee={e}
+                color={color}
+                onRemove={() => onRemoveMember(e.id)}
+              />
             ))}
           </div>
         </SortableContext>
@@ -525,11 +541,13 @@ function MemberRow({
   seq,
   employee: e,
   color,
+  onRemove,
 }: {
   id: string;
   seq: number;
   employee: EmployeeRow;
   color: string;
+  onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const style = {
@@ -541,19 +559,35 @@ function MemberRow({
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
-      className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-grab active:cursor-grabbing hover:bg-muted/40 touch-none"
+      className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-muted/40 touch-none"
     >
-      <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      {/* Only the grip is draggable, so the remove button stays clickable. */}
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing text-muted-foreground shrink-0"
+        aria-label="Drag to move"
+      >
+        <GripVertical className="h-3.5 w-3.5" />
+      </button>
       <span className="h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: color }}>{seq}</span>
       <span className="font-medium truncate">{e.name}</span>
       {e.gender?.toUpperCase().startsWith("F") ? (
         <Badge variant="outline" className="border-gold/40 bg-gold-soft text-gold-dark text-[10px] py-0 shrink-0">F</Badge>
       ) : null}
-      <span className="ml-auto flex items-center gap-1 text-muted-foreground truncate max-w-[45%]" title={e.pickupAddress}>
+      <span className="flex items-center gap-1 text-muted-foreground truncate max-w-[40%] ml-auto" title={e.pickupAddress}>
         <MapPin className="h-3 w-3 shrink-0" /> <span className="truncate">{e.pickupAddress}</span>
       </span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="text-muted-foreground hover:text-destructive shrink-0"
+        aria-label={`Remove ${e.name} from group`}
+        title="Remove from group"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }
