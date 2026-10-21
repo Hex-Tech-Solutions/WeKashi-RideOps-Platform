@@ -32,8 +32,10 @@ import { EditAddressDialog } from "@/components/EditAddressDialog";
 import { RideTypeBadge, RideTypeText } from "@/components/RideTypeLabel";
 import { RosterEmployeePanel } from "@/components/RosterEmployeePanel";
 import { GroupManifestBlock, parseRowId } from "@/components/GroupManifestBlock";
+import { GroupAllocationWorkspace } from "@/components/GroupAllocationWorkspace";
 import { useNavigate } from "react-router-dom";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { LayoutGrid } from "lucide-react";
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 function exportCsv(rows: ReturnType<typeof useSavedGroupsReport>["data"]["report"]) {
@@ -147,6 +149,8 @@ export default function SavedGroups() {
   // route on a map before committing.
   const [editingTemplate, setEditingTemplate] = useState<RouteTemplateRow | null>(null);
   const [editAddressEmployee, setEditAddressEmployee] = useState<EmployeeRow | null>(null);
+  // MoveInSync-style allocation workspace (map + merge + move between groups).
+  const [allocateOpen, setAllocateOpen] = useState(false);
 
   // Company filter for the groups list. A group's company comes from its
   // members' companyLabel (all members share one company by the create rule) —
@@ -245,11 +249,20 @@ export default function SavedGroups() {
         title="Saved Groups"
         description="Reusable employee groups for one-tap booking and usage analytics."
         actions={
-          <Button asChild className="bg-foreground text-background hover:bg-foreground/90">
-            <a href="/supervisor/routes">
-              <Play className="h-4 w-4" /> Book a ride
-            </a>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={visibleTemplates.length === 0}
+              onClick={() => setAllocateOpen(true)}
+            >
+              <LayoutGrid className="h-4 w-4" /> Allocate groups
+            </Button>
+            <Button asChild className="bg-foreground text-background hover:bg-foreground/90">
+              <a href="/supervisor/routes">
+                <Play className="h-4 w-4" /> Book a ride
+              </a>
+            </Button>
+          </div>
         }
       />
 
@@ -484,6 +497,13 @@ export default function SavedGroups() {
         employee={editAddressEmployee}
         open={!!editAddressEmployee}
         onOpenChange={(o) => !o && setEditAddressEmployee(null)}
+      />
+
+      <GroupAllocationWorkspace
+        open={allocateOpen}
+        onOpenChange={setAllocateOpen}
+        templates={visibleTemplates}
+        employeesById={employeesById}
       />
     </div>
   );
