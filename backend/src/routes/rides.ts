@@ -108,21 +108,22 @@ export function createRidesRouter(io: IoServer): Router {
       } else if (req.user?.role === 'supervisor') {
         filters = { role: 'supervisor', userId: req.user.id, page, limit, status };
       } else if (req.user?.role === 'vendor') {
-        // Get vendor for this user
-        const { prisma } = await import('../lib/prisma');
-        const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
-        filters = {
-          role: 'vendor',
-          vendorId: vendor?.id,
-          page,
-          limit,
-          status,
-        };
+        // Fail-closed: throws if no Vendor row is linked, so a mis-provisioned
+        // vendor can never fall through to an unscoped (all-tenants) query.
+        const { resolveVendorId } = await import('../lib/vendorScope');
+        const vendorId = await resolveVendorId(req);
+        filters = { role: 'vendor', vendorId, page, limit, status };
       } else {
         filters = { role: 'admin', page, limit, status };
       }
 
       const result = await listRides(filters);
+      // Strip supervisor-relayed OTPs + other drivers' details from a driver's list.
+      if (req.driver) {
+        const { stripRideListForDriver } = await import('../lib/rideSanitize');
+        res.json({ ...result, rides: stripRideListForDriver(result.rides as Record<string, unknown>[]) });
+        return;
+      }
       res.json(result);
     } catch (err) {
       next(err);
@@ -388,6 +389,13 @@ export function createRidesRouter(io: IoServer): Router {
           res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
         }
       }
+      // A driver must never receive the supervisor-relayed OTPs or other
+      // drivers' details off the ride row.
+      if (req.driver) {
+        const { stripRideSecretsForDriver } = await import('../lib/rideSanitize');
+        res.json(stripRideSecretsForDriver(ride as Record<string, unknown>));
+        return;
+      }
       res.json(ride);
     } catch (err) {
       next(err);
@@ -451,8 +459,16 @@ export function createRidesRouter(io: IoServer): Router {
       } else if (req.user?.role === 'supervisor') {
         if (ride.supervisorId !== req.user.id) { res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return; }
         includeOtp = true;
+      } else if (req.user?.role === 'vendor') {
+        // Vendor may only see pax for rides assigned to their own fleet, and
+        // never the OTPs. Previously a vendor fell through with no check (IDOR).
+        const { prisma } = await import('../lib/prisma');
+        const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id }, select: { id: true } });
+        if (!vendor || ride.vendorId !== vendor.id) { res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return; }
       } else if (req.user?.role === 'admin') {
         includeOtp = true;
+      } else {
+        res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
       }
       res.json(await getRidePax(req.params.id, { includeOtp }));
     } catch (err) {

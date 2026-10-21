@@ -129,11 +129,18 @@ export function createDriversRouter(io: IoServer): Router {
     },
   );
 
-  // GET /drivers/:id — vendor (own drivers only), admin, or the driver themselves
+  // GET /drivers/:id — vendor (own drivers only), admin, or the driver themselves.
+  // Supervisors are NOT allowed: the full driver record carries govId, licence,
+  // UPI VPA and alt-phone, which a supervisor has no need for (they see the
+  // limited driver summary embedded in their own rides). Previously a supervisor
+  // fell through to the full payload — full cross-vendor PII harvesting.
   router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
+      if (req.user?.role === 'supervisor') {
+        res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
+      }
       const driver = await getDriver(req.params.id);
-      // Ownership check: vendor can only see their own drivers, drivers can only see themselves
+      // Ownership check: vendor can only see their own drivers, drivers only themselves.
       if (req.user?.role === 'vendor') {
         const { prisma } = await import('../lib/prisma');
         const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id }, select: { id: true } });

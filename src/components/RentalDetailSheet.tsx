@@ -230,36 +230,47 @@ function RentalTrailMap({ rental }: { rental: RentalDetail }) {
 
 // ─── Receipt download ─────────────────────────────────────────────────────────
 
+// HTML-escape every interpolated value. The receipt is written into a
+// same-origin about:blank popup (window.open('') + document.write), so an
+// unescaped attacker-controlled field (driver name, customer name, address,
+// reg no) would execute script in the app origin and could read the auth
+// tokens from localStorage. Escaping closes that XSS sink.
+function esc(s: string | null | undefined): string {
+  return (s ?? "—").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+
 function downloadRentalReceipt(r: RentalDetail): void {
   const id = r.id.slice(0, 8);
   const generated = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata", hour12: false });
+  // Values are escaped here so the row template below can interpolate safely.
   const rows: Array<[string, string]> = [
-    ["Rental ID", id],
-    ["Status", r.status],
-    ["Customer", r.customerName],
-    ["Mobile", r.customerPhone],
-    ["Vehicle", r.vehicleType],
+    ["Rental ID", esc(id)],
+    ["Status", esc(r.status)],
+    ["Customer", esc(r.customerName)],
+    ["Mobile", esc(r.customerPhone)],
+    ["Vehicle", esc(r.vehicleType)],
     ["Package", `${r.hours}h / ${r.km}km`],
-    ["Pickup", r.pickupAddress],
-    ["Started", r.startedAt ? fmt(r.startedAt) : "—"],
-    ["Completed", r.completedAt ? fmt(r.completedAt) : "—"],
-    ["Duration", fmtDuration(r.elapsedSec)],
+    ["Pickup", esc(r.pickupAddress)],
+    ["Started", r.startedAt ? esc(fmt(r.startedAt)) : "—"],
+    ["Completed", r.completedAt ? esc(fmt(r.completedAt)) : "—"],
+    ["Duration", esc(fmtDuration(r.elapsedSec))],
     ["Distance", `${r.distanceKm} km`],
     ["Base", `₹${r.basePrice}`],
     ["Overage", `₹${r.overageAmount}`],
     ["Total", `₹${r.totalAmount ?? r.basePrice}`],
-    ["Driver", r.driver?.fullName ?? "—"],
-    ["Vehicle no.", r.driver?.vehicle?.regNo ?? "—"],
-    ["Payment", r.paymentStatus === "paid" ? `Paid${r.paymentRef ? ` (UTR ••••${r.paymentRef})` : ""}` : "Unpaid"],
+    ["Driver", esc(r.driver?.fullName)],
+    ["Vehicle no.", esc(r.driver?.vehicle?.regNo)],
+    ["Payment", r.paymentStatus === "paid" ? `Paid${r.paymentRef ? ` (UTR ••••${esc(r.paymentRef)})` : ""}` : "Unpaid"],
   ];
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Rental Receipt ${id}</title>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Rental Receipt ${esc(id)}</title>
     <style>body{font-family:system-ui,Arial,sans-serif;max-width:560px;margin:24px auto;color:#111}
     h1{font-size:18px}table{width:100%;border-collapse:collapse;font-size:13px}
     td{padding:6px 4px;border-bottom:1px solid #eee}td:first-child{color:#666;width:40%}
     .foot{margin-top:16px;font-size:11px;color:#888}</style></head>
     <body><h1>Wekashi Cabs — Rental Receipt</h1>
     <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v ?? "—"}</td></tr>`).join("")}</table>
-    <div class="foot">Generated ${generated} · For bill-claim reference only.</div></body></html>`;
+    <div class="foot">Generated ${esc(generated)} · For bill-claim reference only.</div></body></html>`;
   const win = window.open("", "_blank");
   if (!win) {
     const blob = new Blob([html], { type: "text/html" });

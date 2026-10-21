@@ -44,13 +44,24 @@ const VerifyOtpSchema = z.object({
   otp: z.string().length(6),
 });
 
-// POST /auth/register
+// POST /auth/register — ADMIN bootstrap only (invite-token gated in the service).
+// Supervisor and vendor accounts must NOT be self-serviceable here: that was an
+// open door to mint privileged accounts anonymously. The public signup path is
+// POST /auth/register-request, which creates a pending request an admin reviews
+// and approves. Any non-admin role submitted here is rejected outright.
 router.post(
   '/auth/register',
   authRateLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const body = RegisterSchema.parse(req.body);
+      if (body.role !== 'admin') {
+        res.status(403).json({
+          error: 'Self-registration is not allowed. Submit a request for admin approval instead.',
+          code: 'REGISTRATION_NOT_ALLOWED',
+        });
+        return;
+      }
       const inviteToken = req.headers['x-invite-token'] as string | undefined;
 
       const tokens = await registerUser({ ...body, inviteToken });

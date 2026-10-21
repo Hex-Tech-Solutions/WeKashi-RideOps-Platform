@@ -31,12 +31,11 @@ router.get('/', requireRole('vendor', 'admin'), async (req: AuthRequest, res: Re
     const { page, limit } = parsePagination(req.query.page, req.query.limit);
     const status = req.query.status as string | undefined;
 
-    let vendorId: string | undefined;
-    if (req.user?.role === 'vendor') {
-      const { prisma } = await import('../lib/prisma');
-      const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
-      vendorId = vendor?.id;
-    } else {
+    // Fail-closed vendor scoping. A vendor always sees ONLY their own payouts
+    // (throws if no linked row); an admin may optionally filter by ?vendorId.
+    const { resolveVendorId } = await import('../lib/vendorScope');
+    let vendorId = await resolveVendorId(req);
+    if (req.user?.role === 'admin') {
       vendorId = req.query.vendorId as string | undefined;
     }
 

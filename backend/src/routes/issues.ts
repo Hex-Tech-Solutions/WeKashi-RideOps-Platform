@@ -48,12 +48,9 @@ export function createIssuesRouter(io: IoServer): Router {
         return;
       }
 
-      let vendorId: string | undefined;
-      if (req.user?.role === 'vendor') {
-        const { prisma } = await import('../lib/prisma');
-        const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
-        vendorId = vendor?.id;
-      }
+      // Fail-closed vendor scoping (throws if a vendor has no linked row).
+      const { resolveVendorId } = await import('../lib/vendorScope');
+      const vendorId = await resolveVendorId(req);
       const issues = await listIssues({
         role: req.user?.role ?? '',
         userId: req.user?.id,

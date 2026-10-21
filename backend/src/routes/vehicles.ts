@@ -82,12 +82,10 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
 // GET /vehicles/:id
 router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    let vendorId: string | undefined;
-    if (req.user?.role === 'vendor') {
-      const { prisma } = await import('../lib/prisma');
-      const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
-      vendorId = vendor?.id;
-    }
+    // Fail-closed vendor scoping (throws if a vendor has no linked row), so a
+    // mis-provisioned vendor can't read another tenant's vehicle.
+    const { resolveVendorId } = await import('../lib/vendorScope');
+    const vendorId = await resolveVendorId(req);
     const vehicle = await getVehicle(req.params.id, vendorId);
     res.json(vehicle);
   } catch (err) {

@@ -96,7 +96,10 @@ router.get('/scheduled', async (req: AuthRequest, res: Response, next: NextFunct
   try {
     const { prisma } = await import('../lib/prisma');
     const d = await prisma.driver.findUnique({ where: { id: req.driver!.id }, select: { vehicleType: true } });
-    res.json({ scheduled: await listScheduledRidesForDriver(d?.vehicleType) });
+    const scheduled = await listScheduledRidesForDriver(d?.vehicleType);
+    // Strip supervisor-relayed OTPs (escort/airport) from the driver marketplace.
+    const { stripRideListForDriver } = await import('../lib/rideSanitize');
+    res.json({ scheduled: stripRideListForDriver(scheduled as Record<string, unknown>[]) });
   } catch (err) {
     next(err);
   }
