@@ -417,6 +417,14 @@ export async function advanceRideStatus(
   const ride = await prisma.ride.findUnique({ where: { id: rideId } });
   if (!ride) throw new NotFoundError('Ride not found');
 
+  // Airport rides advance ONLY via their dedicated OTP endpoints (pickup OTP →
+  // in_progress, drop OTP → completed). Block the generic status machine so a
+  // driver can't skip the supervisor-relayed OTP gate. Cancellation still goes
+  // through cancelRide (not here).
+  if (ride.type === 'airport' && (newStatus === 'in_progress' || newStatus === 'completed')) {
+    throw new ValidationError('Airport rides advance via pickup/drop OTP verification');
+  }
+
   // Validate transition
   const validTransitions: Record<string, string[]> = {
     assigned: ['in_progress'],
@@ -1163,12 +1171,16 @@ async function getRidePublicPayload(rideId: string) {
       broadcast_expires_at: Date | null;
       pickup_lat: number;
       pickup_lng: number;
+      airport_direction: string | null;
+      airport_terminal: string | null;
+      flight_number: string | null;
     }>
   >`
     SELECT
       id, type, status, pickup_address, drop_address, pax_count, capacity,
       price, distance_km, is_ac, vehicle_type, escort_required, escort_charge, toll_charge,
       scheduled_for, broadcast_expires_at,
+      airport_direction, airport_terminal, flight_number,
       ST_Y(pickup_point::geometry) as pickup_lat,
       ST_X(pickup_point::geometry) as pickup_lng
     FROM rides
@@ -1176,6 +1188,10 @@ async function getRidePublicPayload(rideId: string) {
   `;
   return rows[0] ?? null;
 }
+
+// Exposed so the airport-ride service can reuse the exact same driver-broadcast
+// payload shape (now including the airport_* fields above).
+export { getRidePublicPayload };
 
 // ─── Completed-ride full detail ───────────────────────────────────────────────
 // Returns ride metadata + driver + supervisor + all employees with pickup/drop

@@ -67,3 +67,28 @@ export function computeFare(km: number, vehicleType?: VehicleType | null, isAc?:
 export function allowedVehicleTypes(pax: number): VehicleType[] {
   return pax <= 3 ? ["hatchback", "sedan", "suv"] : ["suv"];
 }
+
+// ── Airport rides ──────────────────────────────────────────────────────────
+// Flat per-km tariff (NOT the distance bands), no minimum, AC always free.
+// Toll is added separately. Mirror of backend/src/lib/pricing.ts.
+export const AIRPORT_PER_KM: Record<VehicleType, number> = {
+  hatchback: 24,
+  sedan: 24,
+  suv: 28,
+};
+
+/** Airport fare = per-km rate × distance (no bands, no minimum, AC free). */
+export function airportFare(km: number, vehicleType: VehicleType): number {
+  const distance = Math.max(0, km);
+  const rate = AIRPORT_PER_KM[vehicleType] ?? AIRPORT_PER_KM.sedan;
+  return Math.round(distance * rate * 100) / 100;
+}
+
+// The two Bengaluru (BLR) airport terminals — fixed pickup/drop anchors. The
+// exact spot is coordinated on the ground between supervisor, driver, and
+// passenger; these are the approximate terminal centroids for routing/fare.
+export const AIRPORT_TERMINALS = {
+  T1: { name: "Terminal 1", lat: 13.198756668464007, lng: 77.70662145355523 },
+  T2: { name: "Terminal 2", lat: 13.199965793832208, lng: 77.71464340117798 },
+} as const;
+export type AirportTerminal = keyof typeof AIRPORT_TERMINALS;

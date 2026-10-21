@@ -20,6 +20,7 @@ import {
   deleteRide,
 } from '../services/ride.service';
 import { getRidePax, verifyPickup, verifyDrop, markNoShow, verifyEscortDrop } from '../services/ridePax.service';
+import { createAirportRide, verifyAirportPickup, verifyAirportDrop } from '../services/airportRide.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
 import { prisma } from '../lib/prisma';
@@ -63,6 +64,22 @@ const CreateRideSchema = z.object({
 
 const AdvanceStatusSchema = z.object({
   status: z.enum(['pending', 'broadcasting', 'assigned', 'in_progress', 'completed', 'cancelled', 'expired']),
+});
+
+const AirportRideSchema = z.object({
+  direction: z.enum(['to_airport', 'from_airport']),
+  terminal: z.enum(['T1', 'T2']),
+  /** The dynamic (non-terminal) end: pickup for to_airport, drop for from_airport. */
+  cityPoint: GeoPointSchema,
+  cityAddress: z.string().min(1).max(300),
+  paxName: z.string().min(1).max(100),
+  paxPhone: z.string().min(10).max(15),
+  flightNumber: z.string().max(20).optional().nullable(),
+  vehicleType: z.enum(['hatchback', 'sedan', 'suv']),
+  distanceKm: z.number().positive(),
+  /** Estimated road toll (₹) echoed from the route preview. Clamped server-side (0–5000). */
+  tollCharge: z.number().min(0).max(5000).optional(),
+  scheduledFor: z.string().datetime().optional(),
 });
 
 export function createRidesRouter(io: IoServer): Router {
@@ -221,6 +238,66 @@ export function createRidesRouter(io: IoServer): Router {
       }
     },
   );
+
+  // ── Airport rides ─────────────────────────────────────────────────────────
+  // POST /rides/airport — supervisor books a single-passenger airport transfer.
+  router.post('/airport', requireRole('supervisor'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const body = AirportRideSchema.parse(req.body);
+      const result = await createAirportRide(
+        {
+          supervisorId: req.user!.id,
+          direction: body.direction,
+          terminal: body.terminal,
+          cityPoint: body.cityPoint,
+          cityAddress: body.cityAddress,
+          paxName: body.paxName,
+          paxPhone: body.paxPhone,
+          flightNumber: body.flightNumber ?? null,
+          vehicleType: body.vehicleType,
+          distanceKm: body.distanceKm,
+          tollCharge: body.tollCharge,
+          scheduledFor: body.scheduledFor ? new Date(body.scheduledFor) : undefined,
+        },
+        io,
+      );
+      res.status(201).json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /rides/:id/airport/pickup — driver verifies the supervisor-relayed pickup OTP.
+  router.post('/:id/airport/pickup', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { otp } = z.object({ otp: z.string().min(4).max(6) }).parse(req.body);
+      const result = await verifyAirportPickup(req.params.id, otp, req.driver!.id);
+      const ride = await getRide(req.params.id);
+      io.of('/supervisor').to(`supervisor:${ride.supervisorId}`).emit('ride:status_changed', { rideId: req.params.id, status: 'in_progress' });
+      io.of('/admin').to('admin').emit('admin:activity', { event: 'airport:picked', rideId: req.params.id });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /rides/:id/airport/drop — driver verifies the drop OTP → ride completes.
+  router.post('/:id/airport/drop', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { otp } = z.object({ otp: z.string().min(4).max(6) }).parse(req.body);
+      const result = await verifyAirportDrop(req.params.id, otp, req.driver!.id);
+      const ride = await getRide(req.params.id);
+      io.of('/supervisor').to(`supervisor:${ride.supervisorId}`).emit('ride:status_changed', { rideId: req.params.id, status: 'completed' });
+      io.of('/admin').to('admin').emit('admin:activity', { event: 'airport:dropped', rideId: req.params.id });
+      if (result.promotedRideId) {
+        const promoted = await getRide(result.promotedRideId);
+        io.of('/supervisor').to(`supervisor:${promoted.supervisorId}`).emit('ride:status_changed', { rideId: result.promotedRideId, status: 'assigned', queued: false });
+      }
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // POST /rides/:id/arrived — driver marks they've arrived at first pickup
   router.post('/:id/arrived', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {

@@ -416,6 +416,33 @@ router.get('/reports/otd', async (req: AuthRequest, res: Response, next: NextFun
 import { listRentalPacks } from '../lib/rentalPacks';
 import { createRental, listRentalsForSupervisor, cancelRental, removeRental, getRentalProgress } from '../services/rental.service';
 
+// ── Airport rides ─────────────────────────────────────────────────────────────
+// Creation/broadcast lives in the rides router (it has the io instance). This
+// endpoint is read-only: the supervisor's airport rides WITH the pickup/drop
+// OTPs to relay (supervisor-only, like the escort OTP).
+router.get('/airport', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const rides = await prisma.ride.findMany({
+      where: { supervisorId: req.user!.id, type: 'airport' },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: {
+        id: true, status: true, airportDirection: true, airportTerminal: true,
+        paxName: true, paxPhone: true, flightNumber: true, vehicleType: true,
+        pickupAddress: true, dropAddress: true, distanceKm: true, price: true,
+        tollCharge: true, totalAmount: true, scheduledFor: true, createdAt: true,
+        acceptedAt: true, startedAt: true, completedAt: true,
+        airportPickupOtp: true, airportDropOtp: true, airportPickupAt: true, airportDropAt: true,
+        paymentStatus: true,
+        driver: { select: { fullName: true, phone: true, vehicle: { select: { regNo: true } } } },
+      },
+    });
+    res.json({ rides });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /supervisor/rentals/packs — pricing catalog (optionally by vehicle type)
 router.get('/rentals/packs', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

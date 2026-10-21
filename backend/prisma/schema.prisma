@@ -463,6 +463,20 @@ model Ride {
   /// employee, confirming the escort was dropped back at the office. Gates
   /// ride completion for escort rides — see maybeComplete() in ridePax.service.ts.
   escortDroppedAt    DateTime?  @map("escort_dropped_at")
+  // ── Airport rides (type = airport) ─────────────────────────────────────────
+  // A single-passenger point-to-point airport transfer. No RidePax rows and no
+  // employee link — the supervisor enters the passenger's details manually, and
+  // the pickup/drop OTPs live on the ride itself (relayed verbally by the
+  // supervisor, like escortOtp). Fare is per-km (no bands/minimum) + toll.
+  airportDirection   String?    @map("airport_direction")  // to_airport | from_airport
+  airportTerminal    String?    @map("airport_terminal")   // T1 | T2
+  paxName            String?    @map("pax_name")
+  paxPhone           String?    @map("pax_phone")
+  flightNumber       String?    @map("flight_number")
+  airportPickupOtp   String?    @map("airport_pickup_otp")
+  airportDropOtp     String?    @map("airport_drop_otp")
+  airportPickupAt    DateTime?  @map("airport_pickup_at")   // pickup OTP verified → in_progress
+  airportDropAt      DateTime?  @map("airport_drop_at")     // drop OTP verified → completed
 
   supervisor    User           @relation("SupervisorRides", fields: [supervisorId], references: [id])
   driver        Driver?        @relation("DriverRides", fields: [driverId], references: [id])
@@ -600,6 +614,7 @@ enum RideType {
   login
   logout
   scheduled
+  airport
 }
 
 enum RideStatus {

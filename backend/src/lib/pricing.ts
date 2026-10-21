@@ -96,3 +96,21 @@ export function computeFare(
 export function allowedVehicleTypes(pax: number): VehicleType[] {
   return pax <= 3 ? ['hatchback', 'sedan', 'suv'] : ['suv'];
 }
+
+// ── Airport rides ──────────────────────────────────────────────────────────
+// A distinct, flat per-km tariff (NOT the distance bands): the whole distance
+// is billed at the vehicle's per-km rate. No minimum fare, and AC is always
+// included (never charged or shown). The road toll is added separately by the
+// caller, the same way normal rides do.
+export const AIRPORT_PER_KM: Record<VehicleType, number> = {
+  hatchback: 24,
+  sedan: 24,
+  suv: 28,
+};
+
+/** Airport fare = per-km rate × distance (no bands, no minimum, AC free). */
+export function airportFare(km: number, vehicleType: VehicleType): number {
+  const distance = Math.max(0, km);
+  const rate = AIRPORT_PER_KM[vehicleType] ?? AIRPORT_PER_KM.sedan;
+  return Math.round(distance * rate * 100) / 100;
+}
