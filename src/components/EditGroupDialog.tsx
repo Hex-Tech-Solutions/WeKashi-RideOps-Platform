@@ -122,10 +122,13 @@ export function EditGroupDialog({
   // replaces the Haversine straight-line estimate that was here before.
   const [legByEmp, setLegByEmp] = useState<Record<string, RouteLeg>>({});
   const [officeLeg, setOfficeLeg] = useState<RouteLeg | null>(null);
+  // Estimated road toll (₹) for this route from the Routes API; null if
+  // none/unknown. Shown so the supervisor sees it before handing off to booking.
+  const [serverToll, setServerToll] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open || !template) return;
-    if (!selected.length) { setServerRoute(null); setServerPolyline(null); setLegByEmp({}); setOfficeLeg(null); return; }
+    if (!selected.length) { setServerRoute(null); setServerPolyline(null); setLegByEmp({}); setOfficeLeg(null); setServerToll(null); return; }
 
     const manualOrder = customStops && customStops.length ? customStops : null;
     const stopsForRequest = (manualOrder ?? fallbackRoute.stops).map((s) => ({
@@ -153,8 +156,9 @@ export function EditGroupDialog({
           });
           setLegByEmp(legMap);
           setOfficeLeg(result.officeLeg);
+          setServerToll(result.tollInr ?? null);
         },
-        onError: () => { if (!cancelled) { setServerRoute(null); setServerPolyline(null); setLegByEmp({}); setOfficeLeg(null); } },
+        onError: () => { if (!cancelled) { setServerRoute(null); setServerPolyline(null); setLegByEmp({}); setOfficeLeg(null); setServerToll(null); } },
       },
     );
     return () => { cancelled = true; };
@@ -304,6 +308,14 @@ export function EditGroupDialog({
                   <span className="text-muted-foreground whitespace-nowrap">
                     {routeLoading ? "calculating…" : `${route.totalKm} km · ~${route.etaMin} min`}
                   </span>
+                  {!routeLoading && serverToll != null && serverToll > 0 && (
+                    <>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="whitespace-nowrap font-medium text-foreground">
+                        toll ~₹{serverToll}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <Button size="sm" variant="outline" className="shrink-0" onClick={() => setAddOpen(true)}>
                   <Plus className="h-3.5 w-3.5" /> Add
