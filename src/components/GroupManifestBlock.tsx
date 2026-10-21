@@ -148,11 +148,19 @@ function SortableRow({
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
-      className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_72px_40px_32px] gap-1 items-center border-b last:border-0 px-1 py-1.5 text-xs cursor-grab active:cursor-grabbing hover:bg-muted/40 touch-none"
+      className="grid grid-cols-[52px_64px_1fr_28px_120px_1fr_72px_40px_32px] gap-1 items-center border-b last:border-0 px-1 py-1.5 text-xs hover:bg-muted/40 touch-none"
     >
       <div className="flex items-center gap-1">
-        <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        {/* Only the grip is draggable — so accidental taps/scrolls on the row
+            don't start a drag and reorder people. */}
+        <button
+          type="button"
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing text-muted-foreground shrink-0 touch-none"
+          aria-label="Drag to reorder or move"
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
         <span className="h-5 w-5 rounded-full bg-gold text-gold-foreground flex items-center justify-center text-[10px] font-bold">{seq}</span>
       </div>
       <div className="font-mono text-muted-foreground truncate">{e.empId}</div>

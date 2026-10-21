@@ -299,8 +299,9 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
           </div>
         )}
 
-        {/* Live ETA tracker — only for in_progress rides */}
-        {ride.status === "in_progress" && (
+        {/* Live ETA tracker — only for in_progress rides. Airport rides have no
+            per-passenger stops, so the pax-based tracker is skipped. */}
+        {ride.status === "in_progress" && ride.type !== "airport" && (
           <div className="rounded-lg border border-gold/30 bg-gold/5 p-3">
             <div className="text-[10px] uppercase tracking-wider text-gold-dark font-semibold mb-2 flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" /> Live tracking
@@ -334,7 +335,7 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
               {/* Per-stop / total ETA — only meaningful once the trip has
                   actually started (in_progress). Same live tracker shown
                   inline on the card, just full detail in the popup. */}
-              {ride.status === "in_progress" && (
+              {ride.status === "in_progress" && ride.type !== "airport" && (
                 <div className="rounded-lg border border-gold/30 bg-gold/5 p-3">
                   <div className="text-[10px] uppercase tracking-wider text-gold-dark font-semibold mb-2 flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" /> Live tracking

@@ -8,7 +8,7 @@ import {
   type RideRow,
 } from "@/lib/queries";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
-import { Plane, PlaneTakeoff, PlaneLanding, Navigation, Phone, Ticket, KeyRound, IndianRupee, MapPin, CheckCircle2 } from "lucide-react";
+import { PlaneTakeoff, PlaneLanding, Navigation, Phone, KeyRound, IndianRupee, MapPin, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -76,7 +76,6 @@ export function DriverAirportRide({ ride }: { ride: RideRow }) {
             {ride.paxPhone && (
               <a href={`tel:${ride.paxPhone}`} className="text-gold-dark flex items-center gap-1"><Phone className="h-3 w-3" /> {ride.paxPhone}</a>
             )}
-            {ride.flightNumber && <span className="text-muted-foreground flex items-center gap-1"><Ticket className="h-3 w-3" /> {ride.flightNumber}</span>}
           </div>
           <div className="text-muted-foreground flex items-start gap-1">
             <MapPin className="h-3 w-3 mt-0.5 shrink-0" />

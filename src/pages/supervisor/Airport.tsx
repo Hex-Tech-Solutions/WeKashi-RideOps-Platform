@@ -17,7 +17,7 @@ import {
 import {
   airportFare, AIRPORT_TERMINALS, VEHICLE_LABELS, type VehicleType, type AirportTerminal,
 } from "@/lib/pricing";
-import { Plane, PlaneTakeoff, PlaneLanding, Loader2, IndianRupee, Phone, Ticket, KeyRound, X, Radio, Clock, MapPin } from "lucide-react";
+import { Plane, PlaneTakeoff, PlaneLanding, Loader2, IndianRupee, Phone, KeyRound, X, Radio, Clock, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -51,7 +51,6 @@ function AirportBookingForm() {
   const [city, setCity] = useState<{ lat: number; lng: number; address: string } | null>(null);
   const [paxName, setPaxName] = useState("");
   const [paxPhone, setPaxPhone] = useState("");
-  const [flightNumber, setFlightNumber] = useState("");
   const [vehicleType, setVehicleType] = useState<VehicleType>("sedan");
   const [scheduleAt, setScheduleAt] = useState<string>("");
 
@@ -86,7 +85,7 @@ function AirportBookingForm() {
   const cityLabel = direction === "to_airport" ? "Pickup location" : "Drop location";
 
   const reset = () => {
-    setCity(null); setPaxName(""); setPaxPhone(""); setFlightNumber("");
+    setCity(null); setPaxName(""); setPaxPhone("");
     setScheduleAt(""); setRoute(null);
   };
 
@@ -109,7 +108,6 @@ function AirportBookingForm() {
         cityAddress: city.address,
         paxName: paxName.trim(),
         paxPhone: paxPhone.trim(),
-        flightNumber: flightNumber.trim() || undefined,
         vehicleType,
         distanceKm: route.km,
         tollCharge: toll > 0 ? toll : undefined,
@@ -183,10 +181,6 @@ function AirportBookingForm() {
           <div>
             <Label className="text-xs">Mobile number</Label>
             <Input value={paxPhone} onChange={(e) => setPaxPhone(e.target.value)} placeholder="10-digit mobile" inputMode="tel" />
-          </div>
-          <div>
-            <Label className="text-xs">Flight number <span className="text-muted-foreground">(optional)</span></Label>
-            <Input value={flightNumber} onChange={(e) => setFlightNumber(e.target.value)} placeholder="e.g. 6E-234" />
           </div>
         </div>
 
@@ -340,7 +334,6 @@ function AirportRideCard({ ride: r, onCancel }: { ride: AirportRideRow; onCancel
         <div className="text-xs space-y-1">
           <div className="flex items-center gap-1.5"><span className="font-medium">{r.paxName}</span>
             <span className="text-muted-foreground flex items-center gap-1"><Phone className="h-3 w-3" /> {r.paxPhone}</span>
-            {r.flightNumber && <span className="text-muted-foreground flex items-center gap-1"><Ticket className="h-3 w-3" /> {r.flightNumber}</span>}
           </div>
           <div className="text-muted-foreground">{r.pickupAddress} → {r.dropAddress}</div>
           {r.scheduledFor && <div className="text-muted-foreground flex items-center gap-1"><Clock className="h-3 w-3" /> {format(new Date(r.scheduledFor), "EEE d MMM, HH:mm")}</div>}

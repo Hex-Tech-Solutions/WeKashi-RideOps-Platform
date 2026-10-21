@@ -1,11 +1,67 @@
 import { Badge } from "@/components/ui/badge";
-import { useRidePax } from "@/lib/queries";
-import { Loader2, LogIn, LogOut, Shield, UserCheck } from "lucide-react";
+import { useRidePax, useAirportRides } from "@/lib/queries";
+import { Loader2, LogIn, LogOut, Shield, UserCheck, KeyRound, Phone } from "lucide-react";
 
 // Live per-passenger trip status shown to supervisors/admins.
 // For login rides both the pickup OTP and drop OTP are displayed so the
 // supervisor can relay whichever is needed to the employee.
 export function TripProgress({ rideId, type }: { rideId: string; type: string }) {
+  // Airport rides have no ride_pax rows — a single supervisor-entered passenger
+  // with pickup/drop OTPs on the ride itself. Render a dedicated view.
+  if (type === "airport") {
+    return <AirportTripProgress rideId={rideId} />;
+  }
+  return <PaxTripProgress rideId={rideId} type={type} />;
+}
+
+function AirportTripProgress({ rideId }: { rideId: string }) {
+  const { data, isLoading } = useAirportRides();
+  const ride = data?.rides.find((r) => r.id === rideId);
+
+  if (isLoading) {
+    return <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-gold" /></div>;
+  }
+  if (!ride) {
+    return <div className="text-sm text-muted-foreground py-2">Airport ride details unavailable.</div>;
+  }
+
+  const showPickup = ride.status === "assigned" && !ride.airportPickupAt;
+  const showDrop = ride.status === "in_progress" && !ride.airportDropAt;
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="rounded-md border p-3 space-y-1">
+        <div className="font-medium">{ride.paxName}</div>
+        {ride.paxPhone && <div className="text-muted-foreground flex items-center gap-1 text-xs"><Phone className="h-3 w-3" /> {ride.paxPhone}</div>}
+        <div className="text-xs text-muted-foreground">{ride.pickupAddress} → {ride.dropAddress}</div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`rounded px-2 py-2 border ${ride.airportPickupAt ? "border-success/30 bg-success/5" : "border-gold/30 bg-gold/5"}`}>
+          <div className="text-[10px] text-muted-foreground flex items-center gap-1"><KeyRound className="h-3 w-3" /> Pickup OTP</div>
+          <div className={`font-mono text-sm font-bold tracking-widest ${ride.airportPickupAt ? "text-success" : "text-gold-dark"}`}>
+            {ride.airportPickupAt ? "verified ✓" : ride.airportPickupOtp ?? "—"}
+          </div>
+        </div>
+        <div className={`rounded px-2 py-2 border ${ride.airportDropAt ? "border-success/30 bg-success/5" : "border-border bg-secondary"}`}>
+          <div className="text-[10px] text-muted-foreground flex items-center gap-1"><KeyRound className="h-3 w-3" /> Drop OTP</div>
+          <div className={`font-mono text-sm font-bold tracking-widest ${ride.airportDropAt ? "text-success" : "text-foreground"}`}>
+            {ride.airportDropAt ? "verified ✓" : (showDrop || ride.status === "in_progress") ? ride.airportDropOtp ?? "—" : "—"}
+          </div>
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        {showPickup
+          ? "Read the pickup OTP to the driver to start the trip."
+          : showDrop
+          ? "Read the drop OTP to the driver at the destination to complete the ride."
+          : "Relay the OTPs to the driver at each stage."}
+      </p>
+    </div>
+  );
+}
+
+function PaxTripProgress({ rideId, type }: { rideId: string; type: string }) {
   const { data, isLoading } = useRidePax(rideId);
   const isLogin = type !== "logout";
   const pax = data?.pax ?? [];

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useScheduledRides, useDriverRides, useClaimRide, useReleaseRide } from "@/lib/queries";
@@ -12,7 +13,13 @@ export default function DriverScheduled() {
   const claim = useClaimRide();
   const release = useReleaseRide();
 
-  const marketplace = mkt?.scheduled ?? [];
+  // Dismissed marketplace rides — hidden from this driver's list for the
+  // session (so a ride they're not interested in stops cluttering the view).
+  // Local only; it reappears on a full reload, matching a soft "not now".
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const dismiss = (id: string) => setDismissed((s) => new Set(s).add(id));
+
+  const marketplace = (mkt?.scheduled ?? []).filter((r) => !dismissed.has(r.id));
   const upcoming = (mine?.rides ?? []).filter((r) => r.status === "assigned" && r.scheduledFor);
 
   return (
@@ -59,16 +66,25 @@ export default function DriverScheduled() {
                 ride={r}
                 scheduledDate={r.scheduledFor ? format(new Date(r.scheduledFor), "EEE d MMM") : undefined}
                 footer={
-                  <Button
-                    className="w-full h-10 bg-gold text-gold-foreground hover:bg-gold/90"
-                    disabled={claim.isPending}
-                    onClick={() => claim.mutate(r.id, {
-                      onSuccess: () => toast.success("Ride claimed — added to upcoming"),
-                      onError: (e: any) => toast.error(e?.message ?? "Already claimed"),
-                    })}
-                  >
-                    Claim ride
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      className="h-10 flex-1 text-muted-foreground"
+                      onClick={() => dismiss(r.id)}
+                    >
+                      Dismiss
+                    </Button>
+                    <Button
+                      className="h-10 flex-[2] bg-gold text-gold-foreground hover:bg-gold/90"
+                      disabled={claim.isPending}
+                      onClick={() => claim.mutate(r.id, {
+                        onSuccess: () => toast.success("Ride claimed — added to upcoming"),
+                        onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Already claimed"),
+                      })}
+                    >
+                      Claim ride
+                    </Button>
+                  </div>
                 }
               />
             ))}
