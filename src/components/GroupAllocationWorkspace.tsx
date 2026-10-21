@@ -27,6 +27,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   useUpdateRouteTemplate, useDeleteRouteTemplate, useOptimizeRoute,
   type RouteTemplateRow, type EmployeeRow,
 } from "@/lib/queries";
@@ -103,6 +106,39 @@ export function GroupAllocationWorkspace({
   const [mergeFrom, setMergeFrom] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [companyFilter, setCompanyFilter] = useState<string>("all");
+
+  // ── Group-creation rules, enforced on every move/merge ──────────────────────
+  // A group can only hold one company and one shift time (shiftStart for login,
+  // shiftEnd for logout) — identical to the rules at group-creation time. These
+  // helpers derive a group's "identity" from its current members so a move that
+  // would break either rule is blocked.
+  const companyOfGroup = useCallback(
+    (memberIds: string[]): string | null => {
+      for (const id of memberIds) {
+        const c = employeesById.get(id)?.companyLabel;
+        if (c) return c;
+      }
+      return null;
+    },
+    [employeesById],
+  );
+  const shiftOfGroup = useCallback(
+    (memberIds: string[], rideType: "login" | "logout"): string | null => {
+      for (const id of memberIds) {
+        const e = employeesById.get(id);
+        const s = rideType === "logout" ? e?.shiftEnd : e?.shiftStart;
+        if (s) return s;
+      }
+      return null;
+    },
+    [employeesById],
+  );
+  const employeeCompany = (id: string) => employeesById.get(id)?.companyLabel ?? null;
+  const employeeShift = (id: string, rideType: "login" | "logout") => {
+    const e = employeesById.get(id);
+    return (rideType === "logout" ? e?.shiftEnd : e?.shiftStart) ?? null;
+  };
 
   // Snapshot the originals so Save-all can diff and Discard can revert.
   const originals = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates]);
@@ -114,6 +150,7 @@ export function GroupAllocationWorkspace({
     setShownIds(new Set(templates.slice(0, 1).map((t) => t.id))); // show the first group by default
     setRouteByGroup({});
     setMergeFrom(null);
+    setCompanyFilter("all");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, templates.map((t) => t.id).join(",")]);
 
@@ -125,16 +162,34 @@ export function GroupAllocationWorkspace({
     [draft],
   );
 
-  // Shared office/drop anchor — all groups in one company share it. Derive from
-  // the first group that has an officeLocation; fall back to the demo DROP.
+  // Companies present across the loaded groups — drives the filter dropdown.
+  const companyOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of draft) {
+      const c = companyOfGroup(g.memberIds);
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort();
+  }, [draft, companyOfGroup]);
+
+  // Only groups matching the active company filter are shown/edited. Moving an
+  // employee across companies is blocked anyway, so filtering by company keeps
+  // the board focused on one company's cabs at a time.
+  const visibleDraft = useMemo(
+    () => (companyFilter === "all" ? draft : draft.filter((g) => companyOfGroup(g.memberIds) === companyFilter)),
+    [draft, companyFilter, companyOfGroup],
+  );
+
+  // Shared office/drop anchor for the groups currently shown. Derive from the
+  // first visible group that has an officeLocation; fall back to the demo DROP.
   const office = useMemo(() => {
-    const withOffice = draft.find((g) => g.officeLocation);
+    const withOffice = visibleDraft.find((g) => g.officeLocation);
     if (withOffice?.officeLocation) {
       return { name: withOffice.officeLocation.name, lat: withOffice.officeLocation.lat, lng: withOffice.officeLocation.lng };
     }
     const d = getPoint(DROP);
     return { name: DROP, lat: d.lat, lng: d.lng };
-  }, [draft]);
+  }, [visibleDraft]);
 
   // ── Live route computation for SHOWN groups (debounced) ─────────────────────
   // Only shown groups are routed, so the cost scales with what the supervisor is
@@ -181,7 +236,7 @@ export function GroupAllocationWorkspace({
   // hidden groups just contribute faint dots in member order.
   const mapGroups: MapGroup[] = useMemo(
     () =>
-      draft.map((grp) => {
+      visibleDraft.map((grp) => {
         const computed = routeByGroup[grp.id];
         const order = computed?.order ?? grp.memberIds;
         const stops = order
@@ -198,7 +253,7 @@ export function GroupAllocationWorkspace({
           shown: shownIds.has(grp.id),
         };
       }),
-    [draft, routeByGroup, shownIds, employeesById, colorOf],
+    [visibleDraft, routeByGroup, shownIds, employeesById, colorOf],
   );
 
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -239,6 +294,28 @@ export function GroupAllocationWorkspace({
         toast.error(`"${dst.name}" is full`, { description: `A group can hold at most ${MAX_PER_GROUP} employees.` });
         return prev;
       }
+
+      // Same group-creation rules: a group is single-company and single-shift.
+      // An empty destination has no identity yet, so it accepts anyone (like the
+      // first pick when creating a group). Shift is checked against the
+      // DESTINATION group's direction (the one the employee is joining).
+      const dstCompany = companyOfGroup(dst.memberIds);
+      const empCompany = employeeCompany(empId);
+      if (dstCompany && empCompany !== dstCompany) {
+        toast.error("Can't mix companies in one group", {
+          description: `"${dst.name}" is for ${dstCompany}; this employee is ${empCompany ?? "unassigned"}.`,
+        });
+        return prev;
+      }
+      const dstShift = shiftOfGroup(dst.memberIds, dst.rideType);
+      const empShift = employeeShift(empId, dst.rideType);
+      if (dstShift && empShift !== dstShift) {
+        toast.error("Shift-time mismatch", {
+          description: `"${dst.name}" runs at ${dstShift}; this employee's ${dst.rideType} time is ${empShift ?? "unset"}.`,
+        });
+        return prev;
+      }
+
       const srcIds = src.memberIds.filter((id) => id !== empId);
       const dstIds = [...dst.memberIds];
       const insertAt = overEmpId ? dstIds.indexOf(overEmpId) : dstIds.length;
@@ -267,6 +344,21 @@ export function GroupAllocationWorkspace({
       if (!from || !target) return prev;
       if (from.rideType !== target.rideType) {
         toast.error("Can't merge across directions", { description: "Both groups must be the same login/logout direction." });
+        return prev;
+      }
+      // Same group-creation rules — a merged group must stay single-company and
+      // single-shift. Compare the two groups' identities (both already internally
+      // consistent, so comparing their first-member identity is sufficient).
+      const fromCompany = companyOfGroup(from.memberIds);
+      const targetCompany = companyOfGroup(target.memberIds);
+      if (fromCompany && targetCompany && fromCompany !== targetCompany) {
+        toast.error("Can't merge across companies", { description: `"${target.name}" is ${targetCompany}; "${from.name}" is ${fromCompany}.` });
+        return prev;
+      }
+      const fromShift = shiftOfGroup(from.memberIds, target.rideType);
+      const targetShift = shiftOfGroup(target.memberIds, target.rideType);
+      if (fromShift && targetShift && fromShift !== targetShift) {
+        toast.error("Can't merge across shift times", { description: `"${target.name}" runs at ${targetShift}; "${from.name}" at ${fromShift}.` });
         return prev;
       }
       const combined = [...target.memberIds, ...from.memberIds.filter((id) => !target.memberIds.includes(id))];
@@ -348,7 +440,9 @@ export function GroupAllocationWorkspace({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 flex-wrap">
                 Group allocation
-                <Badge variant="outline" className="text-[10px] py-0">{draft.length} groups</Badge>
+                <Badge variant="outline" className="text-[10px] py-0">
+                  {companyFilter === "all" ? `${draft.length} groups` : `${visibleDraft.length} of ${draft.length}`}
+                </Badge>
                 {dirty && <Badge className="bg-gold/20 text-gold-dark text-[10px] py-0">unsaved</Badge>}
                 {mergeFrom && (
                   <Badge className="bg-blue-500/15 text-blue-700 text-[10px] py-0">
@@ -361,6 +455,19 @@ export function GroupAllocationWorkspace({
 
           {/* Toolbar */}
           <div className="flex items-center gap-2 px-4 py-2 border-b flex-wrap">
+            {companyOptions.length > 0 && (
+              <Select value={companyFilter} onValueChange={(v) => { setCompanyFilter(v); setMergeFrom(null); }}>
+                <SelectTrigger className="h-8 w-[180px] text-xs">
+                  <SelectValue placeholder="All companies" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All companies</SelectItem>
+                  {companyOptions.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Button size="sm" variant="outline" onClick={removeEmptyGroups}>
               <Trash2 className="h-3.5 w-3.5" /> Remove empty
             </Button>
@@ -386,7 +493,7 @@ export function GroupAllocationWorkspace({
             {/* Left — group columns */}
             <div className="overflow-y-auto p-3 space-y-3 border-r">
               <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                {draft.map((grp) => (
+                {visibleDraft.map((grp) => (
                   <GroupColumn
                     key={grp.id}
                     group={grp}
@@ -401,8 +508,10 @@ export function GroupAllocationWorkspace({
                     onRemoveMember={(empId) => removeMember(grp.id, empId)}
                   />
                 ))}
-                {draft.length === 0 && (
-                  <div className="text-center text-sm text-muted-foreground py-10">No groups to allocate.</div>
+                {visibleDraft.length === 0 && (
+                  <div className="text-center text-sm text-muted-foreground py-10">
+                    {draft.length === 0 ? "No groups to allocate." : "No groups for this company."}
+                  </div>
                 )}
               </DndContext>
             </div>
@@ -411,7 +520,7 @@ export function GroupAllocationWorkspace({
             <div className="p-3 min-h-[320px]">
               <MultiGroupMap groups={mapGroups} office={office} className="h-full" />
               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
-                {draft.filter((g) => shownIds.has(g.id)).map((g) => (
+                {visibleDraft.filter((g) => shownIds.has(g.id)).map((g) => (
                   <span key={g.id} className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ background: colorOf(g.id) }} />
                     {g.name}
