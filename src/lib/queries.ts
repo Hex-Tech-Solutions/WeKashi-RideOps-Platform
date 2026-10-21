@@ -362,6 +362,8 @@ export interface CreateRidePayload {
   isAc?: boolean;
   /** Manual fare top-up the supervisor picks at booking time — one of FARE_ADJUSTMENT_OPTIONS. */
   fareAdjustment?: number;
+  /** Estimated road toll (₹) from the route preview — echoed back; backend clamps it. */
+  tollCharge?: number;
   scheduled?: boolean;
   /** Per-employee expected pickup times — empId → HH:MM */
   scheduledPickupTimes?: Record<string, string>;
@@ -427,6 +429,8 @@ export interface OptimizeRouteResult {
   legs: RouteLeg[];
   /** Drive into the office (login only; null for logout). */
   officeLeg: RouteLeg | null;
+  /** Estimated total toll for the route in whole rupees; null if none/unknown. */
+  tollInr: number | null;
 }
 
 /**

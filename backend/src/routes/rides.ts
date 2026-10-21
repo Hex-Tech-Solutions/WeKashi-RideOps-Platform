@@ -49,6 +49,8 @@ const CreateRideSchema = z.object({
   isAc: z.boolean().optional(),
   /** Manual fare top-up the supervisor picks at booking time (must be one of the allowed options). */
   fareAdjustment: z.number().min(0).max(1000).optional(),
+  /** Estimated road toll (₹) echoed from the route preview. Clamped server-side (0–5000) so a tampered client can't inflate the total. */
+  tollCharge: z.number().min(0).max(5000).optional(),
   scheduled: z.boolean().optional(),
   /** Per-employee expected pickup times — empId → HH:MM */
   scheduledPickupTimes: z.record(z.string().regex(/^\d{2}:\d{2}$/)).optional(),

@@ -55,6 +55,12 @@ export interface OptimizeRouteResult {
    * into it). Lets the caller show the final "→ office" distance.
    */
   officeLeg: RouteLeg | null;
+  /**
+   * Estimated total toll for the route, in whole rupees. Null when there are
+   * no tolls, the fee is unknown, or the Routes API call failed. The supervisor
+   * UI shows this as a "Toll Charges" line and it is baked into the fare total.
+   */
+  tollInr: number | null;
 }
 
 /**
@@ -108,7 +114,7 @@ export async function optimizeRouteOrder(
   optimize = true,
 ): Promise<OptimizeRouteResult> {
   if (stops.length === 0) {
-    return { stops: [], totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null };
+    return { stops: [], totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null, tollInr: null };
   }
 
   if (!optimize) {
@@ -137,7 +143,7 @@ export async function optimizeRouteOrder(
     logger.error({ err }, 'computeRouteMatrix failed — falling back to submitted order');
     // Fail-safe: keep the order the caller submitted rather than blocking booking entirely.
     const fallbackOrdered = stops.map((s, i) => ({ ...s, seq: i }));
-    return { stops: fallbackOrdered, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null };
+    return { stops: fallbackOrdered, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null, tollInr: null };
   }
 
   // ── Step 2: nearest-neighbour ordering using real durations ──────────────
@@ -215,9 +221,10 @@ async function computeFixedOrderRoute(
       encodedPolyline: route.encodedPolyline,
       legs,
       officeLeg,
+      tollInr: route.tollEstimateInr,
     };
   } catch (err) {
     logger.error({ err }, 'computeRoute (fixed order) failed — returning order without distance/polyline');
-    return { stops: orderedStops, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null };
+    return { stops: orderedStops, totalDistanceKm: 0, etaMin: 0, encodedPolyline: null, legs: [], officeLeg: null, tollInr: null };
   }
 }

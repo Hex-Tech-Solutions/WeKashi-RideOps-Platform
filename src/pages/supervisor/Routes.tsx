@@ -20,7 +20,7 @@ import { computeFare, allowedVehicleTypes, VEHICLE_LABELS, AC_SURCHARGE, escortC
 import { evaluateEscortPolicy, inRestrictedWindow } from "@/lib/escortPolicy";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Shield, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck, IndianRupee } from "lucide-react";
+import { Radio, Check, ArrowRight, ArrowLeft, Users, ShieldCheck, Shield, Search, Wind, Loader2, Building2, ChevronDown, BookmarkPlus, Clock, AlertTriangle, UserCheck, IndianRupee, Navigation } from "lucide-react";
 import { GoogleRouteMap } from "@/components/GoogleRouteMap";
 import { TimeSelect } from "@/components/TimeSelect";
 import { SaveRouteDialog } from "@/components/SaveRouteDialog";
@@ -198,6 +198,9 @@ export default function RoutesPage() {
   const optimizeRoute = useOptimizeRoute();
   const [serverRoute, setServerRoute] = useState<RouteResult | null>(null);
   const [serverPolyline, setServerPolyline] = useState<string | null>(null);
+  // Estimated road toll (₹) for the current route, from the Routes API via the
+  // optimize call. null = none/unknown/not-yet-loaded. Baked into the fare total.
+  const [serverToll, setServerToll] = useState<number | null>(null);
   // Bump this to force a re-fetch even if the stop SET is unchanged (e.g. a
   // pin was moved to a new address, or the office was dragged).
   const [routeRefreshToken, setRouteRefreshToken] = useState(0);
@@ -210,7 +213,7 @@ export default function RoutesPage() {
     // without this gate we'd fire a Routes API request per click, before the
     // supervisor has even finished picking employees.
     if (step < 2) return;
-    if (!selected.length) { setServerRoute(null); setServerPolyline(null); return; }
+    if (!selected.length) { setServerRoute(null); setServerPolyline(null); setServerToll(null); return; }
 
     // If the supervisor has manually reordered/moved a pin (customStops is
     // set), preserve that exact order — just refresh distance/duration.
@@ -247,12 +250,14 @@ export default function RoutesPage() {
             etaMin: result.etaMin || built.etaMin,
           });
           setServerPolyline(result.encodedPolyline);
+          setServerToll(result.tollInr ?? null);
         },
         onError: () => {
           if (cancelled) return;
           // Fall back silently to local Haversine ordering — booking still works.
           setServerRoute(null);
           setServerPolyline(null);
+          setServerToll(null);
         },
       },
     );
@@ -305,6 +310,10 @@ export default function RoutesPage() {
   // Fare only computes once a vehicle is chosen.
   const baseFare = displayKm != null && vehicleType ? computeFare(displayKm, vehicleType, isAc) : null;
   const price = baseFare != null ? baseFare + (fareAdjustment ?? 0) : null;
+  // Estimated road toll (₹) for the current route — a pass-through cost added on
+  // top of the driver fare + escort as its own "Toll Charges" line. Escort (50%
+  // of driver fare) is NOT computed on the toll. null/0 = no toll line shown.
+  const toll = serverToll && serverToll > 0 ? serverToll : 0;
 
   // ── Escort policy ─────────────────────────────────────────────────────────
   // Uses per-stop pickup times (set beside each employee in Step 2) to check
@@ -424,6 +433,7 @@ export default function RoutesPage() {
       vehicleType: vehicleType || undefined,
       isAc,
       fareAdjustment: fareAdjustment ?? undefined,
+      tollCharge: toll > 0 ? toll : undefined,
       scheduledPickupTimes: pickupTimes,
       escortRequired: escortPolicy.required,
       escortName: escortPolicy.required ? (escortName.trim() || null) : null,
@@ -829,10 +839,13 @@ export default function RoutesPage() {
               {escortPolicy.required && price != null && (
                 <Row label="Escort charge (50%)" value={<span className="text-destructive font-medium">+₹{escortCharge(price)}</span>} />
               )}
+              {toll > 0 && (
+                <Row label="Toll charges (est.)" value={<span className="text-foreground">+₹{toll}</span>} />
+              )}
               {price != null && (
                 <Row label="Total you pay" value={
                   <span className="font-bold text-base">
-                    ₹{price + (escortPolicy.required ? escortCharge(price) : 0)}
+                    ₹{price + (escortPolicy.required ? escortCharge(price) : 0) + toll}
                   </span>
                 } />
               )}
@@ -918,18 +931,28 @@ export default function RoutesPage() {
                     <span className="font-semibold text-destructive">+₹{escortCharge(price)}</span>
                   </div>
                 )}
+                {toll > 0 && (
+                  <div className="flex items-center justify-between text-sm rounded-md bg-secondary-foreground/5 border border-border px-2 py-1.5">
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      <Navigation className="h-3.5 w-3.5" />
+                      Toll charges (estimated)
+                    </span>
+                    <span className="font-semibold">+₹{toll}</span>
+                  </div>
+                )}
                 <div className="h-px bg-border" />
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold">You pay</span>
                   <span className="text-2xl font-bold">
                     {price != null
-                      ? `₹${price + (escortPolicy.required ? escortCharge(price) : 0)}`
+                      ? `₹${price + (escortPolicy.required ? escortCharge(price) : 0) + toll}`
                       : <span className="flex items-center gap-1.5 text-muted-foreground text-base"><Loader2 className="h-4 w-4 animate-spin" /> calculating</span>}
                   </span>
                 </div>
                 <div className="text-[11px] text-muted-foreground">
                   You pay the driver directly by UPI after the ride.
                   {escortPolicy.required && price != null && ` Includes ₹${escortCharge(price)} escort charge.`}
+                  {toll > 0 && ` Includes ₹${toll} estimated toll.`}
                 </div>
               </div>
               {/* Fare top-up — bump the driver fare to sweeten the offer */}

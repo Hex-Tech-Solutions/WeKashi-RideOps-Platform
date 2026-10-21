@@ -56,6 +56,35 @@ export interface ComputeRouteResult {
   optimizedIntermediateWaypointIndex: number[] | null;
   /** Per-leg breakdown, one entry per origin→intermediate→...→destination hop, in FINAL (optimized) order. */
   legs: Array<{ distanceMeters: number; durationSeconds: number }>;
+  /**
+   * Estimated total toll for the route, in whole rupees (rounded). Null when
+   * the route has no tolls, or Google knows a toll exists but can't price it
+   * ("unknown fee") — in that case we don't guess a number. Only INR amounts
+   * are summed. Requested via extraComputations:["TOLLS"].
+   */
+  tollEstimateInr: number | null;
+}
+
+/**
+ * Sum the INR entries of a Routes API tollInfo.estimatedPrice list into whole
+ * rupees. Google returns each price as a Money { currencyCode, units, nanos }.
+ * Returns null if there's no priced INR toll (no tolls, or unknown fee).
+ */
+function parseTollInr(tollInfo: any): number | null {
+  const prices: any[] = tollInfo?.estimatedPrice;
+  if (!Array.isArray(prices) || prices.length === 0) return null;
+  let total = 0;
+  let found = false;
+  for (const p of prices) {
+    if (p?.currencyCode && p.currencyCode !== 'INR') continue; // ignore non-INR estimates
+    const units = Number(p?.units ?? 0);
+    const nanos = Number(p?.nanos ?? 0);
+    if (!Number.isFinite(units) && !Number.isFinite(nanos)) continue;
+    total += (Number.isFinite(units) ? units : 0) + (Number.isFinite(nanos) ? nanos : 0) / 1e9;
+    found = true;
+  }
+  if (!found) return null;
+  return Math.round(total);
 }
 
 function apiKey(): string {
@@ -87,6 +116,13 @@ export async function computeRoute(opts: ComputeRouteOptions): Promise<ComputeRo
     travelMode: 'DRIVE',
     routingPreference: 'TRAFFIC_AWARE',
     units: 'METRIC',
+    // Ask Google to estimate tolls for this route. India toll roads use FASTag,
+    // so declare it as the vehicle's pass to get the discounted/accurate price.
+    extraComputations: ['TOLLS'],
+    routeModifiers: {
+      vehicleInfo: { emissionType: 'GASOLINE' },
+      tollPasses: ['IN_FASTAG'],
+    },
   };
   if (opts.intermediates?.length) {
     body.intermediates = opts.intermediates.map(toWaypoint);
@@ -107,6 +143,7 @@ export async function computeRoute(opts: ComputeRouteOptions): Promise<ComputeRo
     'routes.optimizedIntermediateWaypointIndex',
     'routes.legs.distanceMeters',
     'routes.legs.duration',
+    'routes.travelAdvisory.tollInfo.estimatedPrice',
   ].join(',');
 
   const res = await fetch(`${ROUTES_API_BASE}/directions/v2:computeRoutes`, {
@@ -138,6 +175,7 @@ export async function computeRoute(opts: ComputeRouteOptions): Promise<ComputeRo
       distanceMeters: leg.distanceMeters ?? 0,
       durationSeconds: parseDurationSeconds(leg.duration),
     })),
+    tollEstimateInr: parseTollInr(route.travelAdvisory?.tollInfo),
   };
 }
 

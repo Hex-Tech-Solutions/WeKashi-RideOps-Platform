@@ -38,6 +38,8 @@ export interface CreateRideInput {
   isAc?: boolean;
   /** Manual fare top-up the supervisor adds at booking time (e.g. +50/+100), added to the computed driver fare. */
   fareAdjustment?: number;
+  /** Estimated road toll (₹) echoed from the route preview. Clamped server-side and added to total as a pass-through "Toll Charges" line. */
+  tollCharge?: number;
   scheduled?: boolean;
   /** Per-employee expected pickup times — empId → HH:MM */
   scheduledPickupTimes?: Record<string, string>;
@@ -65,9 +67,17 @@ export async function createRide(
     : null;
   const escort = input.escortRequired && price != null ? escortCharge(price) : 0;
 
-  // Supervisor total is now just fare + escort — no platform fee, no
-  // cancellation fee (both removed in the subscription-payments overhaul).
-  const totalAmount = price != null ? price + escort : null;
+  // Estimated road toll (₹) — a pass-through cost added on top of fare + escort.
+  // The value is computed by Google Routes during the route preview and echoed
+  // back by the client; re-clamp it here (0–5000, finite) so it can't be
+  // tampered to inflate the total. Escort (50% of fare) is NOT computed on it.
+  const toll = price != null && Number.isFinite(input.tollCharge)
+    ? Math.min(5000, Math.max(0, Math.round(input.tollCharge as number)))
+    : 0;
+
+  // Supervisor total = driver fare + escort + estimated toll — no platform fee,
+  // no cancellation fee (both removed in the subscription-payments overhaul).
+  const totalAmount = price != null ? price + escort + toll : null;
 
   // Escort return-drop OTP — LOGOUT rides only (per product decision: login
   // escorts are out of scope for the return-drop flow). Escort boards at the
@@ -88,7 +98,7 @@ export async function createRide(
       INSERT INTO rides (
         id, type, status, supervisor_id,
         pickup_point, drop_point, pickup_address, drop_address,
-        distance_km, price, fare_adjustment, total_amount, vehicle_type, is_ac,
+        distance_km, price, fare_adjustment, toll_charge, total_amount, vehicle_type, is_ac,
         pax_count, capacity, scheduled_for, planned_start_time,
         escort_required, escort_name, escort_charge, escort_otp,
         created_at
@@ -104,6 +114,7 @@ export async function createRide(
         ${input.distanceKm ?? null},
         ${price},
         ${fareAdjustment},
+        ${toll > 0 ? toll : null},
         ${totalAmount},
         ${input.vehicleType ?? null},
         ${input.isAc ?? false},
@@ -135,7 +146,7 @@ export async function createRide(
     INSERT INTO rides (
       id, type, status, supervisor_id, vendor_id,
       pickup_point, drop_point, pickup_address, drop_address,
-      distance_km, price, fare_adjustment, total_amount, vehicle_type, is_ac,
+      distance_km, price, fare_adjustment, toll_charge, total_amount, vehicle_type, is_ac,
       pax_count, capacity, scheduled_for,
       planned_start_time,
       escort_required, escort_name, escort_charge, escort_otp,
@@ -153,6 +164,7 @@ export async function createRide(
       ${input.distanceKm ?? null},
       ${price},
       ${fareAdjustment},
+      ${toll > 0 ? toll : null},
       ${totalAmount},
       ${input.vehicleType ?? null},
       ${input.isAc ?? false},
@@ -1146,6 +1158,7 @@ async function getRidePublicPayload(rideId: string) {
       vehicle_type: string | null;
       escort_required: boolean;
       escort_charge: number | null;
+      toll_charge: number | null;
       scheduled_for: Date | null;
       broadcast_expires_at: Date | null;
       pickup_lat: number;
@@ -1154,7 +1167,7 @@ async function getRidePublicPayload(rideId: string) {
   >`
     SELECT
       id, type, status, pickup_address, drop_address, pax_count, capacity,
-      price, distance_km, is_ac, vehicle_type, escort_required, escort_charge,
+      price, distance_km, is_ac, vehicle_type, escort_required, escort_charge, toll_charge,
       scheduled_for, broadcast_expires_at,
       ST_Y(pickup_point::geometry) as pickup_lat,
       ST_X(pickup_point::geometry) as pickup_lng

@@ -411,6 +411,9 @@ model Ride {
   price              Float?
   /// Manual fare top-up the supervisor added at booking time (e.g. +50/+100), already baked into `price`. Kept separately for audit/display.
   fareAdjustment     Float?     @default(0) @map("fare_adjustment")
+  /// Estimated road toll (₹) from Google Routes at booking time, baked into
+  /// `total_amount` as a pass-through cost. Kept separately for audit/display.
+  tollCharge         Float?     @map("toll_charge")
   totalAmount        Float?   @map("total_amount")
   vehicleType        String?    @map("vehicle_type") // hatchback | sedan | suv
   /// Whether this is an AC duty (₹100 flat surcharge already baked into `price`).
