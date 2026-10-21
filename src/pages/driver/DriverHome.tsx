@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { MapPin, Users, IndianRupee, Check, X, LocateFixed, ChevronsRight, Shield, Navigation, Timer, Wind, CarFront } from "lucide-react";
 import { DriverRentalRide } from "./DriverRentalRide";
+import { DriverAirportRide } from "./DriverAirportRide";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
@@ -302,7 +303,13 @@ export default function DriverHome() {
         </div>
 
         {/* Active ride */}
-        {active && (
+        {active && active.type === "airport" && (
+          <div className="px-4 pb-2">
+            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Active ride</div>
+            <DriverAirportRide ride={active} />
+          </div>
+        )}
+        {active && active.type !== "airport" && (
           <div className="px-4 pb-2">
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Active ride</div>
             <Card className="border-gold/50">

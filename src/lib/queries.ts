@@ -307,10 +307,18 @@ export type RideStatus =
 
 export interface RideRow {
   id: string;
-  type: "login" | "logout" | "scheduled";
+  type: "login" | "logout" | "scheduled" | "airport";
   status: RideStatus;
   pickupAddress: string;
   dropAddress: string;
+  // ── Airport rides (type === "airport") ──
+  airportDirection?: "to_airport" | "from_airport" | null;
+  airportTerminal?: "T1" | "T2" | null;
+  paxName?: string | null;
+  paxPhone?: string | null;
+  flightNumber?: string | null;
+  airportPickupAt?: string | null;
+  airportDropAt?: string | null;
   price: number | null;
   totalAmount?: number | null;
   isAc?: boolean;
@@ -454,6 +462,8 @@ export interface ComputeRouteResult {
   durationSeconds: number;
   encodedPolyline: string | null;
   legs: Array<{ distanceMeters: number; durationSeconds: number }>;
+  /** Estimated road toll (₹) for the route; null if none/unknown. */
+  tollInr: number | null;
 }
 
 /**
@@ -886,6 +896,26 @@ export function useMarkNoShow() {
     mutationFn: ({ rideId, paxId }: { rideId: string; paxId: string }) =>
       api(`/rides/${rideId}/pax/${paxId}/no-show`, { method: "POST" }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ridepax"] }); qc.invalidateQueries({ queryKey: ["driver"] }); },
+  });
+}
+
+// Airport ride pickup/drop OTP verification (driver enters the OTP the
+// supervisor relayed). Pickup → in_progress, drop → completed.
+export function useVerifyAirportPickup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rideId, otp }: { rideId: string; otp: string }) =>
+      api(`/rides/${rideId}/airport/pickup`, { method: "POST", body: JSON.stringify({ otp }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
+  });
+}
+
+export function useVerifyAirportDrop() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rideId, otp }: { rideId: string; otp: string }) =>
+      api(`/rides/${rideId}/airport/drop`, { method: "POST", body: JSON.stringify({ otp }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
   });
 }
 
@@ -1974,6 +2004,79 @@ export function useRemoveRental() {
   return useMutation({
     mutationFn: (id: string) => api(`/supervisor/rentals/${id}/remove`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rentals"] }),
+  });
+}
+
+// ── Airport rides ──────────────────────────────────────────────────────────
+
+export interface AirportRideRow {
+  id: string;
+  status: string;
+  airportDirection: "to_airport" | "from_airport" | null;
+  airportTerminal: "T1" | "T2" | null;
+  paxName: string | null;
+  paxPhone: string | null;
+  flightNumber: string | null;
+  vehicleType: string | null;
+  pickupAddress: string;
+  dropAddress: string;
+  distanceKm: number | null;
+  price: number | null;
+  tollCharge: number | null;
+  totalAmount: number | null;
+  scheduledFor: string | null;
+  createdAt: string;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  airportPickupOtp: string | null;
+  airportDropOtp: string | null;
+  airportPickupAt: string | null;
+  airportDropAt: string | null;
+  paymentStatus: string;
+  driver: { fullName: string; phone: string; vehicle: { regNo: string } | null } | null;
+}
+
+export interface CreateAirportPayload {
+  direction: "to_airport" | "from_airport";
+  terminal: "T1" | "T2";
+  cityPoint: { lat: number; lng: number };
+  cityAddress: string;
+  paxName: string;
+  paxPhone: string;
+  flightNumber?: string | null;
+  vehicleType: "hatchback" | "sedan" | "suv";
+  distanceKm: number;
+  tollCharge?: number;
+  scheduledFor?: string;
+}
+
+export function useAirportRides() {
+  return useQuery({
+    queryKey: ["airport-rides"],
+    queryFn: () => api<{ rides: AirportRideRow[] }>("/supervisor/airport"),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useCreateAirportRide() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: CreateAirportPayload) =>
+      api<{ ride: { id: string; status: string }; nearbyCount: number }>("/rides/airport", {
+        method: "POST",
+        body: JSON.stringify(p),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["airport-rides"] }),
+  });
+}
+
+/** Supervisor cancels an airport ride (reuses the generic ride-cancel endpoint). */
+export function useCancelAirportRide() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/rides/${id}/cancel`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["airport-rides"] }),
   });
 }
 

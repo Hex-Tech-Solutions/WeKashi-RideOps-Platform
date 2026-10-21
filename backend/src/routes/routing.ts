@@ -74,6 +74,7 @@ router.post('/route', async (req: AuthRequest, res: Response, next: NextFunction
       durationSeconds: result.durationSeconds,
       encodedPolyline: result.encodedPolyline,
       legs: result.legs,
+      tollInr: result.tollEstimateInr,
     });
   } catch (err) {
     next(err);
