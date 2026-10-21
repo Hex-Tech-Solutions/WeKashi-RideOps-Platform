@@ -61,6 +61,17 @@ jobs:
 
             test -f .env.prod || { echo "ERROR: .env.prod not found in $(pwd)"; exit 1; }
 
+            # Reclaim disk BEFORE pulling. Repeated `--build` deploys pile up old
+            # build cache + replaced images (tens of GB over time) and will fill
+            # the root fs, at which point even `git pull` fails with
+            # "No space left on device". Pruning here guarantees headroom for the
+            # pull and the rebuild. builder cache + unused images are always safe:
+            # running containers keep their images, and volumes are never touched.
+            echo "==> Reclaiming disk (build cache + unused images)..."
+            sudo docker builder prune -af || true
+            sudo docker image prune -af || true
+            df -h / | tail -1
+
             echo "==> Pulling latest code..."
             git pull --ff-only origin main
 
@@ -84,8 +95,9 @@ jobs:
               exit 1
             fi
 
-            echo "==> Pruning dangling images..."
-            sudo docker image prune -f
+            echo "==> Pruning unused images + build cache..."
+            sudo docker image prune -af || true
+            sudo docker builder prune -af || true
 
             echo "==> Health check..."
             # Checked inside the api container: `web` publishes only on
