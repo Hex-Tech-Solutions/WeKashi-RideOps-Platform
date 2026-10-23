@@ -10,6 +10,7 @@ import {
   useSavedGroupsReport,
   useCreateRouteTemplate,
   useEmployees,
+  useOfficeLocations,
   type RouteTemplateRow,
   type EmployeeRow,
 } from "@/lib/queries";
@@ -68,6 +69,7 @@ export default function SavedGroups() {
   const { data: templatesData } = useRouteTemplates();
   const { data: reportData } = useSavedGroupsReport();
   const { data: employeesData } = useEmployees();
+  const { data: locationsData } = useOfficeLocations();
   const updateTemplate = useUpdateRouteTemplate();
   const deleteTemplate = useDeleteRouteTemplate();
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -75,7 +77,24 @@ export default function SavedGroups() {
   const templates = templatesData?.templates ?? [];
   const report = reportData?.report ?? [];
   const allEmployees = employeesData?.employees ?? [];
+  const offices = locationsData?.offices ?? [];
   const employeesById = new Map(allEmployees.map((e) => [e.id, e]));
+
+  // Resolve the office a group should drop at / pick up from, given its members.
+  // Matching an employee's companyLabel to an OfficeLocation.name is the link,
+  // but the match must be forgiving: a trailing space or different casing in
+  // the label (e.g. "OM Collections " vs "OM Collections") must NOT fall
+  // through to the demo drop. If nothing matches, use the default office so a
+  // real destination is always persisted on the group.
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+  const defaultOffice = offices.find((o) => o.isDefault) ?? offices[0] ?? null;
+  const resolveOfficeIdForEmployees = (empIds: string[]): string | null => {
+    const label = empIds
+      .map((id) => employeesById.get(id)?.companyLabel)
+      .find((l) => !!l && norm(l) !== "");
+    const match = label ? offices.find((o) => norm(o.name) === norm(label)) : null;
+    return (match ?? defaultOffice)?.id ?? null;
+  };
 
   // Group builder: ride direction + employee selection (checked rows), built
   // from the roster. Rules mirror Book-a-ride: one office only, one shift time.
@@ -88,8 +107,9 @@ export default function SavedGroups() {
     const name = groupName.trim();
     if (!name) { toast.error("Enter a group name"); return; }
     if (selectedIds.length === 0) { toast.error("Tick at least one employee"); return; }
+    const officeLocationId = resolveOfficeIdForEmployees(selectedIds) ?? undefined;
     createTemplate.mutate(
-      { name, rideType, orderedEmployeeIds: selectedIds },
+      { name, rideType, orderedEmployeeIds: selectedIds, officeLocationId },
       {
         onSuccess: () => {
           toast.success(`Group "${name}" created`);
