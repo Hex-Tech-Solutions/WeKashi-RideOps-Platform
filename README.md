@@ -15,7 +15,7 @@ Operated by **Shreeya Tours and Travels** (proprietor: Padma Priya R), Bengaluru
 | Database | PostgreSQL + PostGIS |
 | Cache / queues | Redis |
 | Routing & ETAs | Google Routes API (server-side proxy) |
-| Payments | Razorpay (orders + PayoutsX) |
+| Payments | Cashfree (driver credit-pack purchases); direct UPI for supervisor→driver settlement |
 | Storage | Azure Blob (KYC docs, invoices) |
 | Deploy | Docker Compose on Azure VM, nginx, GitHub Actions on push to `main` |
 
@@ -26,7 +26,7 @@ Operated by **Shreeya Tours and Travels** (proprietor: Padma Priya R), Bengaluru
 | [SETUP.md](SETUP.md) | Local dev setup, project layout |
 | [API_REFERENCE.md](API_REFERENCE.md) | Every endpoint, auth scoping, rate limits |
 | [DRIVER_APP.md](DRIVER_APP.md) | Driver app trip flow, Android/Capacitor build |
-| [INTEGRATIONS.md](INTEGRATIONS.md) | Google, Razorpay, SMS, FCM, HTTPS setup |
+| [INTEGRATIONS.md](INTEGRATIONS.md) | Google, Cashfree, SMS, FCM, HTTPS setup |
 
 ## Run locally
 

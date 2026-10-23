@@ -629,71 +629,29 @@ Count completed rides for a vendor in a period (for payout calculation preview).
 
 ---
 
-## Payments (Supervisor → Driver Wallet → Driver Bank Account)
+## Payments
 
-Two separate Razorpay products, two separate credential pairs:
-- **Collection** — Razorpay Payments (Standard Checkout). Supervisor pays the full ride amount; it lands in the platform's account. `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`.
-- **Disbursement** — Razorpay X Payouts (Composite Payout API). Driver withdraws from their in-app wallet straight to their bank/UPI. `RAZORPAY_X_KEY_ID` / `RAZORPAY_X_KEY_SECRET` / `RAZORPAY_X_ACCOUNT_NUMBER`.
+Two independent money flows — no platform wallet, no payout gateway:
 
-Razorpay Route is **not used** anywhere in this codebase.
-
-Money flow:
-```
-Supervisor pays  = driverFare + escortCharge (if any) + platformFee (+ cancellationFee if pending)
-On confirm       → driver wallet credited: driverFare + escortCharge
-Platform retains = platformFee only
-Driver withdraws → wallet debited (amount + ₹5.90 payout fee) → bank/UPI receives exactly `amount`
-```
-
-If `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` are unset, `/initiate` and `/confirm` run in **mock mode** (`isMock: true`, no real Razorpay call). If `RAZORPAY_X_KEY_ID`/`RAZORPAY_X_KEY_SECRET` are unset, `/driver/withdraw` runs in mock mode too. Both mock modes are for local dev only — real (but *invalid*) keys will attempt the live Razorpay API and surface `Authentication failed` if the credentials don't work, they will **not** silently fall back to mock mode.
+- **Supervisor → Driver (direct UPI).** After a ride/rental completes, the supervisor pays the driver **directly** via a UPI QR/intent rendered from the driver's verified VPA. This is off-platform money movement; the platform only tracks that it happened (the supervisor records the transaction's last-4 as a reference). No gateway, no credentials.
+- **Driver → Platform (Cashfree).** Drivers buy ride-credit packs through **Cashfree**. This is the only gateway integration. Env: `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_ENV` (`sandbox`|`production`), `CASHFREE_WEBHOOK_SECRET`. Pack order/checkout/verify endpoints live on the driver router (`/api/driver/packs/*`); the webhook lives here.
 
 ### GET /payments/pending
-Completed, unpaid rides for this supervisor. Includes driver wallet balance and bank detail per row.  
+Completed, unpaid rides **and** rentals the supervisor still owes for. Each row carries the driver's verified UPI VPA + name and a ready-to-render `upiIntent` (null if the driver hasn't verified a VPA yet).  
 **Auth:** Supervisor
 
-### POST /payments/rides/:id/initiate
-Create a Razorpay order for the ride fare (driverFare + escortCharge + platformFee + cancellationFee). Requires the ride to be `completed`, unpaid, and have a `price` set.  
-**Auth:** Supervisor  
-**Response:** `{ "orderId": "order_xxx", "amount": 77000, "currency": "INR", "keyId": "rzp_...", "driverFare": 750, "escortFee": 375, "platformFee": 20, "cancellationFee": 0, "totalAmount": 1145, "fineDeduction": 0, "driverReceives": 1125, "driverName": "...", "isMock": false }`
+### GET /payments/history
+Completed rides and rentals already marked paid (settled records: UTR last-4, paid time), newest first, capped at 200 each.  
+**Auth:** Supervisor
 
-### POST /payments/rides/:id/confirm
-Confirm payment after Razorpay checkout. Verifies HMAC-SHA256 signature (`orderId|paymentId`, keyed by `RAZORPAY_KEY_SECRET`), then atomically marks the ride paid and credits the driver's wallet with `driverFare + escortCharge`. Idempotent — a second call for an already-paid ride returns `{ alreadyPaid: true }` without double-crediting.  
-**Auth:** Supervisor  
-**Body:** `{ "razorpayPaymentId": "pay_xxx", "razorpaySignature": "..." }` (`razorpaySignature` required in production, optional in dev)  
-**Response:** `{ "ok": true, "driverFare": 750, "escortFee": 375, "fineDeduction": 0, "driverReceives": 1125 }`
+### POST /payments/rentals/:id/mark-paid
+Mark a completed rental paid, recording the last 4 digits of the transaction reference.  
+**Auth:** Supervisor (own rentals) or Admin  
+**Body:** `{ "txnRef": "1234" }` (exactly 4 digits) · Idempotent — returns `{ ok: true, alreadyPaid: true }` if already settled.
 
 ### POST /payments/webhook
-Razorpay Payments webhook receiver (backup path for missed `/confirm` calls). Verifies `x-razorpay-signature` against `RAZORPAY_WEBHOOK_SECRET` using the raw request body. Handles `payment.captured`.  
+Cashfree webhook for pack purchases. Verifies the `x-webhook-signature` (HMAC-SHA256 over `x-webhook-timestamp` + raw body) with a 5-minute replay window, then idempotently activates the purchased pack on `PAYMENT_SUCCESS_WEBHOOK`.  
 **Auth:** Public (signature-verified). Mounted with `express.raw()` — excluded from the global JSON body parser.
-
-### POST /payments/payout-webhook
-Razorpay X payout status webhook. Verifies signature against `RAZORPAY_X_WEBHOOK_SECRET`. Handles `payout.processed` (marks transaction processed) and `payout.failed` / `payout.reversed` (refunds the driver's wallet for the full `totalDeducted` amount).  
-**Auth:** Public (signature-verified). Mounted with `express.raw()`.
-
-### GET /payments/bank-detail
-Driver's saved bank/UPI details.  
-**Auth:** Driver
-
-### POST /payments/bank-detail
-Save/update driver bank/UPI details (UPI ID or account number + IFSC). Re-saving resets `verified` to `false`.  
-**Auth:** Driver  
-**Body:** `{ "upiId": "name@ybl" }` or `{ "accountNo": "1234567890", "ifsc": "SBIN0001234", "accountName": "Ramesh Kumar" }`
-
-### POST /payments/driver/withdraw
-Driver requests a payout from their wallet to their saved bank/UPI. Debits `amount + ₹5.90` from the wallet atomically (fails cleanly if balance is insufficient), then calls the Razorpay X Composite Payout API. If the Razorpay call fails, the wallet debit is rolled back and no money moves. Payout mode is `UPI` if a UPI ID is on file, else `IMPS`.  
-**Auth:** Driver  
-**Body:** `{ "amount": 500 }` (minimum ₹1; driver must have a bank/UPI detail saved first)  
-**Response:** `{ "ok": true, "amount": 500, "fee": 5.9, "totalDeducted": 505.9, "mode": "IMPS", "payoutId": "pout_...", "status": "processed", "isMock": false, "newWalletBalance": 119.1 }`
-
-### GET /payments/driver/payouts
-Driver's last 20 payout transactions (amount, fee, mode, status, timestamps).  
-**Auth:** Driver  
-**Response:** `{ "payouts": [...], "payoutFee": 5.9 }`
-
-### GET /payments/wallet
-Driver wallet balance, max withdrawable amount (balance minus the ₹5.90 fee), and last 20 paid rides.  
-**Auth:** Driver  
-**Response:** `{ "walletBalance": 625, "maxWithdrawable": 619.1, "payoutFee": 5.9, "payments": [...] }`
 
 ---
 

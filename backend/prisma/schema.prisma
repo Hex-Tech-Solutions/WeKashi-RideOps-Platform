@@ -56,7 +56,7 @@ model Driver {
   /// the driver in Vehicle Info; gates rental broadcast eligibility.
   rentalOptIn     Boolean      @default(false) @map("rental_opt_in")
   seats           Int?         // total seats including driver
-  // ── Direct-payment UPI (validated via Razorpay VPA API) ───────────────────
+  // ── Direct-payment UPI (format-validated only; no external VPA check) ──────
   upiVpa                String?   @map("upi_vpa")        // verified UPI VPA for direct supervisor payment
   upiVpaName            String?   @map("upi_vpa_name")   // account-holder name returned by VPA validation
   upiVerified           Boolean   @default(false) @map("upi_verified")
@@ -170,7 +170,7 @@ model CreditPack {
   @@map("credit_packs")
 }
 
-/// Pack_Payment_Service record — one row per Razorpay pack-purchase order.
+/// Pack_Payment_Service record — one row per Cashfree pack-purchase order.
 /// `activatedPackId` is the idempotency guard: activation runs once per order
 /// whether triggered by the client confirm or the webhook.
 model PackOrder {
