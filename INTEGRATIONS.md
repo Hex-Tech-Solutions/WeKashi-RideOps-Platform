@@ -61,30 +61,56 @@ Review that behaviour before adding new callers.
 
 ---
 
-## 2. Razorpay (payments)
+## 2. Cashfree (driver credit-pack purchases)
 
-Code is implemented and **inactive until keys are present**. When the client
-sends test/live keys:
+The only payment gateway in the platform. Drivers buy ride-credit packs through
+Cashfree; supervisor→driver settlement is **direct UPI** and needs no gateway.
+The code is implemented and **inactive until keys are present**.
 
 1. In `.env.prod`:
    ```
-   RAZORPAY_KEY_ID=rzp_test_xxx
-   RAZORPAY_KEY_SECRET=xxx
-   RAZORPAY_WEBHOOK_SECRET=xxx
-   VITE_RAZORPAY_KEY_ID=rzp_test_xxx     # same key id, for the browser checkout
+   CASHFREE_APP_ID=xxx
+   CASHFREE_SECRET_KEY=xxx
+   CASHFREE_ENV=production            # or 'sandbox' for test keys
+   CASHFREE_WEBHOOK_SECRET=xxx        # Dashboard → Developers → Webhooks (NOT the API secret)
    ```
-2. In the Razorpay dashboard → **Settings → Webhooks**, add:
-   `http://<EC2_or_domain>/api/payments/webhook` with events
-   `payment.captured`, `subscription.charged`, `subscription.activated`.
-   Use the same secret as `RAZORPAY_WEBHOOK_SECRET`.
-3. Redeploy. Subscriptions/payouts become active automatically.
+   > In production the api container **refuses to start** if `CASHFREE_APP_ID`
+   > and `CASHFREE_SECRET_KEY` are set but `CASHFREE_WEBHOOK_SECRET` is missing —
+   > webhook signatures could not be verified otherwise.
+2. In the Cashfree dashboard → **Developers → Webhooks**, add:
+   `https://<domain>/api/payments/webhook` and subscribe to the payment-success
+   event. Use the same secret as `CASHFREE_WEBHOOK_SECRET`.
+3. Redeploy. Pack purchases become active automatically.
 
 ---
 
-## 3. SMS OTP (Twilio)
+## 3. SMS OTP (MSG91)
 
 Until configured, OTPs are **logged to the api container** (and the dev bypass
-`DEV_OTP_BYPASS=123456` works). To send real SMS:
+`DEV_OTP_BYPASS=123456` works). The implemented provider is **MSG91** (India,
+DLT). To send real SMS:
+
+1. In `.env.prod` set the provider, authkey and BOTH DLT-approved template IDs
+   (the factory only switches off console mode when all are present):
+   ```
+   SMS_PROVIDER=msg91
+   MSG91_AUTHKEY=xxx
+   MSG91_LOGIN_TEMPLATE_ID=xxx        # login OTP — one variable (##var1## = OTP)
+   MSG91_RIDE_TEMPLATE_ID=xxx         # ride — ##var1##=vehicle, ##var2##=boarding OTP, ##var3##=de-boarding OTP
+   MSG91_SENDER_ID=WEKASH             # optional DLT header
+   ```
+2. **Remove** `DEV_OTP_BYPASS` from `.env.prod` so a real OTP is required
+   (otherwise `request-otp` short-circuits and never calls MSG91).
+3. The MSG91 templates must match the DLT-approved content exactly, and MSG91's
+   telemarketer must be linked in your Principal-Entity chain on the DLT portal
+   (a "PE-tm chain error" means that link is missing — fix it with MSG91 support
+   / the operator DLT portal, not in code).
+4. Redeploy.
+
+### (legacy) Twilio
+Earlier notes mentioned Twilio — there is **no Twilio code** in the backend. The
+only implemented SMS sender is MSG91 (`backend/src/lib/sms.ts`). Ignore any
+Twilio references.
 
 1. Twilio console → get **Account SID**, **Auth Token**, and an SMS-capable
    **From number**.

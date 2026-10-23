@@ -53,7 +53,7 @@ services:
       # Consequences of 'development' here, all acceptable for a test box but
       # NOT for real production:
       #   - CORS_ORIGIN and JWT secret-strength guards are not enforced
-      #   - the Razorpay signature becomes optional on payment confirm
+      #   - the Cashfree webhook-secret guard is relaxed (pack activation falls back to the client-confirm path)
       #   - error responses include real messages instead of a generic string
       #   - every Prisma query is logged
       #

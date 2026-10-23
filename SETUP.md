@@ -4,10 +4,10 @@
 >
 > **Two hard blockers before going live:**
 > - **HTTPS/SSL** — configure nginx with Let's Encrypt or put Cloudflare in front
-> - **SMS OTP (Twilio)** — drivers cannot log in without it
+> - **SMS OTP (MSG91)** — drivers cannot log in without it
 >
 > **Action required from you before payments work:**
-> - Activate a **Razorpay X** account at [x.razorpay.com](https://x.razorpay.com) for driver payouts (separate product from standard Razorpay Payments, separate KYC/approval). Razorpay Route is **not used** — see Payments Architecture below.
+> - Activate a **Cashfree** account for driver credit-pack purchases (the only payment gateway). Supervisor→driver settlement is direct UPI and needs no gateway. See Payments Architecture below.
 
 ---
 
@@ -21,7 +21,8 @@
 | OTP pickup/drop verification | ✅ Complete |
 | SOS system with rebooking | ✅ Complete |
 | Women's safety escort policy | ✅ Complete |
-| Razorpay Payments (collection) + Razorpay X Payouts (disbursement) | ✅ Complete (needs Razorpay X account activated) |
+| Cashfree credit-pack purchases (driver → platform) | ✅ Complete (needs Cashfree keys) |
+| Direct UPI settlement (supervisor → driver) | ✅ Complete |
 | Escort charge (50% of fare, goes to driver) | ✅ Complete |
 | Driver KYC — DL, Gov ID, alt phone, document upload | ✅ Complete |
 | Document approval flow (vendor/admin) | ✅ Complete |
@@ -109,28 +110,27 @@ Driver receives = ₹1,093.5
 
 ---
 
-## Payments Architecture (Razorpay Payments + Razorpay X Payouts)
+## Payments Architecture (Cashfree packs + direct UPI settlement)
 
-Two separate Razorpay products, two separate credential pairs. **Razorpay Route is not used anywhere.**
+There is **no platform wallet and no payout gateway**. Two independent flows:
 
-| Product | Purpose | Credentials |
-|---------|---------|-------------|
-| Razorpay Payments (Standard Checkout) | Collect the ride fare from the supervisor | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` |
-| Razorpay X Payouts (Composite Payout API) | Driver withdraws their wallet balance to their own bank/UPI | `RAZORPAY_X_KEY_ID`, `RAZORPAY_X_KEY_SECRET`, `RAZORPAY_X_ACCOUNT_NUMBER`, `RAZORPAY_X_WEBHOOK_SECRET` |
+| Flow | Purpose | Credentials |
+|------|---------|-------------|
+| **Cashfree** (credit-pack purchase) | Driver buys ride-credit packs from the platform | `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY`, `CASHFREE_ENV`, `CASHFREE_WEBHOOK_SECRET` |
+| **Direct UPI** (settlement) | Supervisor pays the driver directly after a completed ride/rental | none (off-platform; uses the driver's verified UPI VPA) |
 
-**Flow:**
-1. Supervisor pays the full ride amount via Standard Checkout → money lands in the platform's Razorpay account.
-2. On confirmed payment, the driver's **in-app wallet** is credited with `driverFare + escortCharge`. The platform keeps only the `platformFee` (₹20).
-3. Driver taps **Withdraw** in the app → backend calls the Razorpay X Composite Payout API directly (no fund-account pre-registration step — the API accepts bank/UPI details inline per payout call).
-4. Razorpay X charges a payout fee, which is **passed on to the driver**, not absorbed by the platform:
-   - ₹5 flat fee + 18% GST = **₹5.90 per payout**
-   - Driver requests to withdraw ₹X → wallet is debited ₹(X + 5.90) → driver's bank/UPI receives exactly ₹X
-   - Example: wallet has ₹750, driver withdraws ₹744.10 → wallet debited ₹750.00 (744.10 + 5.90) → bank receives ₹744.10
-   - Minimum withdrawal: ₹1 (so minimum wallet balance needed is ₹6.90)
-5. If the Razorpay X API call fails, the wallet debit is rolled back atomically — no money is lost in transit.
-6. The `payout-webhook` endpoint listens for `payout.failed` / `payout.reversed` and refunds the wallet if a payout fails asynchronously after being queued.
+**Driver pack purchase (Cashfree):**
+1. Driver selects a pack → backend creates a Cashfree order (`/api/driver/packs/order`) and returns a `payment_session_id`.
+2. Frontend opens the Cashfree JS checkout with that session id.
+3. On return, the backend confirms by **fetching the authoritative order status** (`/api/driver/packs/verify`); the pack activates only when status is `PAID`.
+4. A Cashfree webhook (`POST /api/payments/webhook`, signature-verified with a 5-minute replay window) triggers the same **idempotent** activation as a backup path.
 
-**Local dev / mock mode:** If `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET` are blank, `/payments/rides/:id/initiate` and `/confirm` run in mock mode (no real Razorpay call, `isMock: true` in the response). If `RAZORPAY_X_KEY_ID`/`RAZORPAY_X_KEY_SECRET` are blank, `/payments/driver/withdraw` runs in mock mode the same way. This is the default in `backend/.env` for local development. **Note:** if you set *real but invalid* keys, the code will attempt the live Razorpay API and surface whatever error Razorpay returns (e.g. `Authentication failed`) — it does not silently fall back to mock mode just because a call fails.
+**Supervisor → driver settlement (direct UPI):**
+1. After a ride/rental completes, `GET /payments/pending` returns the amount owed plus a `upiIntent` built from the driver's verified UPI VPA.
+2. The supervisor pays the driver directly from their own UPI app (money never touches the platform).
+3. The supervisor records the transaction's last-4 as a reference (`mark-paid`), moving the record into `GET /payments/history`.
+
+**Local dev:** leave the `CASHFREE_*` vars blank to disable pack buying (order creation throws a clear "not configured" error). In production, if `CASHFREE_APP_ID`/`CASHFREE_SECRET_KEY` are set but `CASHFREE_WEBHOOK_SECRET` is missing, the api container refuses to start.
 
 ---
 
@@ -351,25 +351,18 @@ Manual trigger: **Actions → Deploy to Server → Run workflow**
 | `AZURE_STORAGE_CONNECTION_STRING` | Azure Portal → Storage Account → Access keys → Connection string |
 | `AZURE_STORAGE_CONTAINER` | `rideops-uploads` (auto-created on first upload) |
 
-### Required for payments — collection (Razorpay Payments)
+### Required for payments — driver credit-pack purchases (Cashfree)
 
 | Variable | How to get it |
 |----------|--------------|
-| `RAZORPAY_KEY_ID` | Razorpay Dashboard → Settings → API Keys |
-| `RAZORPAY_KEY_SECRET` | Same place |
-| `RAZORPAY_WEBHOOK_SECRET` | Razorpay → Settings → Webhooks → create webhook (event: `payment.captured`) → copy secret |
-| `VITE_RAZORPAY_KEY_ID` | Same value as `RAZORPAY_KEY_ID` (used in frontend checkout) |
+| `CASHFREE_APP_ID` | Cashfree Merchant Dashboard → Developers → API Keys |
+| `CASHFREE_SECRET_KEY` | Same place |
+| `CASHFREE_ENV` | `sandbox` for test keys, `production` for live |
+| `CASHFREE_WEBHOOK_SECRET` | Cashfree → Developers → Webhooks → create webhook → copy signing secret (NOT the API secret key) |
 
-### Required for payouts — driver withdrawals (Razorpay X)
+> ⚠️ In production the api container **refuses to start** if `CASHFREE_APP_ID`/`CASHFREE_SECRET_KEY` are set but `CASHFREE_WEBHOOK_SECRET` is missing — webhook signatures could not be verified otherwise. Until the keys are set, pack purchases are disabled (clear "not configured" error).
 
-| Variable | How to get it |
-|----------|--------------|
-| `RAZORPAY_X_KEY_ID` | [x.razorpay.com](https://x.razorpay.com) → API Keys (separate from standard Payments keys) |
-| `RAZORPAY_X_KEY_SECRET` | Same place |
-| `RAZORPAY_X_ACCOUNT_NUMBER` | Your RazorpayX current account number (the source account payouts are debited from) |
-| `RAZORPAY_X_WEBHOOK_SECRET` | RazorpayX → Settings → Webhooks → create webhook (events: `payout.processed`, `payout.failed`, `payout.reversed`) → copy secret |
-
-> ⚠️ **Razorpay X requires its own account activation** — it is a separate product from standard Razorpay Payments and has its own KYC/approval process. Apply at x.razorpay.com before going live. Until these are set, `/payments/driver/withdraw` runs in mock mode (no real money moves).
+> **Supervisor → driver settlement uses direct UPI — no gateway credentials needed.**
 
 ### Optional (have defaults)
 
@@ -386,12 +379,13 @@ Manual trigger: **Actions → Deploy to Server → Run workflow**
 
 | Variable | Notes |
 |----------|-------|
-| `SMS_PROVIDER` | Set to `twilio` |
-| `TWILIO_ACCOUNT_SID` | From Twilio console |
-| `TWILIO_AUTH_TOKEN` | From Twilio console |
-| `TWILIO_FROM_NUMBER` | Your Twilio number e.g. `+91xxxxxxxxxx` |
+| `SMS_PROVIDER` | Set to `msg91` |
+| `MSG91_AUTHKEY` | MSG91 dashboard → auth key |
+| `MSG91_LOGIN_TEMPLATE_ID` | MSG91 login-OTP template id (one var: OTP) |
+| `MSG91_RIDE_TEMPLATE_ID` | MSG91 ride template id (vars: vehicle, boarding OTP, de-boarding OTP) |
+| `MSG91_SENDER_ID` | Optional DLT header e.g. `WEKASH` |
 
-> Without Twilio, OTPs are printed to the server console (dev only). `DEV_OTP_BYPASS=123456` is **blocked in production**.
+> Without MSG91 configured, OTPs are printed to the server console (dev only). `DEV_OTP_BYPASS=123456` is **blocked in production**.
 
 ### Dev-only (NEVER in production .env.prod)
 
@@ -517,10 +511,9 @@ docker compose down -v        # Stop AND wipe all data (requires re-seed)
 ## Pre-Launch Checklist
 
 - [ ] HTTPS/SSL configured (nginx + Let's Encrypt or Cloudflare)
-- [ ] Twilio SMS configured and tested (`SMS_PROVIDER=twilio`)
-- [ ] Razorpay X account activated at x.razorpay.com (separate from standard Payments account)
-- [ ] Razorpay Payments webhook registered and `RAZORPAY_WEBHOOK_SECRET` set
-- [ ] Razorpay X payout webhook registered and `RAZORPAY_X_WEBHOOK_SECRET` set
+- [ ] MSG91 SMS configured and tested (`SMS_PROVIDER=msg91`, DLT templates approved + PE-tm chain linked)
+- [ ] Cashfree account activated and `CASHFREE_*` keys set
+- [ ] Cashfree webhook registered and `CASHFREE_WEBHOOK_SECRET` set
 - [ ] `CORS_ORIGIN` set to production domain (not `*`)
 - [ ] `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` are strong random values
 - [ ] `DEV_OTP_BYPASS` is NOT in `.env.prod`
