@@ -14,7 +14,7 @@ export const BUSINESS = {
   /** Trading/brand name the business operates under. */
   tradeName: "Shreeya Tours and Travels",
   /** Consumer-facing product brand. */
-  productName: "WeKashi RideOps",
+  productName: "Wekashi Cab",
 
   gstin: "29GVBPP3987H1ZU",
 

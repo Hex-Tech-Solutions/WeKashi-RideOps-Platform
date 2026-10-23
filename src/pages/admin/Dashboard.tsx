@@ -31,7 +31,7 @@ export default function AdminDashboard() {
 
   return (
     <div>
-      <PageHeader title="Platform Overview" description="Real-time view of all RideOps activity." />
+      <PageHeader title="Platform Overview" description="Real-time view of all Wekashi Cab activity." />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatCard label="Live rides" value={liveRides} hint="In-progress · assigned · broadcasting" icon={Car} />

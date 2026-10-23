@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CubeField } from "@/components/CubeField";
+import { Logo } from "@/components/Logo";
 import { useAuth } from "@/hooks/useAuth";
 import { BUSINESS, formattedAddress } from "@/lib/businessInfo";
 import { LEGAL_PAGES } from "@/pages/legal/LegalLayout";
@@ -138,8 +139,7 @@ export default function Landing() {
       <header className="relative backdrop-blur-xl bg-black/40 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-md bg-gradient-gold flex items-center justify-center font-bold text-gold-foreground">R</div>
-            <div className="font-bold text-lg tracking-tight">RideOps</div>
+            <Logo className="h-9 rounded-md" />
           </div>
           <nav className="hidden md:flex items-center gap-7 text-sm text-white/60">
             <a href="#features" className="hover:text-white transition">Features</a>
@@ -194,7 +194,7 @@ export default function Landing() {
               Fill cab shortages<br />in <span className="text-shimmer">three minutes flat.</span>
             </h1>
             <p className="text-lg text-white/85 mt-6 max-w-xl leading-relaxed drop-shadow-[0_1px_6px_rgba(0,0,0,0.7)]">
-              When your primary employee transport runs out of cabs, RideOps connects supervisors directly to a vetted driver marketplace — with real-time routing, female-safety rules, and zero employee-app friction.
+              When your primary employee transport runs out of cabs, {BUSINESS.productName} connects supervisors directly to a vetted driver marketplace — with real-time routing, female-safety rules, and zero employee-app friction.
             </p>
             <div className="flex flex-wrap gap-3 mt-10">
               <Button asChild size="lg" className="bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">
@@ -252,7 +252,7 @@ export default function Landing() {
               <span className="text-shimmer">vetted, tracked, on-time.</span>
             </h3>
             <p className="text-white/80 mt-5 text-base md:text-lg max-w-xl leading-relaxed">
-              Every vehicle on RideOps is GPS-tracked, document-verified, and rated by supervisors after every trip — across four vehicle classes.
+              Every vehicle on {BUSINESS.productName} is GPS-tracked, document-verified, and rated by supervisors after every trip — across four vehicle classes.
             </p>
           </div>
 
@@ -417,12 +417,12 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid lg:grid-cols-2 gap-14 items-center">
             <div>
-              <div className="text-gold text-xs uppercase tracking-widest font-semibold mb-3">Why RideOps</div>
+              <div className="text-gold text-xs uppercase tracking-widest font-semibold mb-3">Why {BUSINESS.productName}</div>
               <h2 className="text-3xl md:text-4xl font-bold tracking-tight leading-tight">
                 Stop paying for empty cabs.<br /><span className="text-shimmer">Pay only for the rides you take.</span>
               </h2>
               <p className="text-white/70 mt-5 leading-relaxed">
-                RideOps is free for supervisors and drivers. You only pay for the cab rides — transparent per-ride pricing, real-time auctions, and zero idle cost.
+                {BUSINESS.productName} is free for supervisors and drivers. You only pay for the cab rides — transparent per-ride pricing, real-time auctions, and zero idle cost.
               </p>
               <ul className="mt-8 space-y-3">
                 {[

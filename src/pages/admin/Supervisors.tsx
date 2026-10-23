@@ -31,7 +31,7 @@ export default function Supervisors() {
 
   return (
     <div>
-      <PageHeader title="Tenants & Supervisors" description="Companies and their supervisor logins on RideOps."
+      <PageHeader title="Tenants & Supervisors" description="Companies and their supervisor logins on Wekashi Cab."
         actions={<Button className="bg-foreground text-background hover:bg-foreground/90" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New tenant</Button>} />
       <Card className="shadow-card">
         <CardContent className="p-0">
