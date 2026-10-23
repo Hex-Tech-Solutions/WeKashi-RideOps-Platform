@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TimeSelect } from "@/components/TimeSelect";
 import {
-  useEmployees, useUpdateRouteTemplate, useOptimizeRoute,
+  useEmployees, useUpdateRouteTemplate, useOptimizeRoute, useOfficeLocations,
   type RouteTemplateRow,
 } from "@/lib/queries";
 import {
@@ -56,8 +56,10 @@ export function EditGroupDialog({
 }) {
   const nav = useNavigate();
   const { data: empData } = useEmployees();
+  const { data: locationsData } = useOfficeLocations();
   const updateTemplate = useUpdateRouteTemplate();
   const optimizeRoute = useOptimizeRoute();
+  const offices = locationsData?.offices ?? [];
 
   const employees: UIEmployee[] = useMemo(
     () => (empData?.employees ?? []).map((e) => ({
@@ -98,11 +100,40 @@ export function EditGroupDialog({
   const type = template?.rideType ?? "login";
   const selected = visibleEmployees.filter((e) => selectedIds.includes(e.id));
 
-  const dropNode = useMemo(() => {
+  // Resolve the group's destination office. Prefer the office explicitly linked
+  // to the template; for legacy groups created before officeLocationId was
+  // persisted, fall back to matching a member's companyLabel to an office
+  // (trimmed + case-insensitive), then to the supervisor's default office. The
+  // demo "Embassy Tech Village" constant is NOT used as a production drop.
+  const resolvedOffice = useMemo(() => {
+    const normLabel = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+    const linkedId = template?.officeLocationId ?? null;
+    if (linkedId) {
+      const o = offices.find((x) => x.id === linkedId);
+      if (o) return { id: o.id, name: o.name, lat: o.lat, lng: o.lng };
+    }
+    // Hydrated office object on the template (name/address/lat/lng, no id) —
+    // recover the id by name so the booking hand-off can carry it.
     const off = template?.officeLocation;
-    if (off) return { name: off.name, point: coordPoint(off.lat, off.lng) };
+    if (off) {
+      const byName = offices.find((o) => normLabel(o.name) === normLabel(off.name));
+      return { id: byName?.id ?? null, name: off.name, lat: off.lat, lng: off.lng };
+    }
+    // Legacy fallback: match by a member's company label.
+    const label = (template?.orderedEmployeeIds as string[] | undefined)
+      ?.map((id) => employees.find((e) => e.id === id)?.companyLabel)
+      .find((l) => normLabel(l) !== "");
+    const byLabel = label ? offices.find((o) => normLabel(o.name) === normLabel(label)) : null;
+    const chosen = byLabel ?? offices.find((o) => o.isDefault) ?? offices[0] ?? null;
+    return chosen ? { id: chosen.id, name: chosen.name, lat: chosen.lat, lng: chosen.lng } : null;
+  }, [template, offices, employees]);
+
+  const dropNode = useMemo(() => {
+    if (resolvedOffice) return { name: resolvedOffice.name, point: coordPoint(resolvedOffice.lat, resolvedOffice.lng) };
+    // Unresolved: render a placeholder route only. Booking is still safe —
+    // Routes.tsx hard-blocks broadcasting without a real office.
     return { name: DROP, point: getPoint(DROP) };
-  }, [template]);
+  }, [resolvedOffice]);
 
   const fallbackRoute = useMemo(() => {
     if (customStops && customStops.length) return buildResult(customStops, dropNode, type);
@@ -251,7 +282,10 @@ export function EditGroupDialog({
         presetEmployeeIds: route.stops.map((s) => s.empId),
         presetType: template.rideType,
         presetVehicleType: template.vehicleType ?? undefined,
-        presetOfficeLocationId: template.officeLocationId ?? undefined,
+        // Prefer the resolved office id (covers legacy groups whose
+        // officeLocationId is null) so Routes.tsx pins the drop to the right
+        // office instead of falling through to the demo drop.
+        presetOfficeLocationId: resolvedOffice?.id ?? template.officeLocationId ?? undefined,
         presetPickupTimes: pickupTimes,
         // Skip Step 2 — every check it would gate on has already run above,
         // against the same shared helpers Step 2 itself uses.

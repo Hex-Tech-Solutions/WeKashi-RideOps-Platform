@@ -141,9 +141,16 @@ export default function RoutesPage() {
     } else {
       // No office on the group — pick the office matching the first preset
       // employee's company so the drop/visible-roster line up with the group.
+      // Match forgivingly (trimmed + case-insensitive) so a stray space or
+      // casing difference in companyLabel doesn't silently fall through to the
+      // demo drop; if nothing matches, activeOffice still defaults to the
+      // supervisor's default office below.
+      const normLabel = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
       const firstId = presetState.presetEmployeeIds[0];
       const emp = (data?.employees ?? []).find((e) => e.id === firstId);
-      const match = emp?.companyLabel ? offices.find((o) => o.name === emp.companyLabel) : null;
+      const match = emp?.companyLabel
+        ? offices.find((o) => normLabel(o.name) === normLabel(emp.companyLabel))
+        : null;
       if (match) setSelectedOfficeId(match.id);
     }
     if (presetState.presetVehicleType) setVehicleType(presetState.presetVehicleType as VehicleType);
@@ -160,18 +167,29 @@ export default function RoutesPage() {
   // never be dropped by the office filter.
   const selected = employees.filter((e) => selectedIds.includes(e.id));
 
-  // Drop = dragged override → selected office → supervisor's legacy office → demo fallback.
+  // Drop = dragged override → selected office → supervisor's legacy office.
+  // `resolved` is false when none of those exist — we do NOT fall back to the
+  // demo "Embassy Tech Village" constant, which previously leaked onto real
+  // bookings. When unresolved, the demo point is used ONLY to render a
+  // placeholder route; booking is hard-blocked below until a real office
+  // exists.
   const dropNode = useMemo(() => {
     if (officeOverride) {
-      return { name: officeOverride.address, point: coordPoint(officeOverride.lat, officeOverride.lng) };
+      return { name: officeOverride.address, point: coordPoint(officeOverride.lat, officeOverride.lng), resolved: true };
     }
     if (activeOffice) {
-      return { name: activeOffice.name, point: coordPoint(activeOffice.lat, activeOffice.lng) };
+      return { name: activeOffice.name, point: coordPoint(activeOffice.lat, activeOffice.lng), resolved: true };
     }
-    return officeData?.officeLat != null
-      ? { name: officeData.officeAddress ?? "Office", point: coordPoint(officeData.officeLat, officeData.officeLng!) }
-      : { name: DROP, point: getPoint(DROP) };
+    if (officeData?.officeLat != null) {
+      return { name: officeData.officeAddress ?? "Office", point: coordPoint(officeData.officeLat, officeData.officeLng!), resolved: true };
+    }
+    return { name: DROP, point: getPoint(DROP), resolved: false };
   }, [officeOverride, activeOffice, officeData]);
+
+  // True once we have a real destination office to pin the drop (login) /
+  // origin (logout) to. Gates broadcasting/scheduling so a ride never ships
+  // with the demo drop.
+  const officeResolved = dropNode.resolved;
 
   // Local fallback route — Haversine nearest-neighbour, used for the initial
   // render before the Routes API result arrives, and as a fallback if that
@@ -405,21 +423,26 @@ export default function RoutesPage() {
 
   const buildPayload = (scheduledFor?: string): CreateRidePayload | null => {
     if (!selected.length || !route.stops.length) return null;
+    // Never ship a ride to the demo drop. Callers (broadcast/schedule) also
+    // guard on officeResolved and surface a clear error; this is the final
+    // belt-and-braces so a payload with the placeholder destination can't be
+    // built.
+    if (!officeResolved) return null;
     const first = route.stops[0];
     const last = route.stops[route.stops.length - 1];
-    // Use dragged override → selected office → supervisor's saved office → demo drop (in that priority).
+    // Use dragged override → selected office → supervisor's saved office (in
+    // that priority). No demo-drop fallback — `officeResolved` guarantees one
+    // of these exists.
     const officePoint = officeOverride
       ? { lat: officeOverride.lat, lng: officeOverride.lng }
       : activeOffice
       ? { lat: activeOffice.lat, lng: activeOffice.lng }
-      : officeData?.officeLat != null
-      ? { lat: officeData.officeLat, lng: officeData.officeLng! }
-      : pt(route.drop.point);
+      : { lat: officeData!.officeLat!, lng: officeData!.officeLng! };
     // Store the office's ACTUAL street address on the ride (not the supervisor's
     // label like "Indicomm") so the driver sees a real destination they can
     // navigate to. `activeOffice.address` is the geocoded address; `.name` is
     // only the supervisor-facing reference label.
-    const officeName = officeOverride?.address ?? activeOffice?.address ?? officeData?.officeAddress ?? route.drop.name;
+    const officeName = officeOverride?.address ?? activeOffice?.address ?? officeData?.officeAddress ?? activeOffice?.name ?? "Office";
     // Send employees in the OPTIMIZED route order (nearest-neighbour + female-safety),
     // so the driver's OTP legs (stop 1,2,3…) follow the exact sequence shown here.
     const orderedIds = route.stops.map((s) => s.empId);
@@ -453,6 +476,12 @@ export default function RoutesPage() {
 
   const broadcast = () => {
     if (displayKm == null) { toast.error("Wait for the route distance to calculate"); return; }
+    if (!officeResolved) {
+      toast.error("No destination office set", {
+        description: "Add an office in Settings → Office Locations, or drag the drop pin on the map, before booking.",
+      });
+      return;
+    }
     if (!vehicleType) { toast.error("Select a vehicle type before broadcasting"); return; }
     if (escortPolicy.required && !escortName.trim()) {
       toast.error("Escort name is required before broadcasting", { description: escortPolicy.reason });
@@ -471,6 +500,12 @@ export default function RoutesPage() {
 
   const schedule = () => {
     if (displayKm == null) { toast.error("Wait for the route distance to calculate"); return; }
+    if (!officeResolved) {
+      toast.error("No destination office set", {
+        description: "Add an office in Settings → Office Locations, or drag the drop pin on the map, before scheduling.",
+      });
+      return;
+    }
     if (!vehicleType) { toast.error("Select a vehicle type before scheduling"); return; }
     if (!scheduleAt) { toast.error("Pick a date first"); return; }
     if (!plannedPickupTime) { toast.error("Set the shift / pickup time first"); return; }
