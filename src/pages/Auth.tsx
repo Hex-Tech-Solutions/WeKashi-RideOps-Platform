@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CubeField } from "@/components/CubeField";
+import { Logo } from "@/components/Logo";
 import { useAuth, type AppRole } from "@/hooks/useAuth";
 import { useSubmitRegistrationRequest } from "@/lib/queries";
 import { toast } from "sonner";
@@ -55,9 +56,8 @@ export default function Auth() {
       <CubeField variant="dark" />
 
       <div className="relative w-full max-w-md">
-        <Link to="/" className="flex items-center justify-center gap-2 mb-8">
-          <div className="h-10 w-10 rounded-md bg-gradient-gold flex items-center justify-center font-bold text-gold-foreground">R</div>
-          <div className="font-bold text-xl tracking-tight">RideOps</div>
+        <Link to="/" className="flex items-center justify-center mb-8">
+          <Logo className="h-20 rounded-xl" />
         </Link>
 
         {screen === "signin" ? (

@@ -67,11 +67,22 @@ export function RoleLayout({ role, user, nav, children }: RoleLayoutProps) {
             collapsed ? "justify-center px-2" : "px-6",
           )}
         >
-          <div className="h-8 w-8 rounded-md bg-gradient-gold flex items-center justify-center font-bold text-gold-foreground shrink-0">R</div>
-          {!collapsed && (
-            <div>
-              <div className="font-semibold text-white tracking-tight leading-none">RideOps</div>
-              <div className="text-[10px] uppercase tracking-widest text-gold mt-1">{role}</div>
+          {collapsed ? (
+            <img
+              src="/wekashi-icon.png"
+              alt="Wekashi Cab"
+              className="h-9 w-9 rounded-lg shrink-0 select-none"
+              draggable={false}
+            />
+          ) : (
+            <div className="flex flex-col gap-1 min-w-0">
+              <img
+                src="/wekashi-logo.jpg"
+                alt="Wekashi Cab"
+                className="h-9 w-auto rounded-md select-none"
+                draggable={false}
+              />
+              <div className="text-[10px] uppercase tracking-widest text-gold">{role}</div>
             </div>
           )}
         </Link>
