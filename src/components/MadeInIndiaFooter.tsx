@@ -32,7 +32,7 @@ export function MadeInIndiaFooter() {
         />
 
         <div className="text-center text-[11px] tracking-wide text-muted-foreground/70 -mt-1">
-          RideOps · Bengaluru
+          Wekashi Cab · Bengaluru
         </div>
       </div>
     </div>

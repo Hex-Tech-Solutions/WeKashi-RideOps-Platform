@@ -40,9 +40,12 @@ export function LegalLayout({
             Back
           </Link>
           <div className="ml-auto flex items-center gap-2">
-            <div className="h-7 w-7 rounded-md bg-gradient-gold flex items-center justify-center font-bold text-gold-foreground text-xs">
-              R
-            </div>
+            <img
+              src="/wekashi-icon.png"
+              alt="Wekashi Cab"
+              className="h-7 w-7 rounded-md select-none"
+              draggable={false}
+            />
             <span className="font-bold tracking-tight">{BUSINESS.productName}</span>
           </div>
         </div>

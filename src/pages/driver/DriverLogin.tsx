@@ -72,7 +72,7 @@ export default function DriverLogin() {
     setBusy(true);
     try {
       await login("+" + phone.replace(/[^\d]/g, ""), otp);
-      toast.success("Welcome to RideOps");
+      toast.success("Welcome to Wekashi Cab");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Invalid OTP");
     } finally { setBusy(false); }

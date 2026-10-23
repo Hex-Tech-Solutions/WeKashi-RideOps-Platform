@@ -77,7 +77,7 @@ export function downloadRideReceipt(ride: RideDetail): void {
 <body>
   <div class="brand">
     <div>
-      <h1>RideOps — Ride Receipt</h1>
+      <h1>Wekashi Cab — Ride Receipt</h1>
       <div class="sub">Trip ID: <b>${tripId}</b> · For bill claim / reimbursement</div>
     </div>
     <div class="right">
@@ -131,7 +131,7 @@ export function downloadRideReceipt(ride: RideDetail): void {
     <div class="amt">₹${ride.price ?? 0}</div>
   </div>
 
-  <div class="foot">RideOps · This is a system-generated receipt for internal claim/reimbursement use.</div>
+  <div class="foot">Wekashi Cab by Shreeya Tours and Travels · This is a system-generated receipt for internal claim/reimbursement use.</div>
 
   <script>window.onload = () => { window.print(); };</script>
 </body></html>`;
