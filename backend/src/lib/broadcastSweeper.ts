@@ -41,7 +41,13 @@ export function initBroadcastSweeper(io: IoServer): void {
       await sweepExpiredBroadcasts();
       await sweepStaleScheduledRides();
       await sweepStaleRentals();
-      await sweepGhostOnlineDrivers();
+      // NOTE (Model 2): the GPS-heartbeat "ghost online" sweep is intentionally
+      // NOT run anymore. A driver stays online even when the app is
+      // backgrounded or swipe-killed, and receives rides via FCM push. Online
+      // is now a deliberate state: it changes only when the driver taps Go
+      // Offline (in-app or on the persistent notification) or when their FCM
+      // token is found dead (uninstall) during a broadcast. See
+      // sweepGhostOnlineDrivers below (kept for reference, no longer called).
     } catch (err) {
       logger.error({ err }, 'Broadcast sweeper tick failed');
     } finally {
@@ -115,52 +121,18 @@ async function sweepExpiredBroadcasts(): Promise<void> {
   }
 }
 
-// How long a driver can go without a GPS heartbeat before we treat them as gone.
-// Online drivers flush their location every 60s (and ping every ~10s), so 3 min
-// of silence reliably means the app was swiped/crashed/lost signal/died — not a
-// brief tunnel. Keep this comfortably above the 60s flush interval.
-const GHOST_ONLINE_STALE_MINUTES = 3;
-
-/**
- * Flip "ghost-online" drivers offline — drivers whose app died without a clean
- * go-offline (swipe-kill, crash, battery, dead signal), so their is_online flag
- * is stuck true while they send no GPS. Left alone they pollute matching, the
- * nearby-driver search, rental eligibility and the admin live map with a driver
- * who can never respond. The go-online path and the 60s location flush both
- * stamp location_updated_at, so a genuinely active driver is never swept.
- */
-async function sweepGhostOnlineDrivers(): Promise<void> {
-  try {
-    // NULL location_updated_at while online shouldn't happen (go-online seeds it),
-    // but treat it as stale too so a legacy/odd row can't linger forever.
-    const stale = await prisma.$queryRawUnsafe<Array<{ id: string }>>(`
-      UPDATE drivers
-      SET is_online = false
-      WHERE is_online = true
-        AND (location_updated_at IS NULL
-             OR location_updated_at < NOW() - INTERVAL '${GHOST_ONLINE_STALE_MINUTES} minutes')
-      RETURNING id
-    `);
-
-    if (stale.length === 0) return;
-
-    logger.info({ count: stale.length }, 'Swept ghost-online drivers (stale GPS heartbeat)');
-
-    // Tell the admin live map to drop them promptly rather than waiting for its
-    // next poll. Supervisor/driver views derive availability from is_online, so
-    // the flip alone fixes matching; this is just the map-freshness nudge.
-    if (ioInstance) {
-      for (const d of stale) {
-        ioInstance.of('/admin').to('admin').emit('admin:activity', {
-          event: 'driver:offline_stale',
-          driverId: d.id,
-        });
-      }
-    }
-  } catch (err) {
-    logger.error({ err }, 'Ghost-online driver sweep failed');
-  }
-}
+// ── Model 2: no GPS-heartbeat auto-offline ───────────────────────────────────
+// The former sweepGhostOnlineDrivers() flipped a driver offline after 3 minutes
+// of GPS silence. That was removed deliberately: under Model 2 a driver stays
+// online through app backgrounding and swipe-kill, and receives rides via FCM
+// push. "Online" is now a deliberate state, changed only by:
+//   • the driver tapping Go Offline (in-app or the persistent notification →
+//     POST /driver/offline), or
+//   • the backend finding the driver's FCM token dead (uninstall) when it tries
+//     to push a broadcast (see emitDriverBroadcast → stale-token pruning, which
+//     also clears is_online).
+// The trade-off (accepted by product): a driver who closes the app and forgets
+// to go offline stays online until they tap Go Offline.
 
 /**
  * Start a broadcast for a ride: set Redis TTL key and expiry in DB.

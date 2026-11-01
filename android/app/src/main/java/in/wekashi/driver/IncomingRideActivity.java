@@ -9,91 +9,90 @@ import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.CountDownTimer;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
 /**
- * Full-screen "incoming ride" window, launched by RideFirebaseMessagingService's
- * full-screen intent. Shows over the lock screen and turns the screen on. Plays
- * a ringtone + vibrates, counts down, and on Accept hands off to the web app
- * (MainActivity) deep-linked to the ride; on Ignore / timeout it dismisses.
+ * Minimal full-screen "wake-up" splash, launched by the full-screen intent in
+ * RideFirebaseMessagingService when a ride push arrives while the phone is
+ * locked / screen off.
  *
- * NOTE: Accept here opens the ride in the web console so the driver confirms in
- * the normal UI (which calls POST /rides/:id/accept). We intentionally do NOT
- * accept the ride from native code — acceptance must go through the app's
- * authenticated flow and its credit/eligibility checks.
+ * Design (Option 2): this screen does NOT render ride details. The web app owns
+ * the real ride card (fare, vehicle, distances, timer, Accept/Reject), so there
+ * is nothing here to get wrong or to drift out of sync with the server. This
+ * Activity only:
+ *   1. Wakes the screen and shows over the lock screen,
+ *   2. Rings + vibrates to grab attention,
+ *   3. Hands off to MainActivity (the web app), deep-linked to the ride, so the
+ *      driver sees and acts on the authoritative in-app card.
+ *
+ * On an UNLOCKED phone we hand off immediately. On a LOCKED phone we wait for
+ * the keyguard dismiss before launching the app, showing a brief spinner.
  */
 public class IncomingRideActivity extends AppCompatActivity {
 
-    // Matches the broadcast auction window (backend broadcast_expires_at = 1 min).
-    // Kept a touch shorter so the screen dismisses before the server expires it.
-    private static final long COUNTDOWN_MS = 55_000L;
-
-    private CountDownTimer timer;
     private Ringtone ringtone;
     private Vibrator vibrator;
     private String rideId;
+    private boolean handedOff = false;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        rideId = getIntent().getStringExtra("rideId");
+
+        boolean locked = isLocked();
         showOverLockScreen();
         setContentView(R.layout.activity_incoming_ride);
 
-        Intent intent = getIntent();
-        rideId = intent.getStringExtra("rideId");
-        String pickup = intent.getStringExtra("pickup");
-        String drop = intent.getStringExtra("drop");
-        String fare = intent.getStringExtra("fare");
-
-        TextView pickupValue = findViewById(R.id.pickupValue);
-        TextView dropValue = findViewById(R.id.dropValue);
-        TextView fareValue = findViewById(R.id.fareValue);
-        final TextView countdown = findViewById(R.id.countdown);
-        Button acceptButton = findViewById(R.id.acceptButton);
-        Button rejectButton = findViewById(R.id.rejectButton);
-
-        if (pickup != null) pickupValue.setText(pickup);
-        if (drop != null) dropValue.setText(drop);
-        if (fare != null) fareValue.setText(fare);
-
-        acceptButton.setOnClickListener(v -> openRideInApp());
-        rejectButton.setOnClickListener(v -> dismiss());
+        Button dismiss = findViewById(R.id.dismissButton);
+        dismiss.setOnClickListener(v -> dismiss());
 
         startAlertSound();
         startVibration();
 
-        timer = new CountDownTimer(COUNTDOWN_MS, 1000) {
-            @Override
-            public void onTick(long msLeft) {
-                countdown.setText(String.valueOf(msLeft / 1000));
+        if (locked) {
+            // Ask the keyguard to dismiss, then open the app once unlocked.
+            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                km.requestDismissKeyguard(this, new KeyguardManager.KeyguardDismissCallback() {
+                    @Override
+                    public void onDismissSucceeded() {
+                        openRideInApp();
+                    }
+                    @Override
+                    public void onDismissError() {
+                        // Keep the splash visible; the driver can tap through / unlock.
+                        openRideInApp();
+                    }
+                });
             }
-
-            @Override
-            public void onFinish() {
-                // Window elapsed with no action — dismiss. The server will expire
-                // the broadcast on its own; we don't auto-reject so a late tap in
-                // the app can still win if the window hasn't closed.
-                dismiss();
-            }
-        }.start();
+            // Safety net: if the callback never fires, hand off after a short wait.
+            handler.postDelayed(this::openRideInApp, 2500);
+        } else {
+            // Screen already unlocked (e.g. in another app) — go straight in.
+            handler.postDelayed(this::openRideInApp, 400);
+        }
     }
 
-    /** Wake the screen and show this Activity over the keyguard. */
+    private boolean isLocked() {
+        KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        return km != null && km.isKeyguardLocked();
+    }
+
     private void showOverLockScreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true);
             setTurnScreenOn(true);
-            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
-            if (km != null) km.requestDismissKeyguard(this, null);
         } else {
             getWindow().addFlags(
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
@@ -114,7 +113,7 @@ public class IncomingRideActivity extends AppCompatActivity {
                 ringtone.play();
             }
         } catch (Exception ignored) {
-            // Sound is best-effort; the visual + vibration still alert the driver.
+            // Sound is best-effort; vibration + the visual splash still alert.
         }
     }
 
@@ -129,19 +128,22 @@ public class IncomingRideActivity extends AppCompatActivity {
         }
     }
 
-    /** Hand off to the web app, deep-linked to the ride offer, and finish. */
-    private void openRideInApp() {
+    /** Launch the web app, deep-linked to the ride, then finish this splash. */
+    private synchronized void openRideInApp() {
+        if (handedOff) return;
+        handedOff = true;
         stopAlerts();
+
         Intent intent = new Intent(this, MainActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        // MainActivity's WebView reads this to navigate to the ride (see the
-        // bridge wiring); harmless if the web app ignores it.
-        intent.putExtra("openRideId", rideId);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (rideId != null) intent.putExtra("openRideId", rideId);
         startActivity(intent);
         finishAndCancelNotification();
     }
 
     private void dismiss() {
+        handedOff = true;
         stopAlerts();
         finishAndCancelNotification();
     }
@@ -153,7 +155,7 @@ public class IncomingRideActivity extends AppCompatActivity {
     }
 
     private void stopAlerts() {
-        if (timer != null) timer.cancel();
+        handler.removeCallbacksAndMessages(null);
         if (ringtone != null && ringtone.isPlaying()) ringtone.stop();
         if (vibrator != null) vibrator.cancel();
     }

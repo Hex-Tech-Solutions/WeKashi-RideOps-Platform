@@ -59,13 +59,16 @@ async function pushToDrivers(driverIds: string[], payload: BroadcastPayloadLike)
 
   const { staleTokens } = await sendRideBroadcastPush(tokens, data);
 
-  // Prune tokens FCM reported as unregistered/invalid so we stop pushing to
-  // dead devices (a token is unique per install, so clear by value).
+  // A token FCM reports as unregistered/invalid means the app was uninstalled
+  // (or its data cleared) — the driver is genuinely unreachable. Under Model 2
+  // this is the ONE signal that auto-flips a driver offline: clear the dead
+  // token AND set is_online = false, so an uninstalled driver stops being
+  // offered rides. (A token is unique per install, so match by value.)
   if (staleTokens.length > 0) {
     await prisma.driver.updateMany({
       where: { fcmToken: { in: staleTokens } },
-      data: { fcmToken: null },
+      data: { fcmToken: null, isOnline: false },
     });
-    logger.info({ count: staleTokens.length }, 'Cleared stale FCM tokens');
+    logger.info({ count: staleTokens.length }, 'Cleared stale FCM tokens and set those drivers offline (uninstall)');
   }
 }

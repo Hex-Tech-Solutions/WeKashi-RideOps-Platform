@@ -29,8 +29,7 @@ import { format } from "date-fns";
  * this the batched matrix call would fire on every one of those polls.
  */
 const APPROACH_TTL_MS = 120_000;
-import { getDevicePosition, watchDevicePosition, sendOfflineBeacon, openAppSettings } from "@/lib/deviceLocation";
-import { tokenStore } from "@/lib/api";
+import { getDevicePosition, watchDevicePosition, openAppSettings } from "@/lib/deviceLocation";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
 
 // One-time flag: we only nudge the driver about background reliability once per
@@ -190,17 +189,11 @@ export default function DriverHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
-  // Best-effort "going offline" beacon: if the driver gracefully backgrounds or
-  // closes the app while online, tell the server immediately rather than waiting
-  // for the 3-min staleness sweep. pagehide is the most reliable unload signal
-  // in the Android WebView. A hard swipe-kill won't fire this — the server
-  // sweeper is the real guarantee; this just speeds up the graceful case.
-  useEffect(() => {
-    if (!online) return;
-    const onHide = () => sendOfflineBeacon(tokenStore.access);
-    window.addEventListener("pagehide", onHide);
-    return () => window.removeEventListener("pagehide", onHide);
-  }, [online]);
+  // Model 2: we deliberately do NOT send an offline beacon when the app is
+  // backgrounded or closed. A driver stays online until they explicitly tap Go
+  // Offline (in-app or on the persistent notification); ride offers reach a
+  // backgrounded/killed app via FCM push. Auto-going-offline on background
+  // would defeat that — so the old pagehide beacon has been removed.
 
   // First-run background-reliability nudge: the first time a driver goes online
   // on this device, offer to open app settings so they can allow "all the time"

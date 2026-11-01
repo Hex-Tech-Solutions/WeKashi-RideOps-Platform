@@ -65,7 +65,40 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
         String type = data.get("type");
 
         createChannel();
+
+        // Always post the full-screen-intent notification. This is what fires
+        // the takeover when the screen is LOCKED/OFF, and it's the heads-up
+        // banner fallback when the OS won't allow a direct launch.
         showFullScreenNotification(rideId, title, body, pickup, drop, type);
+
+        // When the screen is UNLOCKED and the driver is in another app, a
+        // full-screen intent is only shown as a heads-up banner by Android. To
+        // match Rapido's "takes over even while using another app", launch the
+        // Activity directly — this requires the "Display over other apps"
+        // (SYSTEM_ALERT_WINDOW) permission, which the onboarding flow guides the
+        // driver to grant. If it's not granted, we rely on the banner above.
+        if (canDrawOverlays()) {
+            Intent direct = new Intent(this, IncomingRideActivity.class);
+            direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            direct.putExtra("rideId", rideId);
+            direct.putExtra("pickup", pickup);
+            direct.putExtra("drop", drop);
+            direct.putExtra("type", type);
+            direct.putExtra("fare", body);
+            try {
+                startActivity(direct);
+            } catch (Exception ignored) {
+                // Background-activity-launch restrictions may block this; the
+                // full-screen-intent notification above still covers the driver.
+            }
+        }
+    }
+
+    private boolean canDrawOverlays() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return android.provider.Settings.canDrawOverlays(this);
+        }
+        return true;
     }
 
     private void createChannel() {
