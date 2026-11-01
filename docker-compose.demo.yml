@@ -41,6 +41,13 @@ services:
     build: ./backend
     restart: unless-stopped
     env_file: .env.prod
+    # FCM service-account key (push notifications). Put the JSON downloaded from
+    # Firebase Console → Project Settings → Service accounts into ./secrets/ on
+    # the host as fcm-service-account.json. It's mounted read-only into the
+    # container at the path FCM_SERVICE_ACCOUNT_JSON points to (set in .env.prod
+    # to /app/secrets/fcm-service-account.json). The ./secrets dir is gitignored.
+    volumes:
+      - ./secrets:/app/secrets:ro
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
