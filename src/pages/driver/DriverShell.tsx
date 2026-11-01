@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, type IssueRow } from "@/lib/queries";
 import { useDriverBroadcastSocket, type DriverBroadcastPayload } from "@/lib/driverRideAlerts";
 import DriverHome from "./DriverHome";
@@ -28,6 +29,7 @@ export default function DriverShell() {
   const { data: offersData } = useDriverOffers();
   const online = me?.isOnline ?? false;
   const availableOffersCount = offersData?.totalCount ?? 0;
+  const queryClient = useQueryClient();
 
   // Rapido-style live broadcast alert: vibration + sound + surface the offer.
   // Only active while the driver is Online. The hook itself refetches offers.
@@ -35,6 +37,19 @@ export default function DriverShell() {
     setTab("rides");
   }, []);
   useDriverBroadcastSocket(online, handleBroadcast);
+
+  // When the driver taps "Accept" on the native full-screen incoming-ride
+  // window, MainActivity (native) dispatches a `wekashi:openRide` event into
+  // the WebView. Jump to the Rides tab and refetch the offer list so the ride
+  // the driver just accepted-to-view is front and centre.
+  useEffect(() => {
+    const onOpenRide = () => {
+      setTab("rides");
+      void queryClient.invalidateQueries({ queryKey: ["driver", "offers"] });
+    };
+    window.addEventListener("wekashi:openRide", onOpenRide as EventListener);
+    return () => window.removeEventListener("wekashi:openRide", onOpenRide as EventListener);
+  }, [queryClient]);
 
   // Active ride — needed to attach the SOS to the right ride
   const rides  = ridesData?.rides ?? [];
