@@ -32,6 +32,11 @@ public final class RideApi {
         String base = AuthStore.apiBase(ctx);
         String access = AuthStore.access(ctx);
         if (access == null) return Result.AUTH_FAILED;
+        // Never transmit the bearer token over cleartext. The app only loads
+        // from an https origin (capacitor.config.ts cleartext=false), so this
+        // should always hold — refuse loudly rather than leak a token if a
+        // tampered/odd base ever slipped in.
+        if (!isHttps(base)) return Result.ERROR;
 
         int status = doPost(base + path, access);
 
@@ -51,6 +56,11 @@ public final class RideApi {
         }
         if (status == 401 || status == 403) return Result.AUTH_FAILED;
         return Result.ERROR;
+    }
+
+    /** True only for an https:// URL — the token is never sent over cleartext. */
+    private static boolean isHttps(String url) {
+        return url != null && url.toLowerCase(java.util.Locale.US).startsWith("https://");
     }
 
     /** Fire the POST with a Bearer token; returns the HTTP status (or -1). */
@@ -82,6 +92,8 @@ public final class RideApi {
         String base = AuthStore.apiBase(ctx);
         String refresh = AuthStore.refresh(ctx);
         if (refresh == null) return false;
+        // Same cleartext guard — never send the refresh token over http.
+        if (!isHttps(base)) return false;
 
         HttpURLConnection conn = null;
         try {

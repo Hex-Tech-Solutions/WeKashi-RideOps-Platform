@@ -17,10 +17,11 @@ const WekashiAuth = registerPlugin<WekashiAuthPlugin>("WekashiAuth");
 /** Absolute API base the native layer calls, e.g. https://wekashi.in/api. */
 function apiBase(): string {
   // Same-origin in production (the APK loads https://wekashi.in/driver), so the
-  // API is at <origin>/api. Fall back to the prod origin if origin is unusual.
+  // API is at <origin>/api. Only ever hand native an HTTPS base — native refuses
+  // to send tokens over cleartext, and we must not pass it one either.
   try {
     const origin = window.location.origin;
-    if (origin.startsWith("http")) return `${origin}/api`;
+    if (origin.startsWith("https://")) return `${origin}/api`;
   } catch {
     /* ignore */
   }

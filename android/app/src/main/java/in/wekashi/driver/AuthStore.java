@@ -3,17 +3,25 @@ package in.wekashi.driver;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKey;
+
 /**
- * Tiny persistent store for the driver's auth tokens and the API base URL, so
- * the native IncomingRideActivity can call Accept/Reject on the backend even
- * when the web app (which normally holds the tokens in localStorage) is killed.
+ * Persistent, ENCRYPTED store for the driver's auth tokens and the API base
+ * URL, so the native IncomingRideActivity can call Accept/Reject on the backend
+ * even when the web app (which holds the tokens in localStorage) is killed.
  *
- * The web app pushes these down on login via the WekashiAuth Capacitor plugin
- * (see WekashiAuthPlugin). Tokens are stored in a private SharedPreferences
- * file — same sandbox the WebView's localStorage lives in, not world-readable.
+ * Tokens are stored with EncryptedSharedPreferences — AES-256 keyed by a
+ * MasterKey held in the Android Keystore — so they are not readable as
+ * plaintext even on a rooted device. If the crypto layer can't initialize on
+ * some odd OEM build, we fall back to private (sandboxed, MODE_PRIVATE)
+ * SharedPreferences rather than break login — the data is still app-private.
+ *
+ * The web app pushes these down on login / token refresh via the WekashiAuth
+ * Capacitor plugin (see WekashiAuthPlugin).
  */
 public final class AuthStore {
-    private static final String PREFS = "wekashi_auth";
+    private static final String PREFS = "wekashi_auth_enc";
     private static final String KEY_ACCESS = "access";
     private static final String KEY_REFRESH = "refresh";
     private static final String KEY_BASE = "apiBase";
@@ -21,7 +29,21 @@ public final class AuthStore {
     private AuthStore() {}
 
     private static SharedPreferences prefs(Context ctx) {
-        return ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Context app = ctx.getApplicationContext();
+        try {
+            MasterKey masterKey = new MasterKey.Builder(app)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build();
+            return EncryptedSharedPreferences.create(
+                    app,
+                    PREFS,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM);
+        } catch (Exception e) {
+            // Fallback: still app-private, just not encrypted at rest.
+            return app.getSharedPreferences(PREFS + "_fallback", Context.MODE_PRIVATE);
+        }
     }
 
     public static void save(Context ctx, String access, String refresh, String apiBase) {
