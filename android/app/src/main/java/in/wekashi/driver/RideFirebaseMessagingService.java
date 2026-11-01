@@ -105,19 +105,36 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
 
         // Post the full-screen-intent notification. This fires the takeover when
         // the screen is LOCKED/OFF, and is the heads-up banner fallback when the
-        // OS won't allow a direct launch while unlocked.
+        // OS won't allow the overlay (no permission).
         showFullScreenNotification(rideId, title, body, rideIntent);
 
-        // When UNLOCKED and in another app / on the home screen, a full-screen
-        // intent only shows as a banner. To match Rapido's takeover, launch the
-        // Activity directly — needs the "Display over other apps" (overlay)
-        // permission, which the onboarding flow guides the driver to grant.
+        // Rapido-style takeover over the home screen / another app while
+        // UNLOCKED: draw the card as a system overlay via a foreground service.
+        // Unlike launching an Activity, an overlay window is NOT blocked by
+        // Android 10+'s background-activity-launch restriction — this is why it
+        // pops on its own when the push arrives in the background. Needs the
+        // "Display over other apps" permission (onboarding guides the driver).
         if (canDrawOverlays()) {
+            Intent ov = new Intent(this, IncomingRideOverlayService.class);
+            ov.putExtra("rideId", rideId);
+            ov.putExtra("pickup", pickup);
+            ov.putExtra("drop", drop);
+            ov.putExtra("type", type);
+            ov.putExtra("fare", fare);
+            ov.putExtra("vehicleType", vehicleType);
+            ov.putExtra("isAc", isAc);
+            ov.putExtra("distanceKm", distanceKm);
+            ov.putExtra("paxCount", data.get("paxCount"));
+            ov.putExtra("expiresAt", expiresAt);
             try {
-                startActivity(rideIntent);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(ov);
+                } else {
+                    startService(ov);
+                }
             } catch (Exception ignored) {
-                // Background-activity-launch restrictions may block this; the
-                // full-screen-intent notification above still covers the driver.
+                // If the OS blocks the FGS start, the full-screen-intent
+                // notification above still alerts the driver.
             }
         }
     }

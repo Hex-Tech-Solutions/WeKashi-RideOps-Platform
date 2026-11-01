@@ -5,10 +5,14 @@
     <string name="package_name">in.wekashi.driver</string>
     <string name="custom_url_scheme">in.wekashi.driver</string>
 
-    <!-- Incoming-ride wake-up splash -->
+    <!-- Incoming-ride wake-up splash (lock-screen path) -->
     <string name="incoming_ride_title">NEW RIDE REQUEST</string>
     <string name="incoming_ride_opening">Opening ride…</string>
     <string name="incoming_ride_dismiss">Dismiss</string>
+
+    <!-- Incoming-ride overlay card -->
+    <string name="ov_you_earn">YOU EARN</string>
+    <string name="incoming_ride_accept">Accept</string>
     <!-- Notification channels -->
     <string name="channel_incoming_rides">Incoming ride requests</string>
     <string name="channel_incoming_rides_desc">Full-screen alerts when a new ride is available</string>

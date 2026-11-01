@@ -38,9 +38,7 @@
             </intent-filter>
         </service>
 
-        <!-- Full-screen incoming-ride window. showWhenLocked/turnScreenOn let it
-             appear over the lock screen; excludeFromRecents so it doesn't linger
-             in the task switcher after it's dismissed. -->
+        <!-- Full-screen incoming-ride window (lock-screen wake-up path). -->
         <activity
             android:name=".IncomingRideActivity"
             android:exported="false"
@@ -49,6 +47,16 @@
             android:turnScreenOn="true"
             android:excludeFromRecents="true"
             android:theme="@style/AppTheme.NoActionBar" />
+
+        <!-- Overlay service that draws the Rapido-style card over other apps. -->
+        <service
+            android:name=".IncomingRideOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Incoming ride request overlay shown to the driver" />
+        </service>
 
         <!-- Default FCM notification channel used by the messaging service. -->
         <meta-data
@@ -81,6 +89,9 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- FGS special-use type for the incoming-ride overlay (FOREGROUND_SERVICE
+         itself is already declared above for the location service). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

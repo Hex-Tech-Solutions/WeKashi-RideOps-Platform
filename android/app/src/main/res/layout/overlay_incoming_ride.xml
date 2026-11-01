@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Native overlay card drawn over any app (TYPE_APPLICATION_OVERLAY), matching
+     the web DriverOfferCard: dark fare header + chips, pickup/drop rows with a
+     connector, times row, meta row with countdown, Accept/Reject. Occupies the
+     top portion of the screen like Rapido. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/overlay_card_bg"
+    android:elevation="16dp">
+
+    <!-- Fare header (dark) -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/overlay_header_bg"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:id="@+id/fareBlock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentStart="true"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/ov_you_earn"
+                android:textColor="#80FFFFFF"
+                android:textSize="10sp"
+                android:letterSpacing="0.15" />
+            <TextView
+                android:id="@+id/ovFare"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="₹—"
+                android:textColor="#D4A932"
+                android:textSize="34sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/chips"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/ovAc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Non-AC"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:background="@drawable/chip_outline"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="4dp"
+                android:layout_marginEnd="6dp" />
+            <TextView
+                android:id="@+id/ovVehicle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sedan"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:background="@drawable/chip_outline"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="4dp"
+                android:layout_marginEnd="6dp" />
+            <TextView
+                android:id="@+id/ovType"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Login"
+                android:textColor="#4ADE80"
+                android:textSize="11sp"
+                android:background="@drawable/chip_outline"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="4dp" />
+        </LinearLayout>
+    </RelativeLayout>
+
+    <!-- Body -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Pickup -->
+        <TextView
+            android:id="@+id/ovPickupDist"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#111111"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+        <TextView
+            android:id="@+id/ovPickup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="—"
+            android:textColor="#444444"
+            android:textSize="13sp"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Drop -->
+        <TextView
+            android:id="@+id/ovDropDist"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#111111"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+        <TextView
+            android:id="@+id/ovDrop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="—"
+            android:textColor="#444444"
+            android:textSize="13sp" />
+
+        <!-- Times row -->
+        <TextView
+            android:id="@+id/ovTimes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#111111"
+            android:textSize="13sp"
+            android:background="@drawable/times_bg"
+            android:padding="10dp"
+            android:layout_marginTop="12dp"
+            android:visibility="gone" />
+
+        <!-- Meta + countdown -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+            <TextView
+                android:id="@+id/ovMeta"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text=""
+                android:textColor="#666666"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/ovCountdown"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#9B7523"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Actions -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="14dp">
+            <Button
+                android:id="@+id/ovAccept"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="@string/incoming_ride_accept"
+                android:textColor="#111111"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:background="@drawable/btn_accept_ov" />
+            <Button
+                android:id="@+id/ovReject"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:text="✕"
+                android:textColor="#666666"
+                android:textSize="18sp"
+                android:background="@drawable/btn_reject_ov"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
