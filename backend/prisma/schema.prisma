@@ -66,6 +66,12 @@ model Driver {
   dlExpiry        DateTime?    @map("dl_expiry")
   govIdNumber     String?      @map("gov_id_number")
   altPhone        String?      @map("alt_phone")
+  // ── Push notifications (FCM) ──────────────────────────────────────────────
+  /// Firebase Cloud Messaging registration token for this driver's device.
+  /// Set via POST /api/driver/push-token on login; cleared on logout or when
+  /// FCM reports the token is stale/unregistered. Nullable — push is a
+  /// best-effort layer on top of the Socket.IO broadcast.
+  fcmToken        String?      @map("fcm_token")
   createdAt       DateTime     @default(now()) @map("created_at")
 
   vendor        Vendor         @relation(fields: [vendorId], references: [id])

@@ -243,3 +243,17 @@ export function getStoredDriver(): DriverSession | null {
     return null;
   }
 }
+
+/** Register this device's FCM token so the driver gets ride-broadcast pushes. */
+export async function registerPushToken(token: string): Promise<void> {
+  await api("/driver/push-token", { method: "POST", body: JSON.stringify({ token }) });
+}
+
+/** Clear this driver's FCM token (on logout). Best-effort — swallows errors. */
+export async function clearPushToken(): Promise<void> {
+  try {
+    await api("/driver/push-token", { method: "DELETE" });
+  } catch {
+    // Non-fatal: logout proceeds even if the token couldn't be cleared.
+  }
+}
