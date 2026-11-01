@@ -26,12 +26,20 @@ type Messaging = import('firebase-admin/messaging').Messaging;
 let messaging: Messaging | null = null;
 let initialized = false;
 
-/** The data payload we attach so the app can deep-link to the ride on tap. */
+/** The data payload we attach so the native full-screen card can render the
+ *  real ride details and deep-link / accept. All values are sent to FCM as
+ *  strings (FCM data is string-only). */
 export interface RidePushData {
   rideId: string;
   type: string; // 'login' | 'logout' | 'rental' | ...
   pickupAddress?: string;
   dropAddress?: string;
+  fare?: number | null;          // ₹ the driver earns (ride price)
+  vehicleType?: string | null;   // hatchback | sedan | suv
+  isAc?: boolean;
+  distanceKm?: number | null;    // trip distance
+  paxCount?: number | null;
+  expiresAt?: string | null;     // ISO — drives the native countdown
 }
 
 /**
@@ -104,6 +112,12 @@ export async function sendRideBroadcastPush(
   };
   if (data.pickupAddress) dataPayload.pickupAddress = data.pickupAddress;
   if (data.dropAddress) dataPayload.dropAddress = data.dropAddress;
+  if (data.fare != null) dataPayload.fare = String(data.fare);
+  if (data.vehicleType) dataPayload.vehicleType = data.vehicleType;
+  if (data.isAc != null) dataPayload.isAc = data.isAc ? '1' : '0';
+  if (data.distanceKm != null) dataPayload.distanceKm = String(data.distanceKm);
+  if (data.paxCount != null) dataPayload.paxCount = String(data.paxCount);
+  if (data.expiresAt) dataPayload.expiresAt = data.expiresAt;
 
   try {
     const res = await client.sendEachForMulticast({

@@ -7,6 +7,12 @@ import { isFcmEnabled, sendRideBroadcastPush, sendRideDismissPush, type RidePush
  *  public ride model from getRidePublicPayload(); keep this tolerant. */
 interface BroadcastPayloadLike {
   id?: string;
+  price?: number | null;
+  vehicle_type?: string | null;
+  is_ac?: boolean;
+  distance_km?: number | null;
+  pax_count?: number | null;
+  broadcast_expires_at?: string | Date | null;
   type?: string;
   pickup_address?: string;
   drop_address?: string;
@@ -55,6 +61,14 @@ async function pushToDrivers(driverIds: string[], payload: BroadcastPayloadLike)
     type: payload?.type ?? 'login',
     pickupAddress: payload?.pickup_address,
     dropAddress: payload?.drop_address,
+    fare: payload?.price ?? null,
+    vehicleType: payload?.vehicle_type ?? null,
+    isAc: payload?.is_ac ?? false,
+    distanceKm: payload?.distance_km ?? null,
+    paxCount: payload?.pax_count ?? null,
+    expiresAt: payload?.broadcast_expires_at
+      ? new Date(payload.broadcast_expires_at).toISOString()
+      : null,
   };
 
   const { staleTokens } = await sendRideBroadcastPush(tokens, data);

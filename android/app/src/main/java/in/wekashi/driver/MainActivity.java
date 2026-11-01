@@ -26,6 +26,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
+    // Register our native plugins before the bridge initializes.
+    registerPlugin(WekashiAuthPlugin.class);
     super.onCreate(savedInstanceState);
 
     WebView webView = getBridge().getWebView();

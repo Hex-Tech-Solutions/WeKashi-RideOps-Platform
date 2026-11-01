@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { driverVerifyOtp, getStoredDriver, logoutRequest, clearPushToken, type DriverSession } from "@/lib/api";
+import { driverVerifyOtp, getStoredDriver, logoutRequest, clearPushToken, tokenStore, type DriverSession } from "@/lib/api";
 import { initPushNotifications, teardownPushNotifications } from "@/lib/pushNotifications";
+import { syncNativeAuth, clearNativeAuth } from "@/lib/nativeAuth";
 import { TERMS_ACCEPTED_KEY } from "./DriverTerms";
 
 interface DriverAuthState {
@@ -21,9 +22,12 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
   // Register for FCM push whenever there's an authenticated driver session
   // (fresh login OR a session restored from storage on app relaunch). No-op on
   // web / when permission is declined. Ride broadcasts still arrive via sockets.
+  // Also sync the current tokens down to native so the full-screen incoming-ride
+  // card can Accept/Reject directly even when the app is killed.
   useEffect(() => {
     if (!session) return;
     void initPushNotifications();
+    void syncNativeAuth(tokenStore.access, tokenStore.refresh);
   }, [session]);
 
   const login = async (phone: string, otp: string) => {
@@ -40,6 +44,7 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
     // access token is revoked, so a signed-out device stops receiving pushes.
     await clearPushToken();
     await teardownPushNotifications();
+    await clearNativeAuth();
     await logoutRequest();
     sessionStorage.removeItem(TERMS_ACCEPTED_KEY);
     setSession(null);

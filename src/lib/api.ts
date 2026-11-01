@@ -75,6 +75,11 @@ function tryRefresh(): Promise<boolean> {
       if (!res.ok) return false;
       const data = (await res.json()) as { accessToken: string; refreshToken: string };
       tokenStore.set(data.accessToken, data.refreshToken, tokenStore.getUser());
+      // Keep the native auth store in sync so the full-screen incoming-ride
+      // card can still Accept/Reject with a valid token. Lazy import avoids a
+      // circular dependency (nativeAuth imports nothing from here, but keep the
+      // api module free of a static Capacitor import for non-native web builds).
+      void import("@/lib/nativeAuth").then((m) => m.syncNativeAuth(data.accessToken, data.refreshToken));
       return true;
     } catch {
       return false;

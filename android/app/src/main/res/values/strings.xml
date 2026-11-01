@@ -5,10 +5,15 @@
     <string name="package_name">in.wekashi.driver</string>
     <string name="custom_url_scheme">in.wekashi.driver</string>
 
-    <!-- Incoming-ride full-screen wake-up splash -->
+    <!-- Incoming-ride full-screen card -->
     <string name="incoming_ride_title">NEW RIDE REQUEST</string>
-    <string name="incoming_ride_opening">Opening ride details…</string>
-    <string name="incoming_ride_dismiss">Dismiss</string>
+    <string name="incoming_ride_fare_label">You earn</string>
+    <string name="incoming_ride_accept">Accept</string>
+    <string name="incoming_ride_reject">Ignore</string>
+    <string name="incoming_ride_accepting">Accepting…</string>
+    <string name="incoming_ride_taken">Ride no longer available</string>
+    <string name="incoming_ride_auth_failed">Please open the app and sign in again</string>
+    <string name="incoming_ride_error">Something went wrong — open the app to try</string>
     <!-- Notification channels -->
     <string name="channel_incoming_rides">Incoming ride requests</string>
     <string name="channel_incoming_rides_desc">Full-screen alerts when a new ride is available</string>
