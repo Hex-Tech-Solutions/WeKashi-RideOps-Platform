@@ -1,7 +1,7 @@
 import type { Server as IoServer } from 'socket.io';
 import { prisma } from './prisma';
 import { logger } from './logger';
-import { isFcmEnabled, sendRideBroadcastPush, type RidePushData } from './fcm';
+import { isFcmEnabled, sendRideBroadcastPush, sendRideDismissPush, type RidePushData } from './fcm';
 
 /** Fields we read off the ride payload to build the push. The payload is the
  *  public ride model from getRidePublicPayload(); keep this tolerant. */
@@ -70,5 +70,42 @@ async function pushToDrivers(driverIds: string[], payload: BroadcastPayloadLike)
       data: { fcmToken: null, isOnline: false },
     });
     logger.info({ count: staleTokens.length }, 'Cleared stale FCM tokens and set those drivers offline (uninstall)');
+  }
+}
+
+/**
+ * Dismiss the incoming-ride alert on all drivers who were offered this ride,
+ * for a ride that is no longer available (cancelled / expired / taken). Looks
+ * up the offered drivers' FCM tokens and sends a silent dismiss push. Also
+ * emits a socket `ride:dismiss` so an app that's open clears the card instantly.
+ * Best-effort and never throws into the caller.
+ */
+export async function dismissRideForOfferedDrivers(io: IoServer | undefined, rideId: string): Promise<void> {
+  try {
+    const offers = await prisma.rideOffer.findMany({
+      where: { rideId },
+      select: { driverId: true },
+    });
+    const driverIds = offers.map((o) => o.driverId);
+    if (driverIds.length === 0) return;
+
+    // Socket: tell any open driver app to drop the card immediately.
+    if (io) {
+      for (const driverId of driverIds) {
+        io.of('/driver').to(`driver:${driverId}`).emit('ride:dismiss', { rideId });
+      }
+    }
+
+    // FCM: dismiss the notification on backgrounded/killed devices.
+    if (isFcmEnabled()) {
+      const drivers = await prisma.driver.findMany({
+        where: { id: { in: driverIds }, fcmToken: { not: null } },
+        select: { fcmToken: true },
+      });
+      const tokens = drivers.map((d) => d.fcmToken!).filter(Boolean);
+      if (tokens.length > 0) await sendRideDismissPush(tokens, rideId);
+    }
+  } catch (err) {
+    logger.error({ err, rideId }, 'dismissRideForOfferedDrivers failed');
   }
 }

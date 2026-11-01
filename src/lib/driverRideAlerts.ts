@@ -68,9 +68,17 @@ export function useDriverBroadcastSocket(
       alertDriverOfBroadcast();
     };
 
+    // A ride that was offered is no longer available (cancelled / expired /
+    // taken by someone else). Refetch offers so its card drops out of the list.
+    const handleDismiss = () => {
+      void queryClient.invalidateQueries({ queryKey: ["driver", "offers"] });
+    };
+
     socket.on("ride:broadcast", handleBroadcast);
+    socket.on("ride:dismiss", handleDismiss);
     return () => {
       socket.off("ride:broadcast", handleBroadcast);
+      socket.off("ride:dismiss", handleDismiss);
       socket.disconnect();
     };
   }, [enabled, onBroadcast, queryClient]);

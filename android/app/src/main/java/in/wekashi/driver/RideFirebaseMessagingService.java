@@ -53,6 +53,14 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
         Map<String, String> data = remoteMessage.getData();
         String kind = data.get("kind");
+
+        // Ride no longer available (cancelled / expired / taken) — clear its alert.
+        if ("ride_dismiss".equals(kind)) {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(NOTIFICATION_ID);
+            return;
+        }
+
         if (!"ride_broadcast".equals(kind)) {
             return; // not an incoming-ride message; ignore
         }

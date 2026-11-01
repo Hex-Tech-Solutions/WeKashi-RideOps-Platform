@@ -410,6 +410,11 @@ export function createRidesRouter(io: IoServer): Router {
       try {
         const { queued } = await acceptRide(req.params.id, req.driver!.id);
 
+        // One driver won — dismiss the incoming-ride alert on everyone else who
+        // was offered this ride so their banner/card clears immediately.
+        const { dismissRideForOfferedDrivers } = await import('../lib/driverBroadcast');
+        await dismissRideForOfferedDrivers(io, req.params.id);
+
         // Notify supervisor — flag whether the ride is queued behind the
         // driver's current ride so the console can show it distinctly.
         const ride = await getRide(req.params.id);
@@ -740,6 +745,10 @@ export function createRidesRouter(io: IoServer): Router {
         const requestorId   = req.user!.id;
         const requestorRole = req.user!.role;
         await cancelRide(req.params.id, requestorId, requestorRole);
+
+        // Clear the incoming-ride alert on any drivers who were offered it.
+        const { dismissRideForOfferedDrivers } = await import('../lib/driverBroadcast');
+        await dismissRideForOfferedDrivers(io, req.params.id);
 
         io.of('/admin').to('admin').emit('admin:activity', {
           event: 'ride:cancelled',

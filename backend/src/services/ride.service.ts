@@ -530,14 +530,23 @@ export async function rebroadcastRide(
     throw new ValidationError('Only expired or cancelled rides can be rebroadcast');
   }
 
-  await prisma.$executeRaw`
-    UPDATE rides
-    SET status = 'broadcasting',
-        driver_id = NULL,
-        broadcast_started_at = NOW(),
-        broadcast_expires_at = NOW() + INTERVAL '1 minute'
-    WHERE id = ${rideId}
-  `;
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      UPDATE rides
+      SET status = 'broadcasting',
+          driver_id = NULL,
+          broadcast_started_at = NOW(),
+          broadcast_expires_at = NOW() + INTERVAL '1 minute'
+      WHERE id = ${rideId}
+    `;
+    // Clear offer rows from the PREVIOUS broadcast cycle. Without this, the old
+    // rows (now 'rejected'/stale) survive, and the createMany below — with
+    // skipDuplicates — silently skips re-inserting a fresh 'pending' row for
+    // those drivers. listDriverOffers only returns response='pending', so the
+    // ride would push a notification but never appear as a card in the app.
+    // This mirrors releaseQueuedRide, which already does this correctly.
+    await tx.rideOffer.deleteMany({ where: { rideId } });
+  });
 
   await startRideBroadcast(rideId);
 

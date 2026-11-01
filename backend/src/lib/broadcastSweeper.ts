@@ -100,6 +100,11 @@ async function sweepExpiredBroadcasts(): Promise<void> {
         // Clean up Redis key
         await redis.del(`ride:broadcast:${ride.id}`);
 
+        // Dismiss the incoming-ride alert on every driver who was offered this
+        // ride — the auction window closed, so their banner/card must clear.
+        const { dismissRideForOfferedDrivers } = await import('./driverBroadcast');
+        await dismissRideForOfferedDrivers(ioInstance ?? undefined, ride.id);
+
         // Emit socket event
         if (ioInstance) {
           ioInstance

@@ -142,3 +142,25 @@ export async function sendRideBroadcastPush(
     return { staleTokens: [] };
   }
 }
+
+/**
+ * Tell drivers' devices to DISMISS the incoming-ride alert for a ride that is
+ * no longer available (cancelled, expired, or taken by someone else). This is a
+ * silent data-only message the app/native layer handles by cancelling the
+ * ride's notification and clearing its offer card. No-op when FCM is disabled.
+ */
+export async function sendRideDismissPush(tokens: string[], rideId: string): Promise<void> {
+  const client = getMessaging();
+  const valid = tokens.filter(Boolean);
+  if (!client || valid.length === 0) return;
+
+  try {
+    await client.sendEachForMulticast({
+      tokens: valid,
+      data: { kind: 'ride_dismiss', rideId },
+      android: { priority: 'high' },
+    });
+  } catch (err) {
+    logger.error({ err, rideId }, 'FCM dismiss send failed');
+  }
+}
