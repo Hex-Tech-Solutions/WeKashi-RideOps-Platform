@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, ReactNode } from "react";
-import { driverVerifyOtp, getStoredDriver, logoutRequest, type DriverSession } from "@/lib/api";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { driverVerifyOtp, getStoredDriver, logoutRequest, clearPushToken, type DriverSession } from "@/lib/api";
+import { initPushNotifications, teardownPushNotifications } from "@/lib/pushNotifications";
 import { TERMS_ACCEPTED_KEY } from "./DriverTerms";
 
 interface DriverAuthState {
@@ -17,6 +18,14 @@ const Ctx = createContext<DriverAuthState>({
 export function DriverAuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<DriverSession | null>(getStoredDriver());
 
+  // Register for FCM push whenever there's an authenticated driver session
+  // (fresh login OR a session restored from storage on app relaunch). No-op on
+  // web / when permission is declined. Ride broadcasts still arrive via sockets.
+  useEffect(() => {
+    if (!session) return;
+    void initPushNotifications();
+  }, [session]);
+
   const login = async (phone: string, otp: string) => {
     const s = await driverVerifyOtp(phone, otp);
     // Clear any prior acceptance so a fresh login always re-presents the rules,
@@ -27,6 +36,10 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    // Clear the token server-side and tear down native listeners BEFORE the
+    // access token is revoked, so a signed-out device stops receiving pushes.
+    await clearPushToken();
+    await teardownPushNotifications();
     await logoutRequest();
     sessionStorage.removeItem(TERMS_ACCEPTED_KEY);
     setSession(null);

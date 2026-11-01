@@ -58,6 +58,13 @@ ENHANCED_OTD_REPORT.csv
 supabase/.branches/
 supabase/.temp/
 
+# ── FCM / Firebase secrets — NEVER commit ─────────────────────────────────────
+# Backend service-account private key (used by firebase-admin to send pushes)
+secrets/
+*fcm-service-account*.json
+# Android app's Firebase config (contains project keys)
+android/app/google-services.json
+
 # ── Capacitor Android build ───────────────────────────────────────────────────
 android/.gradle/
 android/app/build/

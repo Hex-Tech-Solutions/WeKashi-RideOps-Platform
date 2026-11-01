@@ -65,6 +65,40 @@ router.get('/me', async (req: AuthRequest, res: Response, next: NextFunction) =>
   }
 });
 
+// POST /api/driver/push-token — register this device's FCM token so the driver
+// receives ride-broadcast pushes when the app is backgrounded/killed. Called by
+// the app after login once the push permission is granted. Idempotent.
+const PushTokenSchema = z.object({ token: z.string().min(10).max(4096) });
+router.post('/push-token', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { token } = PushTokenSchema.parse(req.body);
+    const { prisma } = await import('../lib/prisma');
+    // A token is unique per device install. Clear it from any OTHER driver first
+    // (shared device / account switch) so a broadcast never pushes to the wrong
+    // person, then assign it to the current driver.
+    await prisma.driver.updateMany({
+      where: { fcmToken: token, NOT: { id: req.driver!.id } },
+      data: { fcmToken: null },
+    });
+    await prisma.driver.update({ where: { id: req.driver!.id }, data: { fcmToken: token } });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/driver/push-token — clear this driver's token (on logout, so a
+// signed-out device stops receiving pushes).
+router.delete('/push-token', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { prisma } = await import('../lib/prisma');
+    await prisma.driver.update({ where: { id: req.driver!.id }, data: { fcmToken: null } });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/driver/offers — broadcasting rides I can accept.
 // `offers` is capped (see MAX_DRIVER_OFFERS) so the list stays scrollable
 // instead of growing unbounded; `totalCount` is the uncapped total, used to
