@@ -27,6 +27,33 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- FCM service: receives ride-broadcast data messages and raises the
+             full-screen incoming-ride alert. -->
+        <service
+            android:name=".RideFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Full-screen incoming-ride window. showWhenLocked/turnScreenOn let it
+             appear over the lock screen; excludeFromRecents so it doesn't linger
+             in the task switcher after it's dismissed. -->
+        <activity
+            android:name=".IncomingRideActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/AppTheme.NoActionBar" />
+
+        <!-- Default FCM notification channel used by the messaging service. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="ride_broadcasts" />
     </application>
 
     <!-- Permissions -->
@@ -43,5 +70,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Push notifications + full-screen incoming-ride alert. POST_NOTIFICATIONS
+         is the runtime notification permission (Android 13+). USE_FULL_SCREEN_INTENT
+         lets the ride window wake the screen over the lock screen (Android 14+
+         also exposes a per-app toggle the onboarding flow guides the driver to).
+         VIBRATE for the alert; SYSTEM_ALERT_WINDOW (overlay) lets the alert draw
+         over another app while the screen is unlocked. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

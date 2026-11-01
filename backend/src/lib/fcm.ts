@@ -89,11 +89,18 @@ export async function sendRideBroadcastPush(
     ? `Pickup: ${data.pickupAddress}`
     : 'Tap to view and accept.';
 
-  // Data values must be strings for FCM. Keep the payload small.
+  // DATA-ONLY message (no `notification` block). This is deliberate: a
+  // `notification` payload is handled by the Android system tray and would NOT
+  // let our RideFirebaseMessagingService build the full-screen "incoming ride"
+  // intent when the app is backgrounded/killed. By sending data-only at HIGH
+  // priority, every message is delivered to our onMessageReceived(), which then
+  // raises the full-screen call-style Activity (IncomingRideActivity).
   const dataPayload: Record<string, string> = {
     kind: 'ride_broadcast',
     rideId: data.rideId,
     type: data.type,
+    title,
+    body,
   };
   if (data.pickupAddress) dataPayload.pickupAddress = data.pickupAddress;
   if (data.dropAddress) dataPayload.dropAddress = data.dropAddress;
@@ -101,16 +108,11 @@ export async function sendRideBroadcastPush(
   try {
     const res = await client.sendEachForMulticast({
       tokens: valid,
-      notification: { title, body },
       data: dataPayload,
       android: {
+        // HIGH priority wakes the device from Doze so the full-screen alert
+        // fires promptly even when idle. Required for a ride-offer alert.
         priority: 'high',
-        notification: {
-          channelId: 'ride_broadcasts',
-          sound: 'default',
-          // Surface immediately; ride offers are time-critical.
-          defaultVibrateTimings: true,
-        },
       },
     });
 

@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full-screen "incoming ride" window (Rapido/Uber style). Shown over the
+     lock screen and over other apps by IncomingRideActivity. Dark brand
+     background with gold accents to match the app. -->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0E0E0E"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/headerLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/incoming_ride_title"
+        android:textColor="#D4A932"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.15"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="48dp" />
+
+    <!-- Countdown ring / number -->
+    <TextView
+        android:id="@+id/countdown"
+        android:layout_width="96dp"
+        android:layout_height="96dp"
+        android:gravity="center"
+        android:text="20"
+        android:textColor="#FFFFFF"
+        android:textSize="40sp"
+        android:textStyle="bold"
+        android:background="@drawable/countdown_ring"
+        app:layout_constraintTop_toBottomOf="@id/headerLabel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="24dp" />
+
+    <TextView
+        android:id="@+id/fareLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/incoming_ride_fare_label"
+        android:textColor="#9A9A9A"
+        android:textSize="13sp"
+        app:layout_constraintTop_toBottomOf="@id/countdown"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="28dp" />
+
+    <TextView
+        android:id="@+id/fareValue"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="—"
+        android:textColor="#FFFFFF"
+        android:textSize="34sp"
+        android:textStyle="bold"
+        app:layout_constraintTop_toBottomOf="@id/fareLabel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="2dp" />
+
+    <TextView
+        android:id="@+id/pickupLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/incoming_ride_pickup_label"
+        android:textColor="#9A9A9A"
+        android:textSize="12sp"
+        android:letterSpacing="0.08"
+        app:layout_constraintTop_toBottomOf="@id/fareValue"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="32dp" />
+
+    <TextView
+        android:id="@+id/pickupValue"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="—"
+        android:textColor="#FFFFFF"
+        android:textSize="17sp"
+        app:layout_constraintTop_toBottomOf="@id/pickupLabel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/dropLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/incoming_ride_drop_label"
+        android:textColor="#9A9A9A"
+        android:textSize="12sp"
+        android:letterSpacing="0.08"
+        app:layout_constraintTop_toBottomOf="@id/pickupValue"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:id="@+id/dropValue"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="—"
+        android:textColor="#FFFFFF"
+        android:textSize="17sp"
+        app:layout_constraintTop_toBottomOf="@id/dropLabel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="4dp" />
+
+    <!-- Accept / Reject buttons pinned to the bottom -->
+    <Button
+        android:id="@+id/acceptButton"
+        android:layout_width="0dp"
+        android:layout_height="60dp"
+        android:text="@string/incoming_ride_accept"
+        android:textColor="#0E0E0E"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:background="@drawable/btn_accept"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/rejectButton"
+        android:layout_width="0dp"
+        android:layout_height="52dp"
+        android:text="@string/incoming_ride_reject"
+        android:textColor="#9A9A9A"
+        android:textSize="15sp"
+        android:background="@android:color/transparent"
+        app:layout_constraintBottom_toTopOf="@id/acceptButton"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="4dp" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

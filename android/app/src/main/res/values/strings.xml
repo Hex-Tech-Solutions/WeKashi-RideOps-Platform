@@ -4,4 +4,15 @@
     <string name="title_activity_main">Wekashi Cabs</string>
     <string name="package_name">in.wekashi.driver</string>
     <string name="custom_url_scheme">in.wekashi.driver</string>
+
+    <!-- Incoming-ride full-screen alert -->
+    <string name="incoming_ride_title">NEW RIDE REQUEST</string>
+    <string name="incoming_ride_fare_label">Estimated fare</string>
+    <string name="incoming_ride_pickup_label">PICKUP</string>
+    <string name="incoming_ride_drop_label">DROP</string>
+    <string name="incoming_ride_accept">Accept</string>
+    <string name="incoming_ride_reject">Ignore</string>
+    <!-- Notification channels -->
+    <string name="channel_incoming_rides">Incoming ride requests</string>
+    <string name="channel_incoming_rides_desc">Full-screen alerts when a new ride is available</string>
 </resources>

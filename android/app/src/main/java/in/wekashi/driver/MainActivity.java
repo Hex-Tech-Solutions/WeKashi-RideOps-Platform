@@ -1,5 +1,6 @@
 package in.wekashi.driver;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.webkit.WebView;
 import android.webkit.WebSettings;
@@ -35,5 +36,37 @@ public class MainActivity extends BridgeActivity {
       // Clear stale cached documents left by older installs (one-time on launch).
       webView.clearCache(true);
     }
+
+    // Cold start from the full-screen Accept button.
+    handleOpenRide(getIntent());
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    // Warm start (app already running) from the full-screen Accept button.
+    handleOpenRide(intent);
+  }
+
+  /**
+   * When the driver taps Accept on the full-screen IncomingRideActivity, it
+   * launches us with an "openRideId" extra. Tell the web app to navigate to
+   * that ride by dispatching a window event it listens for. Safe no-op if the
+   * extra is absent or the web layer doesn't handle it.
+   */
+  private void handleOpenRide(Intent intent) {
+    if (intent == null) return;
+    final String rideId = intent.getStringExtra("openRideId");
+    if (rideId == null || rideId.isEmpty()) return;
+
+    final WebView webView = getBridge().getWebView();
+    if (webView == null) return;
+    // Defer until the web layer is ready to receive the event.
+    webView.post(() -> {
+      String js = "window.dispatchEvent(new CustomEvent('wekashi:openRide',"
+          + "{ detail: { rideId: '" + rideId.replace("'", "") + "' } }));";
+      webView.evaluateJavascript(js, null);
+    });
   }
 }
