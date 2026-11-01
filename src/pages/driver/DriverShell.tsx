@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, type IssueRow } from "@/lib/queries";
 import { useDriverBroadcastSocket, type DriverBroadcastPayload } from "@/lib/driverRideAlerts";
+import { IncomingRideOverlay } from "./IncomingRideOverlay";
 import DriverHome from "./DriverHome";
 import DriverScheduled from "./DriverScheduled";
 import DriverDocuments from "./DriverDocuments";
@@ -38,10 +39,10 @@ export default function DriverShell() {
   }, []);
   useDriverBroadcastSocket(online, handleBroadcast);
 
-  // When the driver taps "Accept" on the native full-screen incoming-ride
-  // window, MainActivity (native) dispatches a `wekashi:openRide` event into
-  // the WebView. Jump to the Rides tab and refetch the offer list so the ride
-  // the driver just accepted-to-view is front and centre.
+  // When the app is opened from an incoming-ride push, native dispatches a
+  // `wekashi:openRide` event. Refetch offers so the ride is present, then the
+  // IncomingRideOverlay (mounted below) shows it full-screen. Also jump to the
+  // Rides tab so dismissing the overlay lands on the broadcasts list.
   useEffect(() => {
     const onOpenRide = () => {
       setTab("rides");
@@ -71,6 +72,10 @@ export default function DriverShell() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {/* Full-screen incoming-ride takeover — shows the real DriverOfferCard
+          when a broadcast arrives or the app is opened from a ride push. */}
+      <IncomingRideOverlay enabled={online} />
+
       <div className="max-w-md w-full mx-auto flex-1 flex flex-col">
 
         {/* Top bar */}

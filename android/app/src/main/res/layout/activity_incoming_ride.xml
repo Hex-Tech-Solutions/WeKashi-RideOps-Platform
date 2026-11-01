@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Rapido-style full-screen incoming-ride card. Shows the real ride summary
-     (fare, vehicle, distance, pickup, drop) with a live countdown and native
-     Accept/Reject buttons that call the backend directly. -->
+<!-- Minimal wake-up splash (Option Y). No ride details — the web app renders
+     the real DriverOfferCard full-screen after handoff. This only covers the
+     brief moment between the screen waking and the web app coming to front. -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -10,153 +10,57 @@
     android:background="#0E0E0E"
     android:padding="24dp">
 
+    <ProgressBar
+        android:id="@+id/spinner"
+        style="?android:attr/progressBarStyleLarge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:indeterminateTint="#D4A932"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/title"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintVertical_chainStyle="packed" />
+
     <TextView
-        android:id="@+id/headerLabel"
+        android:id="@+id/title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/incoming_ride_title"
         android:textColor="#D4A932"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.15"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginTop="40dp" />
-
-    <TextView
-        android:id="@+id/countdown"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:gravity="center"
-        android:text="--"
-        android:textColor="#FFFFFF"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:background="@drawable/countdown_ring"
-        app:layout_constraintTop_toTopOf="@id/headerLabel"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <!-- Fare -->
-    <TextView
-        android:id="@+id/fareLabel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/incoming_ride_fare_label"
-        android:textColor="#9A9A9A"
-        android:textSize="12sp"
-        app:layout_constraintTop_toBottomOf="@id/headerLabel"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginTop="24dp" />
-
-    <TextView
-        android:id="@+id/fareValue"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="—"
-        android:textColor="#D4A932"
-        android:textSize="40sp"
-        android:textStyle="bold"
-        app:layout_constraintTop_toBottomOf="@id/fareLabel"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginTop="2dp" />
-
-    <!-- Vehicle / AC / distance chips line -->
-    <TextView
-        android:id="@+id/metaLine"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="—"
-        android:textColor="#CFCFCF"
-        android:textSize="14sp"
-        app:layout_constraintTop_toBottomOf="@id/fareValue"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="6dp" />
-
-    <!-- Pickup -->
-    <View
-        android:id="@+id/pickupDot"
-        android:layout_width="10dp"
-        android:layout_height="10dp"
-        android:background="@drawable/dot_gold"
-        app:layout_constraintTop_toTopOf="@id/pickupValue"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginTop="4dp" />
-
-    <TextView
-        android:id="@+id/pickupValue"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="—"
-        android:textColor="#FFFFFF"
-        android:textSize="15sp"
-        app:layout_constraintTop_toBottomOf="@id/metaLine"
-        app:layout_constraintStart_toEndOf="@id/pickupDot"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginStart="12dp"
-        android:layout_marginTop="28dp" />
-
-    <!-- Drop -->
-    <View
-        android:id="@+id/dropDot"
-        android:layout_width="10dp"
-        android:layout_height="10dp"
-        android:background="@drawable/dot_grey"
-        app:layout_constraintTop_toTopOf="@id/dropValue"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginTop="4dp" />
-
-    <TextView
-        android:id="@+id/dropValue"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="—"
-        android:textColor="#FFFFFF"
-        android:textSize="15sp"
-        app:layout_constraintTop_toBottomOf="@id/pickupValue"
-        app:layout_constraintStart_toEndOf="@id/dropDot"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginStart="12dp"
-        android:layout_marginTop="16dp" />
-
-    <!-- Status line (shown while accept/reject is in flight) -->
-    <TextView
-        android:id="@+id/statusLine"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:text=""
-        android:textColor="#9A9A9A"
-        android:textSize="13sp"
-        app:layout_constraintBottom_toTopOf="@id/acceptButton"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginBottom="12dp" />
-
-    <Button
-        android:id="@+id/acceptButton"
-        android:layout_width="0dp"
-        android:layout_height="60dp"
-        android:text="@string/incoming_ride_accept"
-        android:textColor="#0E0E0E"
         android:textSize="18sp"
         android:textStyle="bold"
-        android:background="@drawable/btn_accept"
+        android:letterSpacing="0.12"
+        android:layout_marginTop="24dp"
+        app:layout_constraintTop_toBottomOf="@id/spinner"
+        app:layout_constraintBottom_toTopOf="@id/subtitle"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <TextView
+        android:id="@+id/subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/incoming_ride_opening"
+        android:textColor="#9A9A9A"
+        android:textSize="14sp"
+        android:layout_marginTop="8dp"
+        app:layout_constraintTop_toBottomOf="@id/title"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <Button
+        android:id="@+id/dismissButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/incoming_ride_dismiss"
+        android:textColor="#9A9A9A"
+        android:textSize="14sp"
+        android:background="@android:color/transparent"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginBottom="16dp" />
-
-    <Button
-        android:id="@+id/rejectButton"
-        android:layout_width="0dp"
-        android:layout_height="48dp"
-        android:text="@string/incoming_ride_reject"
-        android:textColor="#9A9A9A"
-        android:textSize="15sp"
-        android:background="@android:color/transparent"
-        app:layout_constraintBottom_toTopOf="@id/acceptButton"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

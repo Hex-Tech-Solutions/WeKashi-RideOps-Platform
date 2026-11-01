@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
+import { OfferCountdown } from "./OfferCountdown";
 import { DriverEarningsCard } from "./DriverEarningsCard";
 import { MadeInIndiaFooter } from "@/components/MadeInIndiaFooter";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
@@ -592,33 +593,6 @@ function completionBlockedReason(ride: RideRow) {
  * Countdown to a broadcast's expiry. Broadcasts only live ~3 minutes, so
  * without this the driver has no idea how long an offer will stay acceptable.
  */
-function OfferCountdown({ expiresAt }: { expiresAt: string }) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const left = Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1000));
-  const mm = String(Math.floor(left / 60)).padStart(2, "0");
-  const ss = String(left % 60).padStart(2, "0");
-
-  // Turn red in the last 30s so it reads as urgent at a glance.
-  const urgent = left <= 30;
-
-  return (
-    <span
-      className={`flex items-center gap-1 font-mono font-semibold shrink-0 ${
-        urgent ? "text-destructive animate-pulse" : "text-gold-dark"
-      }`}
-    >
-      <Timer className="h-3.5 w-3.5" />
-      {left > 0 ? `${mm}:${ss}` : "expired"}
-    </span>
-  );
-}
-
 // Format an ISO datetime (or HH:MM string) to HH:MM.
 function summaryTime(v?: string | null): string | null {
   if (!v) return null;

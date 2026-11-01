@@ -54,10 +54,17 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
         Map<String, String> data = remoteMessage.getData();
         String kind = data.get("kind");
 
-        // Ride no longer available (cancelled / expired / taken) — clear its alert.
+        // Ride no longer available (cancelled / expired / taken) — clear both
+        // the notification AND the open full-screen card.
         if ("ride_dismiss".equals(kind)) {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) nm.cancel(NOTIFICATION_ID);
+            // Tell any live IncomingRideActivity for this ride to finish itself.
+            Intent close = new Intent(IncomingRideActivity.ACTION_DISMISS);
+            close.putExtra("rideId", data.get("rideId"));
+            close.setPackage(getPackageName());
+            androidx.localbroadcastmanager.content.LocalBroadcastManager
+                    .getInstance(this).sendBroadcast(close);
             return;
         }
 
@@ -68,33 +75,46 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
         String rideId = data.get("rideId");
         String title = data.get("title") != null ? data.get("title") : "New ride available";
         String body = data.get("body") != null ? data.get("body") : "Tap to view and accept.";
+        // The real ride fields the full-screen card renders. These are SEPARATE
+        // from `body` — the earlier bug passed `body` (which is "Pickup: ...")
+        // into the fare slot, so the card showed "₹Pickup: ...".
         String pickup = data.get("pickupAddress");
         String drop = data.get("dropAddress");
         String type = data.get("type");
+        String fare = data.get("fare");
+        String vehicleType = data.get("vehicleType");
+        String isAc = data.get("isAc");
+        String distanceKm = data.get("distanceKm");
+        String expiresAt = data.get("expiresAt");
 
         createChannel();
 
-        // Always post the full-screen-intent notification. This is what fires
-        // the takeover when the screen is LOCKED/OFF, and it's the heads-up
-        // banner fallback when the OS won't allow a direct launch.
-        showFullScreenNotification(rideId, title, body, pickup, drop, type);
+        // Build the Activity intent once, with the FULL ride summary, reused by
+        // both the full-screen-intent notification and the direct launch.
+        Intent rideIntent = new Intent(this, IncomingRideActivity.class);
+        rideIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        rideIntent.putExtra("rideId", rideId);
+        rideIntent.putExtra("pickup", pickup);
+        rideIntent.putExtra("drop", drop);
+        rideIntent.putExtra("type", type);
+        rideIntent.putExtra("fare", fare);
+        rideIntent.putExtra("vehicleType", vehicleType);
+        rideIntent.putExtra("isAc", isAc);
+        rideIntent.putExtra("distanceKm", distanceKm);
+        rideIntent.putExtra("expiresAt", expiresAt);
 
-        // When the screen is UNLOCKED and the driver is in another app, a
-        // full-screen intent is only shown as a heads-up banner by Android. To
-        // match Rapido's "takes over even while using another app", launch the
-        // Activity directly — this requires the "Display over other apps"
-        // (SYSTEM_ALERT_WINDOW) permission, which the onboarding flow guides the
-        // driver to grant. If it's not granted, we rely on the banner above.
+        // Post the full-screen-intent notification. This fires the takeover when
+        // the screen is LOCKED/OFF, and is the heads-up banner fallback when the
+        // OS won't allow a direct launch while unlocked.
+        showFullScreenNotification(rideId, title, body, rideIntent);
+
+        // When UNLOCKED and in another app / on the home screen, a full-screen
+        // intent only shows as a banner. To match Rapido's takeover, launch the
+        // Activity directly — needs the "Display over other apps" (overlay)
+        // permission, which the onboarding flow guides the driver to grant.
         if (canDrawOverlays()) {
-            Intent direct = new Intent(this, IncomingRideActivity.class);
-            direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            direct.putExtra("rideId", rideId);
-            direct.putExtra("pickup", pickup);
-            direct.putExtra("drop", drop);
-            direct.putExtra("type", type);
-            direct.putExtra("fare", body);
             try {
-                startActivity(direct);
+                startActivity(rideIntent);
             } catch (Exception ignored) {
                 // Background-activity-launch restrictions may block this; the
                 // full-screen-intent notification above still covers the driver.
@@ -136,22 +156,13 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
     }
 
     private void showFullScreenNotification(String rideId, String title, String body,
-                                            String pickup, String drop, String type) {
-        // The Activity that takes over the screen.
-        Intent fullScreenIntent = new Intent(this, IncomingRideActivity.class);
-        fullScreenIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        fullScreenIntent.putExtra("rideId", rideId);
-        fullScreenIntent.putExtra("pickup", pickup);
-        fullScreenIntent.putExtra("drop", drop);
-        fullScreenIntent.putExtra("type", type);
-        fullScreenIntent.putExtra("fare", body);
-
+                                            Intent rideIntent) {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags |= PendingIntent.FLAG_IMMUTABLE;
         }
         PendingIntent fullScreenPending = PendingIntent.getActivity(
-                this, rideId != null ? rideId.hashCode() : 0, fullScreenIntent, flags);
+                this, rideId != null ? rideId.hashCode() : 0, rideIntent, flags);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
