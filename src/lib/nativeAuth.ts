@@ -7,9 +7,14 @@
 
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
+import type { PluginListenerHandle } from "@capacitor/core";
+
 interface WekashiAuthPlugin {
   saveAuth(opts: { access: string; refresh: string; apiBase: string }): Promise<void>;
   clearAuth(): Promise<void>;
+  showOnlineNotification(): Promise<void>;
+  hideOnlineNotification(): Promise<void>;
+  addListener(event: "wentOffline", cb: () => void): Promise<PluginListenerHandle>;
 }
 
 const WekashiAuth = registerPlugin<WekashiAuthPlugin>("WekashiAuth");
@@ -44,7 +49,30 @@ export async function clearNativeAuth(): Promise<void> {
   if (!Capacitor.isNativePlatform?.()) return;
   try {
     await WekashiAuth.clearAuth();
+    await WekashiAuth.hideOnlineNotification();
   } catch {
     /* ignore */
   }
+}
+
+/** Show/hide the persistent "You're online" notification. No-op on web. */
+export async function setOnlineNotification(online: boolean): Promise<void> {
+  if (!Capacitor.isNativePlatform?.()) return;
+  try {
+    if (online) await WekashiAuth.showOnlineNotification();
+    else await WekashiAuth.hideOnlineNotification();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Subscribe to the native "driver tapped Go Offline on the notification" event.
+ * Returns a cleanup fn. No-op on web.
+ */
+export function onNativeWentOffline(cb: () => void): () => void {
+  if (!Capacitor.isNativePlatform?.()) return () => {};
+  let handle: PluginListenerHandle | undefined;
+  void WekashiAuth.addListener("wentOffline", cb).then((h) => { handle = h; });
+  return () => { void handle?.remove(); };
 }

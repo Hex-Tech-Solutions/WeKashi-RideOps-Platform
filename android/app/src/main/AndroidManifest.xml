@@ -58,6 +58,21 @@
                 android:value="Incoming ride request overlay shown to the driver" />
         </service>
 
+        <!-- Persistent "You're online" foreground notification with Go Offline. -->
+        <service
+            android:name=".OnlineStatusService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Persistent online-status notification with a go-offline action" />
+        </service>
+
+        <!-- Receiver for the notification's Go Offline action. -->
+        <receiver
+            android:name=".GoOfflineReceiver"
+            android:exported="false" />
+
         <!-- Default FCM notification channel used by the messaging service. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"

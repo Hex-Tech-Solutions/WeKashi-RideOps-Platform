@@ -28,6 +28,11 @@ public final class RideApi {
         return post(ctx, "/rides/" + rideId + "/reject", false);
     }
 
+    /** Go offline from the persistent notification without opening the app. */
+    public static Result goOffline(Context ctx) {
+        return post(ctx, "/driver/offline", true);
+    }
+
     private static Result post(Context ctx, String path, boolean isAccept) {
         String base = AuthStore.apiBase(ctx);
         String access = AuthStore.access(ctx);

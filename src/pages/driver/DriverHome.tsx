@@ -31,6 +31,8 @@ import { format } from "date-fns";
  */
 const APPROACH_TTL_MS = 120_000;
 import { getDevicePosition, watchDevicePosition, openAppSettings } from "@/lib/deviceLocation";
+import { setOnlineNotification, onNativeWentOffline } from "@/lib/nativeAuth";
+import { useQueryClient } from "@tanstack/react-query";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
 
 // One-time flag: we only nudge the driver about background reliability once per
@@ -196,6 +198,22 @@ export default function DriverHome() {
   // backgrounded/killed app via FCM push. Auto-going-offline on background
   // would defeat that — so the old pagehide beacon has been removed.
 
+  // Keep the persistent "You're online" notification in sync with the server
+  // state — e.g. when the app opens and the driver was already online (Model 2),
+  // (re)show it so the one-tap Go Offline is always available.
+  const qc = useQueryClient();
+  useEffect(() => {
+    void setOnlineNotification(online);
+  }, [online]);
+
+  // If the driver taps Go Offline on the native notification, the backend was
+  // already told; just refresh `me` so the in-app toggle flips to offline.
+  useEffect(() => {
+    return onNativeWentOffline(() => {
+      void qc.invalidateQueries({ queryKey: ["driver", "me"] });
+    });
+  }, [qc]);
+
   // First-run background-reliability nudge: the first time a driver goes online
   // on this device, offer to open app settings so they can allow "all the time"
   // location + exempt the app from battery optimization. Without that, Android
@@ -236,14 +254,22 @@ export default function DriverHome() {
       try {
         const loc = await getDevicePosition();
         goOnline.mutate(loc, {
-          onSuccess: () => toast.success("You're online — live location shared"),
+          onSuccess: () => {
+            toast.success("You're online — live location shared");
+            // Show the persistent "You're online" notification so the driver
+            // can go offline in one tap even with the app killed (Model 2).
+            void setOnlineNotification(true);
+          },
           onError: (e: any) => toast.error(e?.message ?? "Failed"),
         });
       } catch (e: any) {
         toast.error(e?.message ?? "Could not get your location");
       }
     } else {
-      goOffline.mutate(undefined, { onSuccess: () => toast.success("You're offline"), onError: (e: any) => toast.error(e?.message ?? "Failed") });
+      goOffline.mutate(undefined, {
+        onSuccess: () => { toast.success("You're offline"); void setOnlineNotification(false); },
+        onError: (e: any) => toast.error(e?.message ?? "Failed"),
+      });
     }
   };
 
