@@ -32,6 +32,8 @@ import { format } from "date-fns";
 const APPROACH_TTL_MS = 120_000;
 import { getDevicePosition, watchDevicePosition, openAppSettings } from "@/lib/deviceLocation";
 import { setOnlineNotification, onNativeWentOffline } from "@/lib/nativeAuth";
+import { missingCriticalPermissions } from "@/lib/permissions";
+import { DriverPermissions } from "./DriverPermissions";
 import { useQueryClient } from "@tanstack/react-query";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
 
@@ -219,6 +221,9 @@ export default function DriverHome() {
   // location + exempt the app from battery optimization. Without that, Android
   // OEMs kill the backgrounded app and freeze live tracking during navigation.
   const [showBatteryPrompt, setShowBatteryPrompt] = useState(false);
+  // Re-opened when the driver tries to go online but a critical permission was
+  // revoked since onboarding — shows the checklist again to fix it.
+  const [permGateOpen, setPermGateOpen] = useState(false);
   useEffect(() => {
     if (!online) return;
     if (localStorage.getItem(BATTERY_PROMPT_KEY)) return;
@@ -251,6 +256,19 @@ export default function DriverHome() {
 
   const toggleOnline = async (on: boolean) => {
     if (on) {
+      // Re-check the critical permissions AT THE MOMENT the driver goes online —
+      // the onboarding checklist only runs once per install, but a driver can
+      // later revoke "Display over other apps", notifications, location, or
+      // battery exemption (or an OS update resets them). Going online in that
+      // state would silently drop ride alerts. Block it and point them to fix.
+      const missing = await missingCriticalPermissions();
+      if (missing.length > 0) {
+        setPermGateOpen(true);
+        toast.error("Fix permissions to go online", {
+          description: `Needs: ${missing.join(", ")}. Ride alerts won't work without them.`,
+        });
+        return;
+      }
       try {
         const loc = await getDevicePosition();
         goOnline.mutate(loc, {
@@ -272,6 +290,17 @@ export default function DriverHome() {
       });
     }
   };
+
+  // Permission gate — re-shown when the driver tried to go online but a
+  // critical permission was revoked. Full-screen so it can't be ignored; the
+  // checklist's Continue (enabled once criticals are granted) closes it.
+  if (permGateOpen) {
+    return (
+      <div className="fixed inset-0 z-[120] bg-background overflow-y-auto">
+        <DriverPermissions onAllCriticalGranted={() => setPermGateOpen(false)} />
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -123,3 +123,20 @@ export async function openAutostart(): Promise<{ brand: string; opened: boolean 
   if (!isNative()) return { brand: "", opened: false };
   try { return await Native.openAutostartSettings(); } catch { return { brand: "", opened: false }; }
 }
+
+/**
+ * The CRITICAL permissions that must be present for ride alerts to work. Used
+ * to gate going online — the onboarding checklist runs once, but these can be
+ * revoked later, so we re-verify at the moment the driver goes on-duty.
+ * Returns human-readable labels of whatever is missing ([] = all good / web).
+ */
+export async function missingCriticalPermissions(): Promise<string[]> {
+  if (!isNative()) return [];
+  const s = await checkAllPermissions();
+  const missing: string[] = [];
+  if (!s.notifications) missing.push("Notifications");
+  if (!s.location) missing.push("Location");
+  if (!s.overlay) missing.push("Display over other apps");
+  if (!s.battery) missing.push("Battery (don't optimize)");
+  return missing;
+}
