@@ -135,6 +135,8 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
             ov.putExtra("distanceKm", distanceKm);
             ov.putExtra("paxCount", data.get("paxCount"));
             ov.putExtra("expiresAt", expiresAt);
+            ov.putExtra("loginTime", data.get("loginTime"));
+            ov.putExtra("firstPickupTime", data.get("firstPickupTime"));
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(ov);
@@ -155,18 +157,12 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
         return true;
     }
 
-    /** True if our app has a foreground (resumed) activity — i.e. the driver is
-     *  actively using the app, so the web layer should handle the ride. */
+    /** True if the driver is actively using the app (an activity is resumed), so
+     *  the web layer should own the ride and we skip native surfaces. Backed by
+     *  a reliable activity-lifecycle counter (see WekashiApp), not the
+     *  unreliable process-importance heuristic. */
     private boolean isAppInForeground() {
-        try {
-            android.app.ActivityManager.RunningAppProcessInfo info =
-                    new android.app.ActivityManager.RunningAppProcessInfo();
-            android.app.ActivityManager.getMyMemoryState(info);
-            return info.importance ==
-                    android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
-        } catch (Exception e) {
-            return false;
-        }
+        return WekashiApp.isForeground();
     }
 
     private void createChannel() {

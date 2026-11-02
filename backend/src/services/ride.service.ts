@@ -1178,6 +1178,7 @@ async function getRidePublicPayload(rideId: string) {
       toll_charge: number | null;
       scheduled_for: Date | null;
       broadcast_expires_at: Date | null;
+      planned_start_time: Date | null;
       pickup_lat: number;
       pickup_lng: number;
       airport_direction: string | null;
@@ -1188,14 +1189,24 @@ async function getRidePublicPayload(rideId: string) {
     SELECT
       id, type, status, pickup_address, drop_address, pax_count, capacity,
       price, distance_km, is_ac, vehicle_type, escort_required, escort_charge, toll_charge,
-      scheduled_for, broadcast_expires_at,
+      scheduled_for, broadcast_expires_at, planned_start_time,
       airport_direction, airport_terminal, flight_number,
       ST_Y(pickup_point::geometry) as pickup_lat,
       ST_X(pickup_point::geometry) as pickup_lng
     FROM rides
     WHERE id = ${rideId}
   `;
-  return rows[0] ?? null;
+  const payload = rows[0] ?? null;
+  if (!payload) return null;
+
+  // First pickup's scheduled time (earliest stop with a supervisor-set time) —
+  // the native overlay card shows this just like the in-app DriverOfferCard.
+  const firstPax = await prisma.ridePax.findFirst({
+    where: { rideId, scheduledPickupTime: { not: null } },
+    orderBy: { seq: 'asc' },
+    select: { scheduledPickupTime: true },
+  });
+  return { ...payload, first_pickup_time: firstPax?.scheduledPickupTime ?? null };
 }
 
 // Exposed so the airport-ride service can reuse the exact same driver-broadcast

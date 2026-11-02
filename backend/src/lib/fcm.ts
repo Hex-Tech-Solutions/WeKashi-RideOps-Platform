@@ -40,6 +40,8 @@ export interface RidePushData {
   distanceKm?: number | null;    // trip distance
   paxCount?: number | null;
   expiresAt?: string | null;     // ISO — drives the native countdown
+  loginTime?: string | null;     // ISO planned start (Login/Logout time)
+  firstPickupTime?: string | null; // HH:MM first pickup
 }
 
 /**
@@ -118,6 +120,8 @@ export async function sendRideBroadcastPush(
   if (data.distanceKm != null) dataPayload.distanceKm = String(data.distanceKm);
   if (data.paxCount != null) dataPayload.paxCount = String(data.paxCount);
   if (data.expiresAt) dataPayload.expiresAt = data.expiresAt;
+  if (data.loginTime) dataPayload.loginTime = data.loginTime;
+  if (data.firstPickupTime) dataPayload.firstPickupTime = data.firstPickupTime;
 
   try {
     const res = await client.sendEachForMulticast({

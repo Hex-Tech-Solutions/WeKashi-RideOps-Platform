@@ -87,7 +87,13 @@ public class IncomingRideOverlayService extends Service {
     }
 
     private void showOverlay(Intent data) {
-        if (overlayView != null) return; // already showing
+        // A newer ride push arrived while a card is already up — replace it with
+        // the new one (rather than ignoring it, which left the 2nd ride showing
+        // only as a banner). Tear down the current card first, then draw the new.
+        if (overlayView != null) {
+            if (timer != null) { timer.cancel(); timer = null; }
+            removeOverlay();
+        }
 
         windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_incoming_ride, null);
@@ -132,6 +138,8 @@ public class IncomingRideOverlayService extends Service {
         String drop = d.getStringExtra("drop");
         String type = d.getStringExtra("type");
         String paxCount = d.getStringExtra("paxCount");
+        String loginTime = d.getStringExtra("loginTime");
+        String firstPickupTime = d.getStringExtra("firstPickupTime");
 
         tv(R.id.ovFare).setText(fare != null && !fare.isEmpty() ? "\u20B9" + fare : "\u20B9—");
 
@@ -160,6 +168,40 @@ public class IncomingRideOverlayService extends Service {
         StringBuilder meta = new StringBuilder();
         if (paxCount != null && !paxCount.isEmpty()) meta.append(paxCount).append(" pax");
         tv(R.id.ovMeta).setText(meta.toString());
+
+        // Times row: Login/Logout time + 1st pickup, matching the in-app card.
+        TextView times = tv(R.id.ovTimes);
+        StringBuilder t = new StringBuilder();
+        String loginLabel = "logout".equals(type) ? "Logout" : "Login";
+        String lt = toHHmm(loginTime);
+        if (lt != null) t.append(loginLabel).append(" ").append(lt);
+        String fp = toHHmm(firstPickupTime);
+        if (fp != null) {
+            if (t.length() > 0) t.append("   ");
+            t.append("1st pickup ").append(fp);
+        }
+        if (t.length() > 0) {
+            times.setText(t.toString());
+            times.setVisibility(View.VISIBLE);
+        } else {
+            times.setVisibility(View.GONE);
+        }
+    }
+
+    /** Accept an ISO datetime or an HH:MM string; return HH:MM for display. */
+    private String toHHmm(String v) {
+        if (v == null || v.isEmpty()) return null;
+        if (v.matches("^\\d{2}:\\d{2}$")) return v;
+        try {
+            java.text.SimpleDateFormat in =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+            in.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            java.util.Date d = in.parse(v);
+            java.text.SimpleDateFormat out = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US);
+            return out.format(d);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private TextView tv(int id) { return overlayView.findViewById(id); }

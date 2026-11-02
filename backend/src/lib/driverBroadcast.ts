@@ -13,6 +13,8 @@ interface BroadcastPayloadLike {
   distance_km?: number | null;
   pax_count?: number | null;
   broadcast_expires_at?: string | Date | null;
+  planned_start_time?: string | Date | null;
+  first_pickup_time?: string | null;
   type?: string;
   pickup_address?: string;
   drop_address?: string;
@@ -69,6 +71,10 @@ async function pushToDrivers(driverIds: string[], payload: BroadcastPayloadLike)
     expiresAt: payload?.broadcast_expires_at
       ? new Date(payload.broadcast_expires_at).toISOString()
       : null,
+    loginTime: payload?.planned_start_time
+      ? new Date(payload.planned_start_time).toISOString()
+      : null,
+    firstPickupTime: payload?.first_pickup_time ?? null,
   };
 
   const { staleTokens } = await sendRideBroadcastPush(tokens, data);
