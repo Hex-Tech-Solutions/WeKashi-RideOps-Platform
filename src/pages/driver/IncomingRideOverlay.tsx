@@ -1,16 +1,15 @@
 /**
- * IncomingRideOverlay — the full-screen "a ride is here" takeover, shown inside
- * the web app (Option Y). When a broadcast arrives (socket) or the native layer
- * hands us a ride via the `wekashi:openRide` event (push → wake screen → open
- * app), this covers the screen with the REAL DriverOfferCard for that ride —
- * the exact card the driver sees in the broadcasts list, with working
- * Accept/Reject. No native card, no lookalike.
+ * IncomingRideOverlay — full-screen takeover shown ONLY when the app is opened
+ * from an incoming-ride push (the native `wekashi:openRide` deep-link). It
+ * renders the REAL DriverOfferCard for that ride with working Accept/Reject.
  *
- * It picks the ride to show from the live offers query, so the data is always
- * the authoritative offer model (fare, vehicle, distance, times, countdown).
+ * It does NOT auto-take-over while the driver is already using the app — in
+ * that case offers appear in the broadcasts list (DriverHome) in their normal
+ * place. The ride to show is picked from the live offers query, so the data is
+ * always the authoritative offer model (fare, vehicle, distance, times).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDriverOffers, useAcceptOffer, useRejectOffer, type RideRow } from "@/lib/queries";
 import { getDevicePosition } from "@/lib/deviceLocation";
 import { useRouteMatrix } from "@/lib/queries";
@@ -29,33 +28,22 @@ export function IncomingRideOverlay({ enabled }: { enabled: boolean }) {
   // The ride currently taken over by the overlay. null = overlay hidden.
   const [shownRideId, setShownRideId] = useState<string | null>(null);
   const [approach, setApproach] = useState<ApproachInfo | undefined>(undefined);
-  // Rides the driver already acted on / that we've auto-shown, so we don't
-  // re-pop the overlay for the same ride after they dismiss it.
-  const handledRef = useRef<Set<string>>(new Set());
 
-  // Auto-show the newest pending offer when one arrives (and the driver hasn't
-  // already handled it). This fires both for socket broadcasts (offers refetch)
-  // and when the app is opened from a push.
+  // IMPORTANT: this full-screen overlay is shown ONLY when the app is opened
+  // from an incoming-ride push (the native `wekashi:openRide` deep-link). It
+  // must NOT auto-take-over the screen while the driver is already using the
+  // app — in that case offers belong in the broadcasts list (DriverHome),
+  // rendered in their designated place. (Previously it auto-showed on every
+  // offer arrival, so it consumed the whole screen inside the app.)
   useEffect(() => {
     if (!enabled) { setShownRideId(null); return; }
-    if (shownRideId) return; // already showing one
-    const next = offers.find((o) => !handledRef.current.has(o.id));
-    if (next) setShownRideId(next.id);
-  }, [enabled, offers, shownRideId]);
-
-  // Native deep-link: when the driver opens the app from the incoming-ride
-  // push, show that specific ride's overlay.
-  useEffect(() => {
     const onOpenRide = (e: Event) => {
       const rideId = (e as CustomEvent<{ rideId?: string }>).detail?.rideId;
-      if (rideId) {
-        handledRef.current.delete(rideId);
-        setShownRideId(rideId);
-      }
+      if (rideId) setShownRideId(rideId);
     };
     window.addEventListener("wekashi:openRide", onOpenRide as EventListener);
     return () => window.removeEventListener("wekashi:openRide", onOpenRide as EventListener);
-  }, []);
+  }, [enabled]);
 
   const ride: RideRow | undefined = useMemo(
     () => offers.find((o) => o.id === shownRideId),
@@ -98,7 +86,6 @@ export function IncomingRideOverlay({ enabled }: { enabled: boolean }) {
   if (!enabled || !ride) return null;
 
   const close = () => {
-    if (shownRideId) handledRef.current.add(shownRideId);
     setShownRideId(null);
     setApproach(undefined);
   };

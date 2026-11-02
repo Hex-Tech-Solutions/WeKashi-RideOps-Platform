@@ -60,10 +60,12 @@ export function useDriverBroadcastSocket(
     });
 
     const handleBroadcast = (payload: DriverBroadcastPayload) => {
-      // The server has already persisted the RideOffer before emitting. Refetch
-      // the same complete offer model used by the normal UI, rather than trusting
-      // a partial socket payload for acceptability/expiry decisions.
-      void queryClient.invalidateQueries({ queryKey: ["driver", "offers"] });
+      // The server persists the RideOffer before emitting. Force an IMMEDIATE
+      // refetch (not just invalidate) so two broadcasts arriving in the same
+      // second each pull fresh offers — invalidate can coalesce them into one
+      // refetch that races a 2nd ride's commit, making it look "missed" until
+      // the next 8s poll. refetchType:'all' refetches even inactive observers.
+      void queryClient.refetchQueries({ queryKey: ["driver", "offers"], type: "all" });
       onBroadcast(payload);
       alertDriverOfBroadcast();
     };
@@ -71,7 +73,7 @@ export function useDriverBroadcastSocket(
     // A ride that was offered is no longer available (cancelled / expired /
     // taken by someone else). Refetch offers so its card drops out of the list.
     const handleDismiss = () => {
-      void queryClient.invalidateQueries({ queryKey: ["driver", "offers"] });
+      void queryClient.refetchQueries({ queryKey: ["driver", "offers"], type: "all" });
     };
 
     socket.on("ride:broadcast", handleBroadcast);

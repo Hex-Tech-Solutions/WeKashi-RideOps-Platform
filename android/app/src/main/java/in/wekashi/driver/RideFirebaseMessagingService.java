@@ -103,6 +103,15 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
         rideIntent.putExtra("distanceKm", distanceKm);
         rideIntent.putExtra("expiresAt", expiresAt);
 
+        // When the app is already in the FOREGROUND, the web app handles the
+        // ride entirely (socket → broadcasts list + in-app alert). Showing a
+        // native notification or overlay on top would be duplicate noise and
+        // the card would wrongly cover the screen the driver is using. So skip
+        // both native surfaces and let the web layer own it.
+        if (isAppInForeground()) {
+            return;
+        }
+
         // Post the full-screen-intent notification. This fires the takeover when
         // the screen is LOCKED/OFF, and is the heads-up banner fallback when the
         // OS won't allow the overlay (no permission).
@@ -144,6 +153,20 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
             return android.provider.Settings.canDrawOverlays(this);
         }
         return true;
+    }
+
+    /** True if our app has a foreground (resumed) activity — i.e. the driver is
+     *  actively using the app, so the web layer should handle the ride. */
+    private boolean isAppInForeground() {
+        try {
+            android.app.ActivityManager.RunningAppProcessInfo info =
+                    new android.app.ActivityManager.RunningAppProcessInfo();
+            android.app.ActivityManager.getMyMemoryState(info);
+            return info.importance ==
+                    android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void createChannel() {
@@ -188,7 +211,12 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setAutoCancel(true)
-                .setOngoing(true)
+                // NOT ongoing — the driver must be able to swipe the alert away.
+                // A ride offer is transient (it expires); forcing it to stick
+                // was wrong. The overlay/full-screen path handles the takeover;
+                // this notification should behave like a normal dismissible alert.
+                .setOngoing(false)
+                .setTimeoutAfter(60_000)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 // This is the key line: a full-screen intent marked highPriority
                 // launches the Activity directly when the screen is locked/off.
