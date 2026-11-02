@@ -112,18 +112,15 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
             return;
         }
 
-        // Post the full-screen-intent notification. This fires the takeover when
-        // the screen is LOCKED/OFF, and is the heads-up banner fallback when the
-        // OS won't allow the overlay (no permission).
-        showFullScreenNotification(rideId, title, body, rideIntent);
-
-        // Rapido-style takeover over the home screen / another app while
-        // UNLOCKED: draw the card as a system overlay via a foreground service.
-        // Unlike launching an Activity, an overlay window is NOT blocked by
-        // Android 10+'s background-activity-launch restriction — this is why it
-        // pops on its own when the push arrives in the background. Needs the
-        // "Display over other apps" permission (onboarding guides the driver).
+        // If we can draw the overlay card, that IS the alert — do NOT also post
+        // the separate ride notification. Posting both left a sticky
+        // foreground-service notification next to the card that the driver
+        // couldn't swipe away. The overlay card carries Accept/Reject/dismiss.
         if (canDrawOverlays()) {
+            // Rapido-style takeover over the home screen / another app while
+            // UNLOCKED: draw the card as a system overlay via a foreground
+            // service. An overlay window is NOT blocked by Android 10+'s
+            // background-activity-launch restriction, so it pops on its own.
             Intent ov = new Intent(this, IncomingRideOverlayService.class);
             ov.putExtra("rideId", rideId);
             ov.putExtra("pickup", pickup);
@@ -143,10 +140,18 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
                 } else {
                     startService(ov);
                 }
-            } catch (Exception ignored) {
-                // If the OS blocks the FGS start, the full-screen-intent
-                // notification above still alerts the driver.
+            } catch (Exception e) {
+                // Overlay couldn't start (OS blocked the FGS) — fall back to the
+                // swipeable full-screen-intent notification so the driver is
+                // still alerted.
+                showFullScreenNotification(rideId, title, body, rideIntent);
             }
+        } else {
+            // No overlay permission — use the full-screen-intent notification.
+            // It fires the takeover when the screen is LOCKED/OFF and is a
+            // swipeable heads-up banner otherwise. (Onboarding, Step 4, guides
+            // the driver to grant overlay so they get the full card instead.)
+            showFullScreenNotification(rideId, title, body, rideIntent);
         }
     }
 
