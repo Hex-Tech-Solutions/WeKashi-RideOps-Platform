@@ -64,16 +64,12 @@ public class PermissionsPlugin extends Plugin {
                         Uri.parse("package:" + ctx.getPackageName()));
                 break;
             case "battery":
-                // Direct "allow this app to ignore battery optimization?" dialog
-                // for OUR package — not the global list (which is what
-                // ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS opens, and which
-                // dropped the driver on the wrong, app-agnostic page).
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                            Uri.parse("package:" + ctx.getPackageName()));
-                } else {
-                    intent = appDetailsIntent(ctx);
-                }
+                // Open the app's own info page — reliable on every OEM. From
+                // there the driver taps Battery → Unrestricted/Don't optimize.
+                // (ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS needs a declared
+                // permission + is blocked/no-op on several OEMs, so we don't
+                // use it.)
+                intent = appDetailsIntent(ctx);
                 break;
             case "fullScreenIntent":
                 if (Build.VERSION.SDK_INT >= 34) {
@@ -90,6 +86,12 @@ public class PermissionsPlugin extends Plugin {
                 } else {
                     intent = appDetailsIntent(ctx);
                 }
+                break;
+            case "location":
+                // Samsung (and some others) don't reliably honour a generic
+                // location-settings deep-link from an app; the app info page is
+                // the dependable place to set Location → Allow all the time.
+                intent = appDetailsIntent(ctx);
                 break;
             default:
                 intent = appDetailsIntent(ctx);

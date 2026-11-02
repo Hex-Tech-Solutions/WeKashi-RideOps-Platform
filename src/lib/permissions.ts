@@ -19,7 +19,7 @@ interface PermissionsNative {
     fullScreenIntent: boolean;
     brand: string;
   }>;
-  openSetting(opts: { key: "overlay" | "battery" | "fullScreenIntent" | "notifications" | "appDetails" }): Promise<void>;
+  openSetting(opts: { key: "overlay" | "battery" | "fullScreenIntent" | "notifications" | "location" | "appDetails" }): Promise<void>;
   openAutostartSettings(): Promise<{ brand: string; opened: boolean }>;
 }
 
@@ -112,7 +112,7 @@ export async function requestLocation(): Promise<void> {
 
 /** Open a native special-access settings page. */
 export async function openSetting(
-  key: "overlay" | "battery" | "fullScreenIntent" | "notifications" | "appDetails",
+  key: "overlay" | "battery" | "fullScreenIntent" | "notifications" | "location" | "appDetails",
 ): Promise<void> {
   if (!isNative()) return;
   try { await Native.openSetting({ key }); } catch { /* ignore */ }

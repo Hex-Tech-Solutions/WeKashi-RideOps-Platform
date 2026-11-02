@@ -63,12 +63,18 @@ export function DriverPermissions({ onAllCriticalGranted }: { onAllCriticalGrant
     {
       key: "location", label: "Location", critical: true, icon: MapPin,
       why: "Share your live position so nearby rides reach you.",
-      action: async () => { await requestLocation(); },
+      action: async () => {
+        await requestLocation();
+        // If the OS dialog didn't grant it (denied before, or suppressed on
+        // Samsung), send the driver to app info to allow it manually.
+        const s = await checkAllPermissions();
+        if (!s.location) await openSetting("location");
+      },
     },
     {
       key: "backgroundLocation", label: "Location: Allow all the time", critical: false, icon: Navigation,
       why: "Keeps tracking alive while you navigate in Google Maps.",
-      action: async () => { await openSetting("appDetails"); },
+      action: async () => { await openSetting("location"); },
     },
     {
       key: "overlay", label: "Display over other apps", critical: true, icon: Layers,
@@ -77,8 +83,11 @@ export function DriverPermissions({ onAllCriticalGranted }: { onAllCriticalGrant
     },
     {
       key: "battery", label: "Don't optimize battery", critical: true, icon: BatteryCharging,
-      why: "Stops your phone from killing the app in the background.",
-      action: async () => { await openSetting("battery"); },
+      why: "Opens app info — then tap Battery → Unrestricted so your phone doesn't kill the app.",
+      action: async () => {
+        await openSetting("battery");
+        toast("Tap Battery → Unrestricted (or 'Don't optimize')", { duration: 6000 });
+      },
     },
     {
       key: "fullScreenIntent", label: "Full-screen alerts", critical: false, icon: Maximize,
