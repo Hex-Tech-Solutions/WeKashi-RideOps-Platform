@@ -28,6 +28,7 @@ public class MainActivity extends BridgeActivity {
   public void onCreate(Bundle savedInstanceState) {
     // Register our native plugins before the bridge initializes.
     registerPlugin(WekashiAuthPlugin.class);
+    registerPlugin(PermissionsPlugin.class);
     super.onCreate(savedInstanceState);
 
     WebView webView = getBridge().getWebView();
