@@ -20,6 +20,7 @@ import {
   type PermStatus,
 } from "@/lib/permissions";
 import { Capacitor } from "@capacitor/core";
+import { toast } from "sonner";
 
 interface Row {
   key: keyof PermStatus;
@@ -86,8 +87,11 @@ export function DriverPermissions({ onAllCriticalGranted }: { onAllCriticalGrant
     },
     {
       key: "autostart", label: "Autostart / Auto-launch", critical: false, icon: RefreshCw, statusless: true,
-      why: "On Realme/Oppo/Vivo/Xiaomi, allow the app to start on its own so rides arrive when it's closed.",
-      action: async () => { await openAutostart(); },
+      why: autostartHint(status?.brand),
+      action: async () => {
+        const { brand } = await openAutostart();
+        toast(autostartHint(brand || status?.brand), { duration: 7000 });
+      },
     },
   ];
 
@@ -178,4 +182,23 @@ export function DriverPermissions({ onAllCriticalGranted }: { onAllCriticalGrant
 
 function titleCase(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+/** Brand-specific guidance for the Autostart step, since the exact screen name
+ *  and location vary by OEM and the deep-link is best-effort. */
+function autostartHint(brand?: string): string {
+  const b = (brand || "").toLowerCase();
+  if (b.includes("oneplus")) {
+    return "OnePlus: Settings → Battery → More → Auto-launch (or App auto-launch) → turn ON Wekashi Cabs.";
+  }
+  if (b.includes("xiaomi") || b.includes("redmi") || b.includes("poco")) {
+    return "Xiaomi/Redmi: Settings → Apps → Manage apps → Wekashi Cabs → Autostart → turn ON.";
+  }
+  if (b.includes("oppo") || b.includes("realme")) {
+    return "Realme/Oppo: Settings → Apps → App management → Wekashi Cabs → Allow Auto-launch.";
+  }
+  if (b.includes("vivo") || b.includes("iqoo")) {
+    return "Vivo/iQOO: Settings → Battery → Background power consumption → allow Wekashi Cabs.";
+  }
+  return "Allow the app to start on its own (Autostart / Auto-launch) so rides arrive when it's closed.";
 }

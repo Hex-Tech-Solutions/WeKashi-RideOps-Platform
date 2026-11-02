@@ -64,7 +64,16 @@ public class PermissionsPlugin extends Plugin {
                         Uri.parse("package:" + ctx.getPackageName()));
                 break;
             case "battery":
-                intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                // Direct "allow this app to ignore battery optimization?" dialog
+                // for OUR package — not the global list (which is what
+                // ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS opens, and which
+                // dropped the driver on the wrong, app-agnostic page).
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:" + ctx.getPackageName()));
+                } else {
+                    intent = appDetailsIntent(ctx);
+                }
                 break;
             case "fullScreenIntent":
                 if (Build.VERSION.SDK_INT >= 34) {
@@ -147,6 +156,9 @@ public class PermissionsPlugin extends Plugin {
     /** Known OEM autostart settings components, tried in order. */
     private boolean tryAutostartIntents(Context ctx) {
         String[][] components = {
+            // OnePlus (OxygenOS) — app auto-launch / "chain launch"
+            {"com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"},
+            {"com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListAct"},
             // Xiaomi / Redmi / POCO (MIUI)
             {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
             // Oppo (ColorOS)
@@ -162,15 +174,20 @@ public class PermissionsPlugin extends Plugin {
             {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
             {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
         };
+        android.content.pm.PackageManager pm = ctx.getPackageManager();
         for (String[] c : components) {
+            Intent i = new Intent();
+            i.setClassName(c[0], c[1]);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            // Only launch if the component actually RESOLVES on this device —
+            // avoids landing the driver on a wrong/partial page when a brand's
+            // component name differs from our guess.
+            if (i.resolveActivity(pm) == null) continue;
             try {
-                Intent i = new Intent();
-                i.setClassName(c[0], c[1]);
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 ctx.startActivity(i);
                 return true;
             } catch (Exception ignored) {
-                // try next
+                // Blocked (SecurityException on some OEM builds) — try next.
             }
         }
         return false;
