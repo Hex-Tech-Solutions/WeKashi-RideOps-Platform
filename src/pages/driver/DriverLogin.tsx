@@ -185,7 +185,7 @@ export default function DriverLogin() {
                   className="mt-1"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Ramesh Kumar"
+                  placeholder="Your full name"
                 />
               </div>
               <div>
@@ -223,9 +223,6 @@ export default function DriverLogin() {
           )}
         </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-6">
-          Seeded drivers: +919000000001 / 2 / 3 · OTP: 123456
-        </p>
       </div>
     </div>
   );
