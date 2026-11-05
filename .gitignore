@@ -72,6 +72,11 @@ android/build/
 android/.idea/
 android/*.iml
 
+# ── Android release signing — NEVER commit the keystore or its passwords ──────
+android/keystore.properties
+*.jks
+*.keystore
+
 # ── Lock files (keep package-lock.json, ignore others) ───────────────────────
 bun.lockb
 yarn.lock

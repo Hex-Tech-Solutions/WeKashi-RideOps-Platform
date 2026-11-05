@@ -49,25 +49,24 @@
             android:excludeFromRecents="true"
             android:theme="@style/AppTheme.NoActionBar" />
 
-        <!-- Overlay service that draws the Rapido-style card over other apps. -->
+        <!-- Overlay service that draws the Rapido-style card over other apps.
+             shortService: it's a brief alert that finishes quickly (accept /
+             reject / timeout), so it uses the standard short-service FGS type
+             instead of specialUse — avoiding the extra Play review that
+             specialUse triggers. -->
         <service
             android:name=".IncomingRideOverlayService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Incoming ride request overlay shown to the driver" />
-        </service>
+            android:foregroundServiceType="shortService" />
 
-        <!-- Persistent "You're online" foreground notification with Go Offline. -->
+        <!-- Persistent "You're online" notification with Go Offline. This is the
+             driver's on-duty location-sharing session (they stay online and
+             keep sharing GPS for dispatch), so it uses the standard location
+             FGS type rather than specialUse. -->
         <service
             android:name=".OnlineStatusService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Persistent online-status notification with a go-offline action" />
-        </service>
+            android:foregroundServiceType="location" />
 
         <!-- Receiver for the notification's Go Offline action. -->
         <receiver
@@ -105,9 +104,10 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- FGS special-use type for the incoming-ride overlay (FOREGROUND_SERVICE
-         itself is already declared above for the location service). -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Short-service FGS type for the brief incoming-ride overlay. (The
+         location FGS type used by OnlineStatusService is already covered by
+         FOREGROUND_SERVICE_LOCATION declared above.) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SHORT_SERVICE" />
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

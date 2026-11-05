@@ -278,7 +278,15 @@ public class IncomingRideOverlayService extends Service {
                 .setContentText("Tap to view")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .build();
-        startForeground(FG_NOTIF_ID, n);
+        // shortService FGS type is API 34 (Android 14), where the type is
+        // mandatory at start. On 29–33 start without a type (short-service
+        // wasn't a type yet); below 29 the plain overload applies.
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(FG_NOTIF_ID, n,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE);
+        } else {
+            startForeground(FG_NOTIF_ID, n);
+        }
     }
 
     private void startAlertSound() {

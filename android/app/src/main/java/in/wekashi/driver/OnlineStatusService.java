@@ -41,7 +41,14 @@ public class OnlineStatusService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        startForeground(NOTIF_ID, buildNotification());
+        // location FGS type (Android 10+): this is the driver's on-duty
+        // location-sharing session. The type is required at start on API 29+.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, buildNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+        } else {
+            startForeground(NOTIF_ID, buildNotification());
+        }
         // STICKY so Android restarts it (and the "online" notification) if the
         // process is killed while the driver is still on-duty.
         return START_STICKY;

@@ -33,9 +33,17 @@ interface Row {
   statusless?: boolean;
 }
 
+const LOCATION_DISCLOSURE_KEY = "wekashi_location_disclosure_ack";
+
 export function DriverPermissions({ onAllCriticalGranted }: { onAllCriticalGranted: () => void }) {
   const [status, setStatus] = useState<PermStatus | null>(null);
   const [checking, setChecking] = useState(true);
+  // Google Play requires a PROMINENT in-app disclosure explaining background
+  // ("all the time") location use, shown BEFORE any location permission is
+  // requested, with an affirmative accept. Gate the whole checklist behind it.
+  const [disclosureAck, setDisclosureAck] = useState(
+    () => localStorage.getItem(LOCATION_DISCLOSURE_KEY) === "1",
+  );
 
   const refresh = useCallback(async () => {
     setChecking(true);
@@ -119,6 +127,50 @@ export function DriverPermissions({ onAllCriticalGranted }: { onAllCriticalGrant
     const s = await checkAllPermissions();
     if (!s.notifications) await openSetting(key);
   };
+
+  // ── Prominent background-location disclosure (Play policy) ──────────────────
+  // Must be shown before requesting location, clearly state what's collected,
+  // that it's used in the background ("all the time"), and why.
+  if (!disclosureAck) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="max-w-md w-full mx-auto flex-1 flex flex-col p-5">
+          <div className="pt-8 pb-4 flex flex-col items-center text-center">
+            <div className="h-14 w-14 rounded-2xl bg-gold flex items-center justify-center mb-3">
+              <Navigation className="h-7 w-7 text-gold-foreground" />
+            </div>
+            <h1 className="text-xl font-bold">Location access</h1>
+          </div>
+          <div className="space-y-4 text-sm text-foreground/90 flex-1">
+            <p>
+              Wekashi Cabs collects your device <span className="font-semibold">location</span> to
+              match you with nearby rides, share your live position with the supervisor during a
+              trip, and measure trip distance.
+            </p>
+            <p>
+              To keep this working while you navigate in another app (like Google Maps) or when the
+              screen is off, Wekashi Cabs collects location
+              <span className="font-semibold"> in the background — "Allow all the time"</span>. A
+              persistent notification shows while you're online, and location sharing stops when you
+              go offline.
+            </p>
+            <p className="text-muted-foreground text-xs">
+              You can review or change this anytime in your phone's Settings. See our Privacy Policy
+              at wekashi.in for details on how data is used.
+            </p>
+          </div>
+          <div className="py-5 space-y-2">
+            <Button
+              className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
+              onClick={() => { localStorage.setItem(LOCATION_DISCLOSURE_KEY, "1"); setDisclosureAck(true); }}
+            >
+              I understand, continue
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
