@@ -2,7 +2,7 @@
  * Single source of truth for legal/business identity shown on the public
  * policy pages (About, Privacy, Refund, Shipping & Return).
  *
- * These details are what a payment gateway (PayU) verifies during onboarding,
+ * These details are what a payment gateway (Cashfree) verifies during onboarding,
  * so they must exactly match the GST registration and the bank account the
  * settlements land in. Keep them here rather than inline in each page so a
  * correction can't be applied to one page and missed on another.

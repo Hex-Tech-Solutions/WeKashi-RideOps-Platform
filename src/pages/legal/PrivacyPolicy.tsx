@@ -41,14 +41,26 @@ export default function PrivacyPolicy() {
         <p>
           <strong>Driver accounts.</strong> Name, phone number, alternate phone number, driving licence
           number and expiry, government identity number, vehicle details, and uploaded verification
-          documents. We also store bank account or UPI details, used solely to pay drivers their
-          earnings.
+          documents. We also store a driver's UPI ID so that supervisors can pay the driver's fare
+          directly, and to purchase ride-credit packs.
         </p>
         <p>
-          <strong>Location data.</strong> While a driver is marked online, the driver application shares
-          the vehicle's GPS position so supervisors can track an active trip and so we can calculate
-          arrival estimates. Location is collected from the <strong>driver's device only</strong>. We do
-          not track employees' phones, and employees do not install any application.
+          <strong>Location data (including in the background).</strong> While a driver is on duty
+          ("online") in the driver application, we collect the vehicle's precise GPS location. Because a
+          driver is usually navigating in another app (such as Google Maps) or has the screen off during
+          a trip, this location is collected <strong>in the background — continuously, even when the app
+          is closed or not in active use</strong>. We use it to match drivers to nearby ride requests, to
+          let a supervisor track an active trip in real time, and to calculate arrival estimates and trip
+          distance. A persistent notification is shown while a driver is online, and{" "}
+          <strong>background location collection stops as soon as the driver goes offline</strong>.
+          Location is collected from the <strong>driver's device only</strong>. We do not track
+          employees' phones, and employees do not install any application.
+        </p>
+        <p>
+          <strong>Push notification token.</strong> With the driver's permission, we store the device's
+          push-notification token (via Firebase Cloud Messaging) so we can deliver incoming-ride alerts
+          to the driver's phone even when the app is in the background or closed. It is used only to send
+          operational ride notifications, not for marketing.
         </p>
         <p>
           <strong>Trip records.</strong> Pickup and drop points, route taken, timestamps, OTP
@@ -56,10 +68,12 @@ export default function PrivacyPolicy() {
           safety incident or complaint raised.
         </p>
         <p>
-          <strong>Payment data.</strong> Transaction references, amounts, and payment status. Card
-          numbers, UPI PINs, net-banking credentials and similar payment secrets are entered directly
-          with our payment gateway and are <strong>never</strong> transmitted to or stored on our
-          servers.
+          <strong>Payment data.</strong> Transaction references, amounts, and payment status. Drivers
+          purchase ride-credit packs through our payment gateway (Cashfree); supervisors settle a
+          driver's ride fare directly to the driver's UPI ID (the platform does not hold these funds).
+          Card numbers, UPI PINs, net-banking credentials and similar payment secrets are entered
+          directly with the payment gateway and are <strong>never</strong> transmitted to or stored on
+          our servers.
         </p>
         <p>
           <strong>Technical data.</strong> IP address, browser and device information, and server logs,
@@ -77,7 +91,8 @@ export default function PrivacyPolicy() {
             pickup or last drop of a journey, and assigning a chaperone where required
           </li>
           <li>To verify driver identity, licences and vehicle documents before allowing them to work</li>
-          <li>To calculate fares, collect payment, and pay drivers their earnings</li>
+          <li>To calculate fares, let supervisors pay drivers directly, and sell ride-credit packs to drivers</li>
+          <li>To deliver incoming-ride alerts to the driver's device by push notification</li>
           <li>To investigate safety incidents, complaints and billing disputes</li>
           <li>To meet legal, tax and regulatory obligations</li>
         </ul>
@@ -104,9 +119,10 @@ export default function PrivacyPolicy() {
         </p>
         <p>
           <strong>Service providers.</strong> We share the minimum necessary with our payment gateway
-          (to process payments and driver payouts), our mapping provider (coordinates, to calculate
-          routes and estimates), our SMS provider (phone number and OTP, to send trip messages), and our
-          cloud hosting and storage providers.
+          (Cashfree, to process ride-credit pack purchases), our mapping provider (coordinates, to
+          calculate routes and estimates), our SMS provider (phone number and OTP, to send login and
+          trip messages), our push-notification provider (Google Firebase Cloud Messaging, to deliver
+          ride alerts to the device), and our cloud hosting and storage providers.
         </p>
         <p>
           <strong>Legal disclosure.</strong> We may disclose information where required by law, or to a
