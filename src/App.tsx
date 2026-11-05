@@ -52,6 +52,7 @@ import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
 import RefundPolicy from "./pages/legal/RefundPolicy";
 import ShippingAndReturns from "./pages/legal/ShippingAndReturns";
 import Terms from "./pages/legal/Terms";
+import DataDeletion from "./pages/legal/DataDeletion";
 
 import { AuthProvider } from "@/hooks/useAuth";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -76,6 +77,7 @@ const App = () => (
             <Route path="/refund-policy" element={<RefundPolicy />} />
             <Route path="/shipping-and-returns" element={<ShippingAndReturns />} />
             <Route path="/terms" element={<Terms />} />
+            <Route path="/data-deletion" element={<DataDeletion />} />
 
             <Route path="/supervisor" element={<ProtectedRoute requiredRole="supervisor"><SupervisorLayout /></ProtectedRoute>}>
               <Route index element={<SupervisorDashboard />} />

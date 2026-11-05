@@ -16,6 +16,7 @@ export const LEGAL_PAGES = [
   { to: "/refund-policy", label: "Refund & Cancellation" },
   { to: "/shipping-and-returns", label: "Service Delivery" },
   { to: "/terms", label: "Terms of Service" },
+  { to: "/data-deletion", label: "Delete My Data" },
 ] as const;
 
 export function LegalLayout({
