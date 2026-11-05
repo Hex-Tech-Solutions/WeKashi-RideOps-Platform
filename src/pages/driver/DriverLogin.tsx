@@ -163,7 +163,7 @@ export default function DriverLogin() {
                   className="mt-1"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+91 90000 00001"
+                  placeholder="+91 XXXXX XXXXX"
                   inputMode="tel"
                 />
               </div>
@@ -194,7 +194,7 @@ export default function DriverLogin() {
                   className="mt-1"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+91 90000 00001"
+                  placeholder="+91 XXXXX XXXXX"
                   inputMode="tel"
                 />
               </div>
