@@ -1,9 +1,17 @@
 package in.wekashi.driver;
 
 import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
+import android.view.View;
 import android.webkit.WebView;
 import android.webkit.WebSettings;
+
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 
@@ -31,6 +39,8 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(PermissionsPlugin.class);
     super.onCreate(savedInstanceState);
 
+    applySystemBarInsets();
+
     WebView webView = getBridge().getWebView();
     if (webView != null) {
       WebSettings settings = webView.getSettings();
@@ -42,6 +52,35 @@ public class MainActivity extends BridgeActivity {
 
     // Cold start from the full-screen Accept button.
     handleOpenRide(getIntent());
+  }
+
+  /**
+   * Targeting SDK 35+ makes Android 15+ draw the app edge-to-edge, so the web
+   * page (and its header) slid under the status bar and gesture bar. Capacitor 6
+   * doesn't compensate, so pad the content view by the system-bar / cutout
+   * insets ourselves. The page itself keeps working unchanged.
+   */
+  private void applySystemBarInsets() {
+    final View content = findViewById(android.R.id.content);
+    if (content == null) return;
+
+    // The bars are drawn over this background, so match the white app header
+    // and use dark status/navigation icons so they stay readable.
+    content.setBackgroundColor(Color.WHITE);
+    WindowInsetsControllerCompat controller =
+        WindowCompat.getInsetsController(getWindow(), content);
+    if (controller != null) {
+      controller.setAppearanceLightStatusBars(true);
+      controller.setAppearanceLightNavigationBars(true);
+    }
+
+    ViewCompat.setOnApplyWindowInsetsListener(content, (v, windowInsets) -> {
+      Insets bars = windowInsets.getInsets(
+          WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+      v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+      return windowInsets;
+    });
+    ViewCompat.requestApplyInsets(content);
   }
 
   @Override
