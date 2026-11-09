@@ -6,6 +6,7 @@ import { logger } from '../lib/logger';
 import { randomInt } from 'crypto';
 import { consumeOneCredit } from './creditPack.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
+import { invalidateDriverActiveRide } from '../lib/activeRideCache';
 
 // Use crypto.randomInt for cryptographically secure OTPs
 const gen4 = () => String(randomInt(1000, 10000));
@@ -196,6 +197,8 @@ async function maybeComplete(rideId: string): Promise<void> {
     await consumeOneCredit(tx, ride.driverId, rideId);
     return promoteQueuedRide(tx, rideId, ride.driverId);
   });
+
+  await invalidateDriverActiveRide(ride.driverId);
 
   if (promotedRideId) {
     await sendPaxOtpSms(promotedRideId);

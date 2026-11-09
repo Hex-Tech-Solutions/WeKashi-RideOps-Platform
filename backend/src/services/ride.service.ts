@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
+import { invalidateDriverActiveRide } from '../lib/activeRideCache';
 import { startRideBroadcast } from '../lib/broadcastSweeper';
 import { findNearbyDrivers, FINISHING_DISTANCE_KM } from './driver.service';
 import {
@@ -348,6 +349,7 @@ export async function acceptRide(rideId: string, driverId: string): Promise<{ qu
 
   // Clean up Redis broadcast key
   await redis.del(`ride:broadcast:${rideId}`);
+  await invalidateDriverActiveRide(driverId);
 
   // For a normal accept, notify passengers now. For a QUEUED accept, defer the
   // OTP SMS until the ride is promoted to active (see promoteQueuedRide), so
@@ -405,6 +407,7 @@ export async function cancelRide(
     return null;
   });
   await redis.del(`ride:broadcast:${rideId}`);
+  await invalidateDriverActiveRide(ride.driverId);
   await afterQueuedPromotion(promotedRideId);
 }
 
@@ -491,6 +494,7 @@ export async function advanceRideStatus(
       const promoted = await promoteQueuedRide(tx, rideId, driverId);
       return { updated: r, promotedRideId: promoted };
     });
+    await invalidateDriverActiveRide(driverId);
     await afterQueuedPromotion(promotedRideId);
     return { id: updated.id, status: updated.status, promotedRideId };
   }
@@ -499,6 +503,7 @@ export async function advanceRideStatus(
     where: { id: rideId },
     data: updateData,
   });
+  await invalidateDriverActiveRide(ride.driverId);
 
   return { id: updated.id, status: updated.status, promotedRideId: null };
 }
@@ -547,6 +552,7 @@ export async function rebroadcastRide(
     // This mirrors releaseQueuedRide, which already does this correctly.
     await tx.rideOffer.deleteMany({ where: { rideId } });
   });
+  await invalidateDriverActiveRide(ride.driverId);
 
   await startRideBroadcast(rideId);
 
@@ -601,6 +607,7 @@ export async function releaseQueuedRide(
     `;
     await tx.rideOffer.deleteMany({ where: { rideId } });
   });
+  await invalidateDriverActiveRide(driverId);
 
   // Re-broadcast to nearby drivers, and tell the supervisor it's back on the
   // marketplace, exactly like a fresh broadcast.
@@ -679,6 +686,7 @@ export async function driverCancelAssignedRide(
     // promote the queued one so they keep it as their new active ride.
     return promoteQueuedRide(tx, rideId, driverId);
   });
+  await invalidateDriverActiveRide(driverId);
 
   await afterQueuedPromotion(promotedRideId);
 
@@ -728,6 +736,7 @@ export async function claimScheduledRide(rideId: string, driverId: string): Prom
       WHERE id = ${rideId}
     `;
   });
+  await invalidateDriverActiveRide(driverId);
   logger.info({ rideId, driverId }, 'Scheduled ride claimed');
 }
 
@@ -754,6 +763,7 @@ export async function driverReleaseScheduledRide(
     WHERE id = ${rideId}
   `;
 
+  await invalidateDriverActiveRide(driverId);
   logger.info({ rideId, driverId }, 'Driver released scheduled ride');
 }
 
@@ -916,6 +926,7 @@ export async function manualAssignRide(
   });
 
   await redis.del(`ride:broadcast:${rideId}`);
+  await invalidateDriverActiveRide(driverId);
 
   // Ensure per-passenger OTP legs exist (older rides may predate ride_pax).
   const paxCount = await prisma.ridePax.count({ where: { rideId } });
@@ -1056,6 +1067,7 @@ export async function sweepStaleScheduledRides(io?: IoServer): Promise<void> {
         if (Number(rows) === 0 || !r.driver_id) return null;
         return promoteQueuedRide(tx, r.id, r.driver_id);
       });
+      await invalidateDriverActiveRide(r.driver_id);
       if (promotedRideId) await sendPaxOtpSms(promotedRideId);
     } catch (err) {
       logger.error({ err, rideId: r.id }, 'Failed to expire stale assigned ride / promote queued');

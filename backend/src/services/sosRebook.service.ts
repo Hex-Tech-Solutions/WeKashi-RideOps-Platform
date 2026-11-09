@@ -23,6 +23,7 @@ const gen4 = () => String(randomInt(1000, 10000));
 import { logger } from '../lib/logger';
 import { computeFare } from '../lib/pricing';
 import { redis } from '../lib/redis';
+import { invalidateDriverActiveRide } from '../lib/activeRideCache';
 import { emitDriverBroadcast } from '../lib/driverBroadcast';
 import type { Server as IoServer } from 'socket.io';
 
@@ -233,6 +234,7 @@ export async function sosRebook(
 
   // Original ride is now cancelled (committed) — clear its broadcast key.
   await redis.del(`ride:broadcast:${rideId}`);
+  await invalidateDriverActiveRide(originalRide.driverId, issue.driverId);
   logger.info({ rideId, newRideId, issueId }, 'SOS rebook: original cancelled + replacement created atomically');
 
   // ── 10. Post system message in SOS chat ───────────────────────────────────

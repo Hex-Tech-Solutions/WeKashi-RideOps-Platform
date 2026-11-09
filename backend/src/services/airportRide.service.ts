@@ -23,6 +23,7 @@ import { emitDriverBroadcast } from '../lib/driverBroadcast';
 import { getRidePublicPayload } from './ride.service';
 import { consumeOneCredit } from './creditPack.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
+import { invalidateDriverActiveRide } from '../lib/activeRideCache';
 
 const gen4 = () => String(randomInt(1000, 10000));
 const BROADCAST_RADIUS_KM = 10;
@@ -198,6 +199,7 @@ export async function verifyAirportPickup(rideId: string, otp: string, driverId:
     where: { id: rideId },
     data: { status: 'in_progress', startedAt: new Date(), airportPickupAt: new Date() },
   });
+  await invalidateDriverActiveRide(driverId);
   logger.info({ rideId, driverId }, 'Airport ride started (pickup OTP verified)');
   return { ok: true };
 }
@@ -222,6 +224,7 @@ export async function verifyAirportDrop(rideId: string, otp: string, driverId: s
     await consumeOneCredit(tx, driverId, rideId);
     return promoteQueuedRide(tx, rideId, driverId);
   });
+  await invalidateDriverActiveRide(driverId);
   logger.info({ rideId, driverId }, 'Airport ride completed (drop OTP verified)');
   return { ok: true, promotedRideId };
 }

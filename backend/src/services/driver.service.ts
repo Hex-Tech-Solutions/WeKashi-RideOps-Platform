@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { NotFoundError, ForbiddenError, NearbyDriver } from '../types';
 import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
+import { getDriverActiveRide } from '../lib/activeRideCache';
 import { grantJoiningBonus } from './creditPack.service';
 
 // Next-ride queueing: a driver whose in-progress ride's drop is within this
@@ -130,11 +131,8 @@ export async function updateDriverLocation(
   lng: number,
   io?: import('socket.io').Server,
 ): Promise<void> {
-  // ── Find active ride (lightweight read — still needed for Socket.io emit) ──
-  const activeRide = await prisma.ride.findFirst({
-    where: { driverId, status: { in: ['in_progress', 'assigned'] } },
-    select: { id: true, supervisorId: true, status: true },
-  });
+  // ── Find active ride (Redis-cached; invalidated on every ride state change) ─
+  const activeRide = await getDriverActiveRide(driverId);
 
   // ── Buffer position in Redis (bulk DB write happens every 60s) ────────────
   // This replaces the direct DB write on every ping.

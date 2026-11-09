@@ -30,6 +30,9 @@ import { format } from "date-fns";
  * this the batched matrix call would fire on every one of those polls.
  */
 const APPROACH_TTL_MS = 120_000;
+// GPS ping cadence: fast while on a ride, slow while idle (see the location effect).
+const BUSY_PING_MS = 10_000;
+const IDLE_PING_MS = 30_000;
 import { getDevicePosition, watchDevicePosition, openAppSettings } from "@/lib/deviceLocation";
 import { setOnlineNotification, onNativeWentOffline } from "@/lib/nativeAuth";
 import { missingCriticalPermissions } from "@/lib/permissions";
@@ -181,13 +184,30 @@ export default function DriverHome() {
   // Posts are time-throttled to ~10s so a tight distance filter doesn't spam
   // the endpoint; the backend further throttles the supervisor socket (3s) and
   // batches DB writes (60s flush).
+  //
+  // Adaptive rate: 10s while the driver holds any assigned/in-progress ride (live
+  // map + odometer need it), 30s while idle. Idle drivers are the vast majority
+  // and nothing reads their position more finely than the 60s DB flush anyway,
+  // so this cuts location traffic by roughly two thirds at scale.
+  const hasRide =
+    rides.some((r) => r.status === "assigned" || r.status === "in_progress") ||
+    myRentals.length > 0;
+  const pingIntervalRef = useRef(IDLE_PING_MS);
+  const lastPostTsRef = useRef(0);
+  useEffect(() => {
+    pingIntervalRef.current = hasRide ? BUSY_PING_MS : IDLE_PING_MS;
+    // Just picked up a ride: send the very next GPS fix straight away instead
+    // of waiting out the remainder of the slow idle interval.
+    if (hasRide) lastPostTsRef.current = 0;
+  }, [hasRide]);
+
   useEffect(() => {
     if (!online) return;
-    let lastPostTs = 0;
+    lastPostTsRef.current = 0; // first fix after going online posts immediately
     const stop = watchDevicePosition((c) => {
       const now = Date.now();
-      if (now - lastPostTs < 10_000) return;
-      lastPostTs = now;
+      if (now - lastPostTsRef.current < pingIntervalRef.current) return;
+      lastPostTsRef.current = now;
       updateLocation.mutate(c);
     });
     return stop;
