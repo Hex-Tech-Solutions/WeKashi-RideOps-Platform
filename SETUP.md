@@ -358,9 +358,9 @@ Manual trigger: **Actions → Deploy to Server → Run workflow**
 | `CASHFREE_APP_ID` | Cashfree Merchant Dashboard → Developers → API Keys |
 | `CASHFREE_SECRET_KEY` | Same place |
 | `CASHFREE_ENV` | `sandbox` for test keys, `production` for live |
-| `CASHFREE_WEBHOOK_SECRET` | Cashfree → Developers → Webhooks → create webhook → copy signing secret (NOT the API secret key) |
+| `CASHFREE_WEBHOOK_SECRET` | Optional. Cashfree signs webhooks with the API secret key, so leave blank unless you need an override |
 
-> ⚠️ In production the api container **refuses to start** if `CASHFREE_APP_ID`/`CASHFREE_SECRET_KEY` are set but `CASHFREE_WEBHOOK_SECRET` is missing — webhook signatures could not be verified otherwise. Until the keys are set, pack purchases are disabled (clear "not configured" error).
+> Until the keys are set, pack purchases are disabled (clear "not configured" error). Register the webhook at `https://<domain>/api/payments/webhook`.
 
 > **Supervisor → driver settlement uses direct UPI — no gateway credentials needed.**
 

@@ -12,7 +12,8 @@
 //   CASHFREE_APP_ID       client id  (x-client-id header)
 //   CASHFREE_SECRET_KEY   secret     (x-client-secret header)
 //   CASHFREE_ENV          'sandbox' | 'production'  (defaults to sandbox)
-//   CASHFREE_WEBHOOK_SECRET  optional; used to verify webhook signatures
+//   CASHFREE_WEBHOOK_SECRET  optional override; webhooks are normally verified
+//                            with CASHFREE_SECRET_KEY
 
 import crypto from 'crypto';
 import axios from 'axios';
@@ -21,18 +22,16 @@ import { logger } from './logger';
 const appId = process.env.CASHFREE_APP_ID ?? '';
 const secretKey = process.env.CASHFREE_SECRET_KEY ?? '';
 const env = (process.env.CASHFREE_ENV ?? 'sandbox').toLowerCase();
-// Webhooks are signed with the DEDICATED webhook secret (Dashboard → Webhooks),
-// NOT the API secret key. The old `?? secretKey` fallback silently produced a
-// wrong key, so every real webhook failed signature verification and pack
-// activation quietly fell back to the client-confirm path only. Resolve it
-// strictly; fail loudly in production when Cashfree is configured but the
-// webhook secret is missing.
-const webhookSecret = process.env.CASHFREE_WEBHOOK_SECRET ?? '';
-if (process.env.NODE_ENV === 'production' && appId && secretKey && !webhookSecret) {
-  throw new Error('FATAL: CASHFREE_WEBHOOK_SECRET must be set in production (Cashfree Dashboard → Developers → Webhooks). It is NOT the API secret key.');
-}
-if (appId && secretKey && !webhookSecret) {
-  logger.warn('CASHFREE_WEBHOOK_SECRET not set — webhook signature verification will reject all webhooks until it is configured.');
+// Cashfree Payment Gateway signs webhooks with the merchant's PG secret key
+// (the same client secret used for API calls) — see Cashfree docs, "Webhook
+// signature verification". There is no separate signing secret for PG
+// webhooks. CASHFREE_WEBHOOK_SECRET is kept as an optional override; the
+// signature is accepted if it matches either that value or the API secret key.
+const webhookSecrets = [process.env.CASHFREE_WEBHOOK_SECRET ?? '', secretKey].filter(
+  (s, i, all) => s !== '' && all.indexOf(s) === i,
+);
+if (appId && webhookSecrets.length === 0) {
+  logger.warn('CASHFREE_SECRET_KEY not set — webhook signature verification will reject all webhooks.');
 }
 
 // Reject webhook timestamps older than this (replay-protection window).
@@ -164,20 +163,23 @@ export async function getOrderStatus(orderId: string): Promise<CashfreeOrderStat
  * `x-webhook-signature` header (with `x-webhook-timestamp`).
  */
 export function verifyWebhookSignature(rawBody: string, signature: string, timestamp: string): boolean {
-  if (!webhookSecret) return false;
+  if (webhookSecrets.length === 0) return false;
 
-  // Replay protection: Cashfree's x-webhook-timestamp is epoch SECONDS. Reject
-  // anything outside a 5-minute window (covers clock skew; blocks replays of an
-  // old captured request). Non-numeric/absent timestamps are rejected.
-  const tsSec = Number(timestamp);
-  if (!Number.isFinite(tsSec)) return false;
-  const ageMs = Math.abs(Date.now() - tsSec * 1000);
+  // Replay protection: reject anything outside a 5-minute window (covers clock
+  // skew; blocks replays of an old captured request). Cashfree sends
+  // x-webhook-timestamp in epoch MILLISECONDS (13 digits, e.g. 1617695238078);
+  // values below 1e11 are treated as seconds. Non-numeric timestamps are rejected.
+  const tsNum = Number(timestamp);
+  if (!Number.isFinite(tsNum)) return false;
+  const tsMs = tsNum < 1e11 ? tsNum * 1000 : tsNum;
+  const ageMs = Math.abs(Date.now() - tsMs);
   if (ageMs > WEBHOOK_MAX_AGE_MS) return false;
 
   const payload = `${timestamp}${rawBody}`;
-  const expected = crypto.createHmac('sha256', webhookSecret).update(payload).digest('base64');
-  const a = Buffer.from(expected);
   const b = Buffer.from(signature);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  return webhookSecrets.some((secret) => {
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('base64');
+    const a = Buffer.from(expected);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  });
 }

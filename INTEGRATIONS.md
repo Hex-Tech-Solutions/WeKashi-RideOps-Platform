@@ -72,14 +72,13 @@ The code is implemented and **inactive until keys are present**.
    CASHFREE_APP_ID=xxx
    CASHFREE_SECRET_KEY=xxx
    CASHFREE_ENV=production            # or 'sandbox' for test keys
-   CASHFREE_WEBHOOK_SECRET=xxx        # Dashboard → Developers → Webhooks (NOT the API secret)
    ```
-   > In production the api container **refuses to start** if `CASHFREE_APP_ID`
-   > and `CASHFREE_SECRET_KEY` are set but `CASHFREE_WEBHOOK_SECRET` is missing —
-   > webhook signatures could not be verified otherwise.
-2. In the Cashfree dashboard → **Developers → Webhooks**, add:
-   `https://<domain>/api/payments/webhook` and subscribe to the payment-success
-   event. Use the same secret as `CASHFREE_WEBHOOK_SECRET`.
+   > Cashfree signs webhooks with the API secret key (`CASHFREE_SECRET_KEY`), so
+   > no separate webhook secret is needed. `CASHFREE_WEBHOOK_SECRET` is an
+   > optional override and can be left unset.
+2. In the Cashfree dashboard → **Developers → Webhooks**, add the endpoint
+   `https://<domain>/api/payments/webhook` (the full path, not just the domain)
+   and subscribe to the success-payment event.
 3. Redeploy. Pack purchases become active automatically.
 
 ---

@@ -57,16 +57,34 @@ describe('Cashfree webhook signature verification (Req 6.6)', () => {
   // Cashfree signs HMAC-SHA256(timestamp + rawBody) with the webhook secret,
   // base64-encoded. verifyWebhookSignature uses the secret captured at import
   // (CASHFREE_WEBHOOK_SECRET, falling back to CASHFREE_SECRET_KEY).
-  const secret = process.env.CASHFREE_WEBHOOK_SECRET ?? process.env.CASHFREE_SECRET_KEY ?? '';
+  const webhookSecret = process.env.CASHFREE_WEBHOOK_SECRET ?? '';
+  const apiSecret = process.env.CASHFREE_SECRET_KEY ?? '';
   const rawBody = '{"type":"PAYMENT_SUCCESS_WEBHOOK","data":{"order":{"order_id":"o1"}}}';
-  const ts = '1700000000';
+  const sign = (secret: string, ts: string) =>
+    crypto.createHmac('sha256', secret).update(`${ts}${rawBody}`).digest('base64');
 
-  it('accepts a correctly computed signature', () => {
-    const good = crypto.createHmac('sha256', secret).update(`${ts}${rawBody}`).digest('base64');
-    expect(verifyWebhookSignature(rawBody, good, ts)).toBe(true);
+  // Cashfree sends x-webhook-timestamp in epoch milliseconds.
+  it('accepts a signature made with the API secret key (millisecond timestamp)', () => {
+    const ts = String(Date.now());
+    expect(verifyWebhookSignature(rawBody, sign(apiSecret, ts), ts)).toBe(true);
+  });
+
+  it('accepts a signature made with the optional webhook-secret override', () => {
+    const ts = String(Date.now());
+    expect(verifyWebhookSignature(rawBody, sign(webhookSecret, ts), ts)).toBe(true);
+  });
+
+  it('still accepts a seconds-based timestamp', () => {
+    const ts = String(Math.floor(Date.now() / 1000));
+    expect(verifyWebhookSignature(rawBody, sign(apiSecret, ts), ts)).toBe(true);
   });
 
   it('rejects a wrong signature', () => {
-    expect(verifyWebhookSignature(rawBody, 'not-a-valid-signature', ts)).toBe(false);
+    expect(verifyWebhookSignature(rawBody, 'not-a-valid-signature', String(Date.now()))).toBe(false);
+  });
+
+  it('rejects a replayed (stale) timestamp even with a valid signature', () => {
+    const ts = String(Date.now() - 10 * 60 * 1000);
+    expect(verifyWebhookSignature(rawBody, sign(apiSecret, ts), ts)).toBe(false);
   });
 });
