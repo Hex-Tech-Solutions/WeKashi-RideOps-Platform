@@ -125,13 +125,6 @@ router.post(
     try {
       const { phone } = RequestOtpSchema.parse(req.body);
 
-      // In dev-bypass mode, skip Redis rate-limit and bcrypt OTP storage entirely.
-      // The driver just types DEV_OTP_BYPASS directly in the verify step.
-      if (process.env.DEV_OTP_BYPASS) {
-        res.json({ message: `OTP sent (dev mode: use ${process.env.DEV_OTP_BYPASS})` });
-        return;
-      }
-
       await checkOtpRateLimit(phone);
       const otp = generateOtp();
       await storeOtp(phone, otp);
@@ -173,12 +166,10 @@ router.post(
         data: { phone, fullName, vendorId: vendor.id, status: 'pending', kycStatus: 'pending' },
       });
       // Send OTP to verify phone
-      if (!process.env.DEV_OTP_BYPASS) {
-        await checkOtpRateLimit(phone);
-        const otp = generateOtp();
-        await storeOtp(phone, otp);
-        await smsSender.sendLoginOtp(phone, otp);
-      }
+      await checkOtpRateLimit(phone);
+      const otp = generateOtp();
+      await storeOtp(phone, otp);
+      await smsSender.sendLoginOtp(phone, otp);
       res.status(201).json({ message: 'Account created. OTP sent to your phone.', vendorName: vendor.name });
     } catch (err) {
       next(err);

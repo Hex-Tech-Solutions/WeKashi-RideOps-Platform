@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { redis } from '../src/lib/redis';
+import { storeOtp } from '../src/lib/otp';
 import { prisma, createTestServer, createTestVendor, createTestDriver } from './helpers';
 
 describe('OTP rate limiting', () => {
@@ -83,7 +84,7 @@ describe('OTP rate limiting', () => {
     expect(response.status).toBe(429);
   });
 
-  it('accepts DEV_OTP_BYPASS in non-production mode for an active driver', async () => {
+  it('logs in an active driver with a valid stored OTP and rejects the old bypass code', async () => {
     // Create a driver with this phone
     const { vendor } = await createTestVendor();
     await prisma.driver.upsert({
@@ -98,11 +99,18 @@ describe('OTP rate limiting', () => {
       },
     });
 
+    // The former bypass code must not work any more.
+    await storeOtp(testPhone, '482913');
+    const bypass = await request(app)
+      .post('/api/driver/auth/verify-otp')
+      .send({ phone: testPhone, otp: '123456' });
+    expect(bypass.status).toBe(401);
+
+    // A real OTP (as sent by SMS) logs the driver in.
     const response = await request(app)
       .post('/api/driver/auth/verify-otp')
-      .send({ phone: testPhone, otp: '123456' }); // DEV_OTP_BYPASS value
+      .send({ phone: testPhone, otp: '482913' });
 
-    // Should succeed (200) since DEV_OTP_BYPASS=123456 is set in setup.ts
     expect(response.status).toBe(200);
     expect(response.body.accessToken).toBeTruthy();
     expect(response.body.refreshToken).toBeTruthy();

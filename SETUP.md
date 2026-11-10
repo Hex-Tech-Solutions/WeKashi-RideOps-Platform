@@ -183,13 +183,11 @@ JWT_ACCESS_SECRET=change-me-access-secret
 JWT_REFRESH_SECRET=change-me-refresh-secret
 NODE_ENV=development
 CORS_ORIGIN=http://localhost:8080
-DEV_OTP_BYPASS=123456
 PORT=3000
 LOG_LEVEL=debug
 ```
 
-> `DEV_OTP_BYPASS=123456` lets any driver log in with OTP `123456` during testing.
-> The server **refuses to start in production** if this variable is set.
+> Without an SMS provider, driver OTPs are written to the server log (`SMS (login OTP)`) — read the code from there to sign in.
 
 ### 4. Set up the database
 ```cmd
@@ -385,13 +383,8 @@ Manual trigger: **Actions → Deploy to Server → Run workflow**
 | `MSG91_RIDE_TEMPLATE_ID` | MSG91 ride template id (vars: vehicle, boarding OTP, de-boarding OTP) |
 | `MSG91_SENDER_ID` | Optional DLT header e.g. `WEKASH` |
 
-> Without MSG91 configured, OTPs are printed to the server console (dev only). `DEV_OTP_BYPASS=123456` is **blocked in production**.
-
-### Dev-only (NEVER in production .env.prod)
-
-| Variable | Purpose |
-|----------|---------|
-| `DEV_OTP_BYPASS` | Set to `123456` — lets any driver log in without real SMS. Server refuses to start in production if set. |
+> Without MSG91 configured, OTPs are printed to the server log. There is no OTP bypass.
+> If your MSG91 template variables aren't named `var1`/`var2`/`var3`, set `MSG91_LOGIN_VARS` / `MSG91_RIDE_VARS` (comma-separated).
 
 ---
 
@@ -516,7 +509,7 @@ docker compose down -v        # Stop AND wipe all data (requires re-seed)
 - [ ] Cashfree webhook registered and `CASHFREE_WEBHOOK_SECRET` set
 - [ ] `CORS_ORIGIN` set to production domain (not `*`)
 - [ ] `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` are strong random values
-- [ ] `DEV_OTP_BYPASS` is NOT in `.env.prod`
+- [ ] Leftover `DEV_OTP_BYPASS` line removed from `.env.prod` (it is ignored, but the server logs a warning)
 - [ ] Google Maps key restricted to production domain in Google Cloud Console
 - [ ] Azure Blob Storage container created and `AZURE_STORAGE_CONNECTION_STRING` set
 - [ ] GitHub Actions secrets set (`SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY`)

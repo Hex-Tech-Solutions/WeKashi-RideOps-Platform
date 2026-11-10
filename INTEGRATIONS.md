@@ -85,9 +85,9 @@ The code is implemented and **inactive until keys are present**.
 
 ## 3. SMS OTP (MSG91)
 
-Until configured, OTPs are **logged to the api container** (and the dev bypass
-`DEV_OTP_BYPASS=123456` works). The implemented provider is **MSG91** (India,
-DLT). To send real SMS:
+Until configured, OTPs are **logged to the api container** — read the OTP from
+the log to sign in. There is no OTP bypass. The implemented provider is
+**MSG91** (India, DLT). To send real SMS:
 
 1. In `.env.prod` set the provider, authkey and BOTH DLT-approved template IDs
    (the factory only switches off console mode when all are present):
@@ -97,9 +97,11 @@ DLT). To send real SMS:
    MSG91_LOGIN_TEMPLATE_ID=xxx        # login OTP — one variable (##var1## = OTP)
    MSG91_RIDE_TEMPLATE_ID=xxx         # ride — ##var1##=vehicle, ##var2##=boarding OTP, ##var3##=de-boarding OTP
    MSG91_SENDER_ID=WEKASH             # optional DLT header
+   # Only if your MSG91 template variables are not named var1/var2/var3:
+   # MSG91_LOGIN_VARS=OTP
+   # MSG91_RIDE_VARS=vehicle,board,dboard
    ```
-2. **Remove** `DEV_OTP_BYPASS` from `.env.prod` so a real OTP is required
-   (otherwise `request-otp` short-circuits and never calls MSG91).
+2. Restart the api container and confirm the log shows `SMS provider: MSG91`.
 3. The MSG91 templates must match the DLT-approved content exactly, and MSG91's
    telemarketer must be linked in your Principal-Entity chain on the DLT portal
    (a "PE-tm chain error" means that link is missing — fix it with MSG91 support

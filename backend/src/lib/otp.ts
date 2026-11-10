@@ -3,7 +3,6 @@ import { randomInt } from 'crypto';
 import { prisma } from './prisma';
 import { redis } from './redis';
 import { TooManyRequestsError } from '../types';
-import { logger } from './logger';
 
 const OTP_BCRYPT_ROUNDS = 10;
 const OTP_TTL_SECONDS = 600; // 10 minutes
@@ -54,11 +53,6 @@ export async function storeOtp(phone: string, otp: string): Promise<void> {
  * Returns true on success, false on mismatch, throws on max attempts.
  */
 export async function verifyOtp(phone: string, otp: string): Promise<boolean> {
-  if (process.env.DEV_OTP_BYPASS && otp === process.env.DEV_OTP_BYPASS) {
-    logger.debug({ phone }, 'OTP bypass used');
-    return true;
-  }
-
   const record = await prisma.driverOtp.findUnique({ where: { phone } });
   if (!record) return false;
 

@@ -8,7 +8,7 @@ runs as a mobile web console today and wraps into an Android APK via Capacitor.
 Open **http://13.201.194.248/driver** on a phone browser.
 
 - Sign in with a seeded driver phone: `+919000000001` (or `…02` / `…03`)
-- OTP in dev mode is **`123456`** (the backend `DEV_OTP_BYPASS`)
+- The OTP arrives by SMS; without MSG91 configured, read it from the api log (`SMS (login OTP)`)
 - Flip **Go online** (pick an area first) → you become eligible for broadcasts
 - When a supervisor books a ride near that area, it appears under **Ride broadcasts**
 

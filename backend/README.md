@@ -96,7 +96,7 @@ POST /api/driver/auth/request-otp    Send OTP to phone (rate-limited: 5/10min)
 POST /api/driver/auth/verify-otp     Verify OTP, get tokens
 ```
 
-In development, set `DEV_OTP_BYPASS=123456` and use `123456` as OTP.
+In development (no SMS provider configured), the OTP is written to the server log as `SMS (login OTP)` — read it from there.
 
 ## API Routes Summary
 

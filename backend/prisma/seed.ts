@@ -199,7 +199,7 @@ async function main() {
   console.log('  Admin:      admin@rideops.dev / Admin123!');
   console.log('  Vendor:     vendor@rideops.dev / Vendor123!');
   console.log('  Supervisor: supervisor@rideops.dev / Super123!');
-  console.log('  Drivers:    +919000000001/2/3 (use DEV_OTP_BYPASS env var in development)');
+  console.log('  Drivers:    +919000000001/2/3 (OTP is sent by SMS, or written to the server log if no SMS provider is set)');
 }
 
 main()

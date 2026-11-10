@@ -13,7 +13,6 @@ process.env.JWT_REFRESH_SECRET = 'test-refresh-secret';
 process.env.JWT_ACCESS_EXPIRY = '15m';
 process.env.JWT_REFRESH_EXPIRY = '7d';
 process.env.ADMIN_INVITE_TOKEN = 'test-invite-token';
-process.env.DEV_OTP_BYPASS = '123456';
 process.env.LOG_LEVEL = 'silent';
 // Cashfree — a dummy webhook secret so signature-verification unit tests can
 // exercise the positive path. No real Cashfree calls are made in tests.

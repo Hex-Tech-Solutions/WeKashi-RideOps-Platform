@@ -29,9 +29,10 @@ export function createApp(io: IoServer): express.Application {
     if (!process.env.CORS_ORIGIN || process.env.CORS_ORIGIN === '*') {
       throw new Error('FATAL: CORS_ORIGIN must be set to a specific origin in production (never *)');
     }
-    if (process.env.DEV_OTP_BYPASS) {
-      throw new Error('FATAL: DEV_OTP_BYPASS must not be set in production');
-    }
+  }
+  // The OTP bypass has been removed from the code; a leftover env line is inert.
+  if (process.env.DEV_OTP_BYPASS) {
+    logger.warn('DEV_OTP_BYPASS is set but no longer supported — it is ignored. Remove it from the env file.');
   }
 
   const app = express();

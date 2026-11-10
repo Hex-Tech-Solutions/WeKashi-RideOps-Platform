@@ -51,11 +51,9 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
-      # 'development', not 'production' — this is the dev/test environment
-      # (dev.wekashi.in) and it relies on DEV_OTP_BYPASS for driver login.
-      # createApp() refuses to boot when NODE_ENV=production and
-      # DEV_OTP_BYPASS is set, which is correct: a real production deployment
-      # must never ship an OTP bypass.
+      # 'development', not 'production'. Driver login always needs a real OTP
+      # (the dev OTP bypass has been removed from the code); without MSG91
+      # configured, OTPs are only written to this container's log.
       #
       # Consequences of 'development' here, all acceptable for a test box but
       # NOT for real production:
@@ -65,7 +63,7 @@ services:
       #   - every Prisma query is logged
       #
       # The eventual production stack (docker-compose.prod.yml) keeps
-      # NODE_ENV=production and must not define DEV_OTP_BYPASS.
+      # NODE_ENV=production.
       NODE_ENV: development
       PORT: "3000"
     depends_on:
