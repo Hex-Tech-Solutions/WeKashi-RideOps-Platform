@@ -42,10 +42,13 @@ export class ConsoleSmssSender implements SmsSender {
  *   MSG91_RIDE_TEMPLATE_ID=<Template 1 — ride confirmation>
  *   MSG91_SENDER_ID=<approved sender id>            (optional)
  *
- * MSG91 uses positional variable names (##var1##, ##var2##, ...), so:
+ * Variable names are whatever you named them in the MSG91 template
+ * (##var1##, ##OTP##, ...) — the JSON keys sent here must match exactly, or
+ * MSG91 sends the SMS with that placeholder blank. Defaults:
  *   Login template:  var1 = OTP
  *   Ride template:   var1 = vehicle, var2 = boarding OTP, var3 = de-boarding OTP
- * These must match the order of the {#var#} placeholders in the DLT template.
+ * Override with MSG91_LOGIN_VARS="OTP" / MSG91_RIDE_VARS="vehicle,board,dboard"
+ * (comma-separated, in the order listed above).
  */
 export class Msg91SmsSender implements SmsSender {
   constructor(
@@ -53,6 +56,8 @@ export class Msg91SmsSender implements SmsSender {
     private loginTemplateId: string,
     private rideTemplateId: string,
     private senderId?: string,
+    private loginVars: string[] = ['var1'],
+    private rideVars: string[] = ['var1', 'var2', 'var3'],
   ) {}
 
   private async post(templateId: string, mobiles: string, vars: Record<string, string>): Promise<void> {
@@ -67,30 +72,45 @@ export class Msg91SmsSender implements SmsSender {
       headers: { 'Content-Type': 'application/json', authkey: this.authkey },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
+    // MSG91 can report a rejected request in the body ({"type":"error"}) even
+    // with HTTP 200, so check both. {"type":"success"} carries a request id.
+    // Note: success only means MSG91 accepted it — DLT/operator delivery
+    // failures show up later in the MSG91 delivery report, not here.
+    const text = await res.text().catch(() => '');
+    let parsed: { type?: string; message?: string } = {};
+    try { parsed = JSON.parse(text); } catch { /* non-JSON body */ }
+    if (!res.ok || parsed.type === 'error') {
       logger.error({ mobiles, templateId, status: res.status, text }, 'MSG91 send failed');
       throw new Error('Failed to send SMS');
     }
-    logger.info({ mobiles, templateId }, 'SMS sent via MSG91');
+    logger.info({ mobiles, templateId, requestId: parsed.message }, 'SMS sent via MSG91');
+  }
+
+  /** Pair configured variable names with values, in order. */
+  private vars(names: string[], values: string[]): Record<string, string> {
+    return Object.fromEntries(values.map((v, i) => [names[i] ?? `var${i + 1}`, v]));
   }
 
   async sendLoginOtp(phone: string, otp: string): Promise<void> {
-    // Login template: "...login OTP is ##var1##..."
-    await this.post(this.loginTemplateId, normalizeMobile(phone), { var1: otp });
+    await this.post(this.loginTemplateId, normalizeMobile(phone), this.vars(this.loginVars, [otp]));
   }
 
   async sendRideOtp(
     phone: string,
     data: { vehicle: string; boardingOtp: string; deboardingOtp: string },
   ): Promise<void> {
-    // Ride template order: Vehicle ##var1## Boarding ##var2## De-Boarding ##var3##
-    await this.post(this.rideTemplateId, normalizeMobile(phone), {
-      var1: data.vehicle,
-      var2: data.boardingOtp,
-      var3: data.deboardingOtp,
-    });
+    await this.post(
+      this.rideTemplateId,
+      normalizeMobile(phone),
+      this.vars(this.rideVars, [data.vehicle, data.boardingOtp, data.deboardingOtp]),
+    );
   }
+}
+
+/** Parse a comma-separated env list ("OTP" / "vehicle,board,dboard"). */
+function envList(value: string | undefined): string[] | undefined {
+  const list = value?.split(',').map((s) => s.trim()).filter(Boolean);
+  return list && list.length > 0 ? list : undefined;
 }
 
 /** MSG91 wants the mobile with country code and no '+'. Defaults to 91 (India). */
@@ -115,6 +135,8 @@ export function createSmsSender(): SmsSender {
       process.env.MSG91_LOGIN_TEMPLATE_ID,
       process.env.MSG91_RIDE_TEMPLATE_ID,
       process.env.MSG91_SENDER_ID,
+      envList(process.env.MSG91_LOGIN_VARS),
+      envList(process.env.MSG91_RIDE_VARS),
     );
   }
   logger.info('SMS provider: console (no real SMS — OTPs are logged server-side)');
