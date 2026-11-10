@@ -20,12 +20,14 @@ import {
 import { Ticket, IndianRupee, Loader2, CheckCircle2, CalendarClock } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { useExternalCheckoutHost } from "./checkoutContext";
 
 export function DriverCredits() {
   const { data: creditsData } = useDriverCredits();
   const { data: catalogData } = usePackCatalog();
   const createOrder = useCreatePackOrder();
   const verify = useVerifyPackPayment();
+  const checkoutHost = useExternalCheckoutHost();
   const [buying, setBuying] = useState<string | null>(null);
 
   const available = creditsData?.available ?? 0;
@@ -40,23 +42,29 @@ export function DriverCredits() {
 
       const cashfree = await load({ mode: order.env === "production" ? "production" : "sandbox" });
 
-      // Opens the Cashfree checkout modal; resolves once it closes.
-      await cashfree.checkout({
-        paymentSessionId: order.paymentSessionId,
-        redirectTarget: "_modal",
-      });
+      // The account panel is a modal Sheet that blocks taps outside itself, and
+      // the Cashfree checkout lives outside it — so close the panel first. This
+      // unmounts this card; everything below therefore uses promises and global
+      // toasts rather than component state or per-call mutate callbacks.
+      checkoutHost.beginCheckout();
+      try {
+        // Opens the Cashfree checkout modal; resolves once it closes.
+        await cashfree.checkout({
+          paymentSessionId: order.paymentSessionId,
+          redirectTarget: "_modal",
+        });
+      } finally {
+        checkoutHost.endCheckout();
+      }
 
       // Confirm with the backend, which fetches the authoritative order status.
-      verify.mutate(
-        { orderId: order.orderId },
-        {
-          onSuccess: (r) =>
-            r.activated
-              ? toast.success(`${r.credits} credits added`)
-              : toast.message("Payment received — credits will reflect shortly"),
-          onError: (e: any) => toast.error(e?.message ?? "Could not confirm payment"),
-        },
-      );
+      try {
+        const r = await verify.mutateAsync({ orderId: order.orderId });
+        if (r.activated) toast.success(`${r.credits} credits added`);
+        else toast.message("Payment received — credits will reflect shortly");
+      } catch (e: any) {
+        toast.error(e?.message ?? "Could not confirm payment");
+      }
     } catch (e: any) {
       toast.error(e?.message ?? "Could not start purchase");
     } finally {

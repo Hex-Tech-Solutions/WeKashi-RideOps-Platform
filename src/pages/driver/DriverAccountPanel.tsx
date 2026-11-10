@@ -11,8 +11,9 @@
  * personal/licence details, VehicleCard, CreditsSection) and the extracted
  * DriverRecentTrips list — nothing is duplicated, just relocated.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { ExternalCheckoutContext, type ExternalCheckoutHost } from "./checkoutContext";
 import { cn } from "@/lib/utils";
 import { useDriverMe } from "@/lib/queries";
 import { useDriverAuth } from "./useDriverAuth";
@@ -50,7 +51,22 @@ export function DriverAccountPanel({
 
   const activeMeta = SECTIONS.find((s) => s.key === section)!;
 
+  // Close the drawer while an external checkout (Cashfree) is on screen — the
+  // modal Sheet would otherwise block every tap on it — and bring the driver
+  // back to Ride Credits when it closes. `section` lives here, so it survives.
+  const checkoutHost = useMemo<ExternalCheckoutHost>(
+    () => ({
+      beginCheckout: () => onOpenChange(false),
+      endCheckout: () => {
+        setSection("credits");
+        onOpenChange(true);
+      },
+    }),
+    [onOpenChange],
+  );
+
   return (
+    <ExternalCheckoutContext.Provider value={checkoutHost}>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="left"
@@ -146,5 +162,6 @@ export function DriverAccountPanel({
         </div>
       </SheetContent>
     </Sheet>
+    </ExternalCheckoutContext.Provider>
   );
 }
