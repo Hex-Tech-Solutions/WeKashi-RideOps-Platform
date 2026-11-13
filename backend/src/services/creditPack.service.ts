@@ -108,13 +108,16 @@ async function expireStalePacks(driverId: string): Promise<void> {
  */
 export async function grantJoiningBonus(driverId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    const driver = await tx.driver.findUnique({
-      where: { id: driverId },
-      select: { joiningBonusGrantedAt: true },
-    });
-    if (!driver || driver.joiningBonusGrantedAt) return;
-
     const now = new Date();
+    // Claim the grant atomically: only the one call that flips
+    // joiningBonusGrantedAt from NULL proceeds. Re-activation, KYC renewal,
+    // document re-verification or concurrent calls can never grant twice.
+    const claimed = await tx.driver.updateMany({
+      where: { id: driverId, joiningBonusGrantedAt: null },
+      data: { joiningBonusGrantedAt: now },
+    });
+    if (claimed.count === 0) return;
+
     await tx.creditPack.create({
       data: {
         driverId,
@@ -126,10 +129,6 @@ export async function grantJoiningBonus(driverId: string): Promise<void> {
         expiresAt: packExpiry(now),
         status: 'active',
       },
-    });
-    await tx.driver.update({
-      where: { id: driverId },
-      data: { joiningBonusGrantedAt: now },
     });
   });
 }

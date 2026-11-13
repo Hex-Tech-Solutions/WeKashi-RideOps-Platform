@@ -159,7 +159,11 @@ export async function fetchFileBlob(fileUrl: string): Promise<Blob> {
     if (await tryRefresh()) res = await run();
   }
   if (!res.ok) {
-    throw new ApiError(res.status, res.status === 403 ? "You don't have access to this file" : "Could not load the file");
+    const message =
+      res.status === 403 ? "You don't have access to this file"
+      : res.status === 404 ? "This file is missing on the server. The document needs to be uploaded again."
+      : "Could not load the file";
+    throw new ApiError(res.status, message);
   }
   return res.blob();
 }

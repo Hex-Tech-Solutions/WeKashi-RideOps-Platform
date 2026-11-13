@@ -48,6 +48,11 @@ services:
     # to /app/secrets/fcm-service-account.json). The ./secrets dir is gitignored.
     volumes:
       - ./secrets:/app/secrets:ro
+      # Driver documents + payout files (local-disk storage, used because
+      # AZURE_STORAGE_CONNECTION_STRING is unset). MUST be a named volume:
+      # without it /app/uploads lives inside the container and every deploy
+      # (which rebuilds the container) silently deletes every uploaded file.
+      - uploads:/app/uploads
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
@@ -93,3 +98,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:
