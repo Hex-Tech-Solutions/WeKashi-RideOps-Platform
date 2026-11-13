@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { getRentalPack, computeRentalOverage, type RentalVehicle } from '../lib/rentalPacks';
 import { NotFoundError, ValidationError, ConflictError } from '../types';
 import { logger } from '../lib/logger';
+import { spareCredits } from './creditPack.service';
 import { randomInt } from 'crypto';
 
 // A driver's dismissed rentals persist across refreshes (so a declined card
@@ -470,13 +471,8 @@ export async function listEligibleRentalsForDriver(driverId: string) {
     return [];
   }
 
-  const credits = await prisma.$queryRaw<Array<{ total: number }>>`
-    SELECT COALESCE(SUM(credits_remaining), 0)::int AS total
-    FROM credit_packs
-    WHERE driver_id = ${driverId} AND status = 'active'
-      AND credits_remaining > 0 AND expires_at > NOW()
-  `;
-  if ((credits[0]?.total ?? 0) < 1) return [];
+  // Needs a credit not already committed to an accepted/claimed ride.
+  if ((await spareCredits(driverId)) < 1) return [];
 
   // Not on an active ride.
   const active = await prisma.ride.count({
@@ -567,6 +563,13 @@ export async function acceptRental(rentalId: string, driverId: string): Promise<
     `;
     if (rows.length === 0) {
       throw new ConflictError('This rental is no longer available');
+    }
+
+    // A credit already committed to an accepted/claimed ride can't also be
+    // spent on this rental.
+    await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
+    if ((await spareCredits(driverId, tx)) < 1) {
+      throw new ValidationError('No ride credits available — buy a pack to accept rentals');
     }
 
     // Burn one credit (oldest-expiring first), idempotent via credit_consumed.

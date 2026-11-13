@@ -42,6 +42,36 @@ export async function availableCredits(driverId: string): Promise<number> {
 }
 
 /**
+ * Credits a driver can still commit to a NEW ride.
+ *
+ * Normal / scheduled / airport rides only burn their credit on completion, so
+ * every ride the driver has accepted or claimed but not finished is already
+ * "spoken for". Without subtracting those, one credit could back several
+ * accepted rides. Rentals burn on accept, so they are already reflected in
+ * availableCredits and are not counted again here.
+ *
+ * Pass a transaction client to read inside the caller's transaction.
+ */
+export async function spareCredits(
+  driverId: string,
+  db: Prisma.TransactionClient = prisma,
+): Promise<number> {
+  const rows = await db.$queryRaw<Array<{ available: bigint | number | null; reserved: bigint | number | null }>>`
+    SELECT
+      (SELECT COALESCE(SUM(credits_remaining), 0) FROM credit_packs
+        WHERE driver_id = ${driverId} AND status = 'active'
+          AND credits_remaining > 0 AND expires_at > NOW()) AS available,
+      (SELECT COUNT(*) FROM rides
+        WHERE driver_id = ${driverId}
+          AND status IN ('assigned', 'in_progress')
+          AND credit_consumed = false) AS reserved
+  `;
+  const available = Number(rows[0]?.available ?? 0);
+  const reserved = Number(rows[0]?.reserved ?? 0);
+  return Math.max(0, available - reserved);
+}
+
+/**
  * List a driver's packs for display, lazily flipping any past-expiry packs to
  * 'expired' first so the returned view is accurate. (Req 8.3, 9.1)
  */

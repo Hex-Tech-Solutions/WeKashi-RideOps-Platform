@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { prisma } from '../lib/prisma';
 import { UPLOAD_DIR } from '../lib/storage';
-import { NotFoundError, ForbiddenError } from '../types';
+import { NotFoundError, ForbiddenError, ValidationError } from '../types';
 
 export async function addDriverDocument(
   driverId: string,
@@ -49,6 +49,30 @@ export async function setDocumentStatus(
   const doc = await prisma.driverDocument.findUnique({ where: { id: docId }, include: { driver: true } });
   if (!doc) throw new NotFoundError('Document not found');
   if (vendorId && doc.driver.vendorId !== vendorId) throw new ForbiddenError('Access denied');
+
+  // Review rules:
+  //   pending  -> verified | rejected
+  //   verified -> rejected (a problem found later)
+  //   rejected -> nothing. A rejected file is final; the driver must upload a
+  //               new document, which starts again as pending.
+  if (doc.status === 'rejected') {
+    throw new ValidationError('This document was rejected. The driver must upload a new one for review.');
+  }
+  if (status === doc.status) {
+    throw new ValidationError(`This document is already ${status}.`);
+  }
+  if (status === 'pending') {
+    throw new ValidationError('A reviewed document cannot be moved back to pending.');
+  }
+
+  // Only the driver's latest upload of each type can be reviewed — older
+  // copies are history once a replacement has been uploaded.
+  const newer = await prisma.driverDocument.count({
+    where: { driverId: doc.driverId, type: doc.type, createdAt: { gt: doc.createdAt } },
+  });
+  if (newer > 0) {
+    throw new ValidationError('A newer version of this document has been uploaded. Review that one instead.');
+  }
 
   return prisma.driverDocument.update({
     where: { id: docId },

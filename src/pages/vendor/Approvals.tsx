@@ -1,12 +1,20 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/RoleLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useDrivers, useUpdateDriverStatus, useDriverDocsForVendor, useSetDocumentStatus, fileSrc } from "@/lib/queries";
-import { Check, X, Loader2, FileText, ExternalLink } from "lucide-react";
+import { useDrivers, useUpdateDriverStatus, type DriverRow } from "@/lib/queries";
+import { Check, X, Loader2 } from "lucide-react";
+import { format } from "date-fns";
 import { toast } from "sonner";
 
+/**
+ * Driver Approvals — ACCOUNT approval only.
+ *
+ * A vendor approves or rejects a new driver's account here. KYC and documents
+ * are reviewed separately in the driver detail drawer, so they are not shown
+ * on this page. One horizontal row per driver.
+ */
 export default function Approvals() {
   const { data, isLoading } = useDrivers();
   const updateStatus = useUpdateDriverStatus();
@@ -25,7 +33,7 @@ export default function Approvals() {
     <div>
       <PageHeader
         title="Driver Approvals"
-        description="Activate new drivers once their details are verified."
+        description="Approve new driver accounts. Documents and KYC are reviewed from the driver's details."
         actions={
           <div className="flex gap-2">
             <Button size="sm" variant={filter === "pending" ? "default" : "outline"} onClick={() => setFilter("pending")}>Pending ({pending.length})</Button>
@@ -39,88 +47,94 @@ export default function Approvals() {
       ) : list.length === 0 ? (
         <Card className="shadow-card"><CardContent className="py-16 text-center text-sm text-muted-foreground">No drivers awaiting review 🎉</CardContent></Card>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {list.map((d) => (
-            <Card key={d.id} className="shadow-card">
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-12 w-12 rounded-full bg-foreground text-background flex items-center justify-center font-semibold">{d.fullName.split(" ").map((n) => n[0]).join("")}</div>
-                    <div>
-                      <CardTitle className="text-base">{d.fullName}</CardTitle>
-                      <div className="text-xs text-muted-foreground mt-1">{d.phone}</div>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className={
-                    d.status === "active" ? "border-success/40 text-success" :
-                    d.status === "blacklisted" ? "border-destructive/40 text-destructive" :
-                    "border-warning/40 text-warning"
-                  }>{d.status}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3 text-sm p-3 bg-secondary rounded-md">
-                  <div><div className="text-xs text-muted-foreground">Vehicle</div><div className="font-medium">{d.vehicle ? `${d.vehicle.fuelType} · ${d.vehicle.capacity} seats` : "Not assigned"}</div></div>
-                  <div><div className="text-xs text-muted-foreground">Reg No.</div><div className="font-mono text-xs">{d.vehicle?.regNo ?? "—"}</div></div>
-                  <div><div className="text-xs text-muted-foreground">KYC</div><div className="font-medium capitalize">{d.kycStatus}</div></div>
-                  <div><div className="text-xs text-muted-foreground">Rating</div><div className="font-medium">⭐ {d.rating.toFixed(1)}</div></div>
-                </div>
+        <Card className="shadow-card overflow-hidden">
+          {/* Column headings — wide screens only */}
+          <div className="hidden md:grid grid-cols-[2fr_1.3fr_1.3fr_1fr_0.9fr_1.6fr] gap-4 px-5 py-3 border-b bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground font-medium">
+            <div>Driver</div>
+            <div>Phone</div>
+            <div>Vehicle No.</div>
+            <div>Signed up</div>
+            <div>Status</div>
+            <div className="text-right">Actions</div>
+          </div>
 
-                <DriverDocList driverId={d.id} />
-
-                {d.status === "pending" && (
-                  <div className="flex gap-2 pt-2">
-                    <Button disabled={updateStatus.isPending} onClick={() => act(d.id, "active", d.fullName)} className="flex-1 bg-foreground text-background hover:bg-foreground/90"><Check className="h-4 w-4" /> Approve</Button>
-                    <Button disabled={updateStatus.isPending} onClick={() => act(d.id, "blacklisted", d.fullName)} variant="outline" className="flex-1 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40"><X className="h-4 w-4" /> Reject</Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+          <ul className="divide-y">
+            {list.map((d) => (
+              <ApprovalRow
+                key={d.id}
+                driver={d}
+                busy={updateStatus.isPending}
+                onApprove={() => act(d.id, "active", d.fullName)}
+                onReject={() => act(d.id, "blacklisted", d.fullName)}
+              />
+            ))}
+          </ul>
+        </Card>
       )}
     </div>
   );
 }
 
-function DriverDocList({ driverId }: { driverId: string }) {
-  const { data, isLoading } = useDriverDocsForVendor(driverId);
-  const setStatus = useSetDocumentStatus();
-  const docs = data?.documents ?? [];
+function statusClass(status: DriverRow["status"]) {
+  if (status === "active") return "border-success/40 text-success";
+  if (status === "blacklisted" || status === "expired") return "border-destructive/40 text-destructive";
+  return "border-warning/40 text-warning";
+}
 
-  if (isLoading) return <div className="py-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+function ApprovalRow({
+  driver: d,
+  busy,
+  onApprove,
+  onReject,
+}: {
+  driver: DriverRow;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const initials = d.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+  const regNo = d.vehicle?.regNo ?? "—";
+  const signedUp = format(new Date(d.createdAt), "dd MMM yyyy");
 
   return (
-    <div className="space-y-2">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium">Documents ({docs.length})</div>
-      {docs.length === 0 && <div className="text-xs text-muted-foreground">No documents uploaded yet.</div>}
-      {docs.map((doc) => (
-        <div key={doc.id} className="flex items-center gap-2 p-2 rounded border text-sm">
-          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="capitalize truncate">{doc.type}{doc.number ? ` · #${doc.number}` : ""}</div>
-            {doc.expiry && <div className="text-[10px] text-muted-foreground">exp {doc.expiry.slice(0, 10)}</div>}
-          </div>
-          <Badge variant="outline" className={
-            doc.status === "verified" ? "border-success/40 text-success"
-            : doc.status === "rejected" ? "border-destructive/40 text-destructive"
-            : "border-warning/40 text-warning"
-          }>{doc.status}</Badge>
-          <a href={fileSrc(doc.fileUrl)} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground"><ExternalLink className="h-3.5 w-3.5" /></a>
-          {doc.status !== "verified" && (
-            <Button size="sm" variant="ghost" className="h-7 text-xs text-success" disabled={setStatus.isPending}
-              onClick={() => setStatus.mutate({ driverId, docId: doc.id, status: "verified" }, { onSuccess: () => toast.success("Verified"), onError: (e: any) => toast.error(e?.message ?? "Failed") })}>
-              Verify
-            </Button>
-          )}
-          {doc.status !== "rejected" && (
-            <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" disabled={setStatus.isPending}
-              onClick={() => setStatus.mutate({ driverId, docId: doc.id, status: "rejected" }, { onSuccess: () => toast("Rejected"), onError: (e: any) => toast.error(e?.message ?? "Failed") })}>
-              Reject
-            </Button>
-          )}
+    <li className="px-5 py-3 grid grid-cols-1 md:grid-cols-[2fr_1.3fr_1.3fr_1fr_0.9fr_1.6fr] gap-2 md:gap-4 md:items-center text-sm">
+      {/* Driver */}
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="h-9 w-9 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-semibold shrink-0" aria-hidden="true">
+          {initials}
         </div>
-      ))}
-    </div>
+        <div className="min-w-0">
+          <div className="font-medium truncate">{d.fullName}</div>
+          {/* On narrow screens, phone · vehicle · date sit under the name */}
+          <div className="md:hidden text-xs text-muted-foreground truncate">
+            {d.phone} · <span className="font-mono">{regNo}</span> · {signedUp}
+          </div>
+        </div>
+        <Badge variant="outline" className={`md:hidden ml-auto capitalize ${statusClass(d.status)}`}>{d.status}</Badge>
+      </div>
+
+      <div className="hidden md:block text-muted-foreground">{d.phone}</div>
+      <div className="hidden md:block font-mono text-xs">{regNo}</div>
+      <div className="hidden md:block text-muted-foreground">{signedUp}</div>
+      <div className="hidden md:block">
+        <Badge variant="outline" className={`capitalize ${statusClass(d.status)}`}>{d.status}</Badge>
+      </div>
+
+      {/* Actions */}
+      <div className="flex md:justify-end gap-2">
+        {d.status === "pending" ? (
+          <>
+            <Button size="sm" disabled={busy} onClick={onApprove} className="flex-1 md:flex-none bg-foreground text-background hover:bg-foreground/90" aria-label={`Approve ${d.fullName}`}>
+              <Check className="h-4 w-4" /> Approve
+            </Button>
+            <Button size="sm" disabled={busy} onClick={onReject} variant="outline" className="flex-1 md:flex-none hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40" aria-label={`Reject ${d.fullName}`}>
+              <X className="h-4 w-4" /> Reject
+            </Button>
+          </>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
+      </div>
+    </li>
   );
 }

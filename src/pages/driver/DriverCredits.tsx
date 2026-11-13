@@ -15,9 +15,10 @@ import {
   usePackCatalog,
   useCreatePackOrder,
   useVerifyPackPayment,
+  useDriverPurchases,
   type PackDefinition,
 } from "@/lib/queries";
-import { Ticket, IndianRupee, Loader2, CheckCircle2, CalendarClock } from "lucide-react";
+import { Ticket, IndianRupee, Loader2, CheckCircle2, CalendarClock, Receipt } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { useExternalCheckoutHost } from "./checkoutContext";
@@ -30,9 +31,16 @@ export function DriverCredits() {
   const checkoutHost = useExternalCheckoutHost();
   const [buying, setBuying] = useState<string | null>(null);
 
+  const { data: purchaseData } = useDriverPurchases();
+  const purchases = purchaseData?.purchases ?? [];
+
+  // The total includes every usable credit (bonus too), but the pack list
+  // shows only packs the driver actually bought.
   const available = creditsData?.available ?? 0;
   const packs = creditsData?.packs ?? [];
-  const activePacks = packs.filter((p) => p.status === "active" && p.creditsRemaining > 0);
+  const activePacks = packs.filter(
+    (p) => p.source === "purchase" && p.status === "active" && p.creditsRemaining > 0,
+  );
   const catalog = catalogData?.packs ?? [];
 
   const buy = async (pack: PackDefinition) => {
@@ -105,7 +113,6 @@ export function DriverCredits() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium">
                     {p.creditsRemaining} / {p.creditsTotal} credits left
-                    {p.source === "joining_bonus" && <span className="ml-1 text-gold">· bonus</span>}
                   </div>
                   <div className="text-muted-foreground flex items-center gap-1 mt-0.5">
                     <CalendarClock className="h-3 w-3" />
@@ -150,6 +157,37 @@ export function DriverCredits() {
           <p className="text-[11px] text-muted-foreground">
             One credit is used each time you complete a ride. Credits closest to expiring are used first.
           </p>
+        </div>
+
+        <Separator />
+
+        {/* Purchase history — the driver's own successful purchases */}
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1.5">
+            <Receipt className="h-3.5 w-3.5" /> Purchase history
+          </div>
+          {purchases.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No purchases yet.</div>
+          ) : (
+            <ul className="divide-y rounded-lg border">
+              {purchases.map((p) => (
+                <li key={p.id} className="flex items-center gap-3 px-3 py-2.5 text-xs">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm">{p.credits} ride credits</div>
+                    <div className="text-muted-foreground">
+                      {format(new Date(p.paidAt ?? p.createdAt), "dd MMM yyyy, h:mm a")}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-semibold flex items-center gap-0.5 justify-end">
+                      <IndianRupee className="h-3 w-3" />{p.amount}
+                    </div>
+                    <div className="text-success">Paid</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -233,13 +233,19 @@ export async function findNearbyDrivers(
         WHERE rt.driver_id = drivers.id
           AND rt.status IN ('assigned', 'in_progress')
       )
-      -- Credit gate: only drivers with at least one available ride credit
-      AND EXISTS (
-        SELECT 1 FROM credit_packs cp
+      -- Credit gate: at least one credit NOT already committed to an
+      -- accepted/claimed ride that hasn't burned its credit yet (spareCredits).
+      AND (
+        SELECT COALESCE(SUM(cp.credits_remaining), 0) FROM credit_packs cp
         WHERE cp.driver_id = drivers.id
           AND cp.status = 'active'
           AND cp.credits_remaining > 0
           AND cp.expires_at > NOW()
+      ) > (
+        SELECT COUNT(*) FROM rides rr
+        WHERE rr.driver_id = drivers.id
+          AND rr.status IN ('assigned', 'in_progress')
+          AND rr.credit_consumed = false
       )
     ORDER BY distance_m
     LIMIT 20
@@ -267,12 +273,18 @@ export async function vehicleAvailability(
         WHERE driver_id IS NOT NULL
           AND status IN ('assigned', 'in_progress')
       )
-      AND EXISTS (
-        SELECT 1 FROM credit_packs cp
+      -- Credit gate (same rule as spareCredits).
+      AND (
+        SELECT COALESCE(SUM(cp.credits_remaining), 0) FROM credit_packs cp
         WHERE cp.driver_id = drivers.id
           AND cp.status = 'active'
           AND cp.credits_remaining > 0
           AND cp.expires_at > NOW()
+      ) > (
+        SELECT COUNT(*) FROM rides rr
+        WHERE rr.driver_id = drivers.id
+          AND rr.status IN ('assigned', 'in_progress')
+          AND rr.credit_consumed = false
       )
     GROUP BY vehicle_type
   `;

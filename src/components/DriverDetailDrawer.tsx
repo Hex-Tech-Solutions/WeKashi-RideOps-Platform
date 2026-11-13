@@ -24,12 +24,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  useDriver, useDriverDocsForVendor, useSetDocumentStatus, fileSrc,
+  useDriver, useDriverDocsForVendor, useSetDocumentStatus,
   type DocumentRow,
 } from "@/lib/queries";
+import { DocumentViewer } from "@/components/DocumentViewer";
 import {
   Loader2, Phone, Car, Building2, CreditCard, FileText,
-  CheckCircle2, XCircle, Clock, AlertTriangle, ExternalLink,
+  CheckCircle2, XCircle, Clock, AlertTriangle, Eye,
   User, BadgeCheck,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -85,8 +86,14 @@ export function DriverDetailDrawer({
     return "border-warning/40 text-warning bg-warning/10";
   };
 
+  // Keep only the latest upload of each type (the API returns newest first).
+  // Older copies — e.g. a rejected file the driver has since replaced — are
+  // history and can no longer be reviewed.
+  const latestByType = new Map<string, DocumentRow>();
+  for (const d of docs) if (!latestByType.has(d.type)) latestByType.set(d.type, d);
+
   // Sort docs in display order; unknowns go to end
-  const sortedDocs = [...docs].sort((a, b) => {
+  const sortedDocs = [...latestByType.values()].sort((a, b) => {
     const ia = DOC_ORDER.indexOf(a.type);
     const ib = DOC_ORDER.indexOf(b.type);
     if (ia === -1 && ib === -1) return 0;
@@ -95,7 +102,7 @@ export function DriverDetailDrawer({
     return ia - ib;
   });
 
-  const pendingCount = docs.filter((d) => d.status === "pending").length;
+  const pendingCount = sortedDocs.filter((d) => d.status === "pending").length;
 
   return (
     <Sheet open={!!driverId} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -237,6 +244,7 @@ function DocReviewCard({
   const setStatus  = useSetDocumentStatus();
   const [note, setNote]       = useState("");
   const [showNote, setShowNote] = useState(false);
+  const [viewing, setViewing]   = useState(false);
 
   const expired  = isExpired(doc);
   const pending  = doc.status === "pending";
@@ -313,12 +321,12 @@ function DocReviewCard({
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        <Button asChild variant="outline" size="sm" className="flex-1 h-8 text-xs">
-          <a href={fileSrc(doc.fileUrl)} target="_blank" rel="noreferrer">
-            <ExternalLink className="h-3 w-3 mr-1" /> View
-          </a>
+        <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={() => setViewing(true)}>
+          <Eye className="h-3 w-3 mr-1" /> View
         </Button>
-        {canApprove && !verified && (
+        {/* Approve only a pending upload. A rejected file is final — the
+            driver must upload a new one, which comes back as pending. */}
+        {canApprove && pending && (
           <Button
             size="sm"
             className="flex-1 h-8 text-xs bg-success text-white hover:bg-success/90"
@@ -339,17 +347,19 @@ function DocReviewCard({
             <XCircle className="h-3 w-3 mr-1" /> Reject
           </Button>
         )}
-        {canApprove && rejected && (
-          <Button
-            size="sm"
-            className="flex-1 h-8 text-xs"
-            onClick={approve}
-            disabled={setStatus.isPending}
-          >
-            <CheckCircle2 className="h-3 w-3 mr-1" /> Re-approve
-          </Button>
-        )}
       </div>
+
+      {rejected && (
+        <p className="text-xs text-muted-foreground">
+          Waiting for the driver to upload a new document.
+        </p>
+      )}
+
+      <DocumentViewer
+        fileUrl={viewing ? doc.fileUrl : null}
+        title={docLabel(doc.type)}
+        onClose={() => setViewing(false)}
+      />
 
       {/* Rejection note input */}
       {showNote && (

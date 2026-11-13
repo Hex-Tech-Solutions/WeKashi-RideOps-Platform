@@ -8,14 +8,14 @@ import {
   useDriverDocuments,
   useUploadDriverDocument,
   useDeleteDriverDocument,
-  fileSrc,
   type DocumentRow,
 } from "@/lib/queries";
+import { DocumentViewer } from "@/components/DocumentViewer";
 import {
   FileText,
   Upload,
   Trash2,
-  ExternalLink,
+  Eye,
   Loader2,
   CheckCircle2,
   XCircle,
@@ -131,19 +131,77 @@ function DocCard({
   const fileRef = useRef<HTMLInputElement>(null);
   const [number, setNumber] = useState("");
   const [expiry, setExpiry] = useState("");
+  const [viewing, setViewing] = useState(false);
+  // For an existing document, the number/expiry inputs appear once the driver
+  // taps Replace / Re-upload, so a replacement always carries fresh details.
+  const [replacing, setReplacing] = useState(false);
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Required details for this type must be filled before picking a file.
+  const detailsError = (): string | null => {
+    if (req.wantsNumber && !number.trim()) return `Enter the ${req.label} number`;
+    if (req.wantsExpiry) {
+      if (!expiry) return `Enter the ${req.label} expiry date`;
+      if (expiry < today) return `${req.label} has already expired — upload a valid document`;
+    }
+    return null;
+  };
+
+  const pickFile = () => {
+    const err = detailsError();
+    if (err) { toast.error(err); return; }
+    fileRef.current?.click();
+  };
 
   const onFile = (file?: File) => {
     if (!file) return;
     const form = new FormData();
     form.append("file", file);
     form.append("type", req.type);
-    if (number) form.append("number", number);
-    if (expiry) form.append("expiry", new Date(expiry).toISOString());
+    if (req.wantsNumber) form.append("number", number.trim());
+    if (req.wantsExpiry) form.append("expiry", new Date(expiry).toISOString());
     upload.mutate(form, {
-      onSuccess: () => toast.success(`${req.label} uploaded`),
+      onSuccess: () => {
+        toast.success(`${req.label} uploaded`);
+        setReplacing(false);
+        setNumber("");
+        setExpiry("");
+      },
       onError: (e: any) => toast.error(e?.message ?? "Upload failed"),
     });
+    // Allow picking the same file again after an error.
+    if (fileRef.current) fileRef.current.value = "";
   };
+
+  const needsDetails = !!(req.wantsNumber || req.wantsExpiry);
+  const showDetailInputs = needsDetails && (!existing || replacing);
+
+  const detailInputs = (
+    <div className="grid grid-cols-2 gap-2">
+      {req.wantsNumber && (
+        <Input
+          placeholder={`${req.label} number`}
+          aria-label={`${req.label} number`}
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+          className="h-9 text-sm"
+          required
+        />
+      )}
+      {req.wantsExpiry && (
+        <Input
+          type="date"
+          aria-label={`${req.label} expiry date`}
+          min={today}
+          value={expiry}
+          onChange={(e) => setExpiry(e.target.value)}
+          className="h-9 text-sm"
+          required
+        />
+      )}
+    </div>
+  );
 
   // Determine expired state: prefer client-side date check; fall back to server flag.
   const clientExpired = existing ? isDocExpired(existing) : false;
@@ -195,21 +253,21 @@ function DocCard({
         </div>
 
         {existing ? (
+          <div className="space-y-2">
+          {showDetailInputs && detailInputs}
           <div className="flex gap-2">
-            <Button asChild variant="outline" size="sm" className="flex-1">
-              <a href={fileSrc(existing.fileUrl)} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-3.5 w-3.5" /> View
-              </a>
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => setViewing(true)}>
+              <Eye className="h-3.5 w-3.5" /> View
             </Button>
             <Button
-              variant={docExpired ? "default" : "outline"}
+              variant={docExpired || existing.status === "rejected" ? "default" : "outline"}
               size="sm"
-              className={`flex-1 ${docExpired ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}`}
-              onClick={() => fileRef.current?.click()}
+              className={`flex-1 ${docExpired || existing.status === "rejected" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}`}
+              onClick={() => (needsDetails && !replacing ? setReplacing(true) : pickFile())}
               disabled={upload.isPending}
             >
-              <Upload className="h-3.5 w-3.5" />
-              {docExpired ? "Re-upload" : "Replace"}
+              {upload.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {replacing ? "Choose file" : docExpired || existing.status === "rejected" ? "Re-upload" : "Replace"}
             </Button>
             <Button
               variant="ghost"
@@ -226,31 +284,20 @@ function DocCard({
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
+          {replacing && (
+            <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setReplacing(false)}>
+              Cancel
+            </button>
+          )}
+          </div>
         ) : (
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              {req.wantsNumber && (
-                <Input
-                  placeholder="Number"
-                  value={number}
-                  onChange={(e) => setNumber(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              )}
-              {req.wantsExpiry && (
-                <Input
-                  type="date"
-                  value={expiry}
-                  onChange={(e) => setExpiry(e.target.value)}
-                  className="h-9 text-sm"
-                />
-              )}
-            </div>
+            {showDetailInputs && detailInputs}
             <Button
               variant="outline"
               size="sm"
               className="w-full"
-              onClick={() => fileRef.current?.click()}
+              onClick={pickFile}
               disabled={upload.isPending}
             >
               {upload.isPending
@@ -266,6 +313,12 @@ function DocCard({
           accept="image/*,application/pdf"
           className="hidden"
           onChange={(e) => onFile(e.target.files?.[0])}
+        />
+
+        <DocumentViewer
+          fileUrl={viewing && existing ? existing.fileUrl : null}
+          title={req.label}
+          onClose={() => setViewing(false)}
         />
       </CardContent>
     </Card>

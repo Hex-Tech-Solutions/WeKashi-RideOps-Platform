@@ -12,6 +12,7 @@ import {
 } from '../services/driver.service';
 import { addDriverDocument, listDriverDocuments, deleteDriverDocument } from '../services/document.service';
 import { upload, USE_AZURE_STORAGE, uploadToAzureBlob } from '../lib/storage';
+import { validateDocDetails, DOC_TYPE_RULES } from '../lib/documentTypes';
 
 // Helper: after multer processes a file, get its final URL (local path or Azure Blob)
 async function resolveFileUrl(file: Express.Multer.File): Promise<string> {
@@ -241,11 +242,19 @@ router.post('/documents', upload.single('file'), async (req: AuthRequest, res: R
       res.status(400).json({ error: 'Document type is required', code: 'VALIDATION_ERROR' });
       return;
     }
+    // Each type must carry its required number / expiry (see lib/documentTypes).
+    const detailError = validateDocDetails(type, number, expiry);
+    if (detailError) {
+      res.status(400).json({ error: detailError, code: 'VALIDATION_ERROR' });
+      return;
+    }
+    const rule = DOC_TYPE_RULES[type];
     const doc = await addDriverDocument(req.driver!.id, {
       type,
       fileUrl: await resolveFileUrl(req.file),
-      number: number || undefined,
-      expiry: expiry ? new Date(expiry) : undefined,
+      number: number?.trim() || undefined,
+      // Only store an expiry for types that have one.
+      expiry: rule.needsExpiry && expiry ? new Date(expiry) : undefined,
     });
     res.status(201).json(doc);
   } catch (err) {
@@ -291,6 +300,26 @@ router.get('/credits', async (req: AuthRequest, res: Response, next: NextFunctio
       listPacks(req.driver!.id),
     ]);
     res.json({ available, packs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/driver/purchases — this driver's own successful pack purchases,
+// newest first. Scoped to req.driver.id, so a driver only ever sees their own.
+router.get('/purchases', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { prisma } = await import('../lib/prisma');
+    const orders = await prisma.packOrder.findMany({
+      where: { driverId: req.driver!.id, status: 'paid' },
+      orderBy: { paidAt: 'desc' },
+      take: 100,
+      select: {
+        id: true, packKey: true, credits: true, amount: true, status: true,
+        gatewayOrderId: true, paidAt: true, createdAt: true,
+      },
+    });
+    res.json({ purchases: orders });
   } catch (err) {
     next(err);
   }

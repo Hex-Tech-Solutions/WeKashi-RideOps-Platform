@@ -141,6 +141,29 @@ export async function api<T = unknown>(path: string, options: ApiOptions = {}): 
   return (await res.json()) as T;
 }
 
+/**
+ * Fetch a protected file (e.g. "/api/files/abc.pdf") with the Authorization
+ * header, refreshing the access token once if it has expired. Returns the file
+ * as a Blob so it can be shown in-app via URL.createObjectURL — this avoids
+ * target="_blank" links (ignored by the Android app's WebView) and stale
+ * ?token= URLs.
+ */
+export async function fetchFileBlob(fileUrl: string): Promise<Blob> {
+  const run = () =>
+    fetch(fileUrl, {
+      headers: tokenStore.access ? { Authorization: `Bearer ${tokenStore.access}` } : {},
+    });
+
+  let res = await run();
+  if (res.status === 401) {
+    if (await tryRefresh()) res = await run();
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, res.status === 403 ? "You don't have access to this file" : "Could not load the file");
+  }
+  return res.blob();
+}
+
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
 export async function login(email: string, password: string): Promise<AuthUser> {

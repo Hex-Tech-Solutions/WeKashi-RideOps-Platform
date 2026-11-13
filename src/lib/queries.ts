@@ -1834,6 +1834,26 @@ export function useDriverCredits() {
   });
 }
 
+export interface PackPurchase {
+  id: string;
+  packKey: string;
+  credits: number;
+  amount: number;
+  status: string;
+  gatewayOrderId: string;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+/** The driver's own successful pack purchases (newest first). */
+export function useDriverPurchases() {
+  return useQuery({
+    // Under "driverCredits" so a purchase refreshes it with the balance.
+    queryKey: ["driverCredits", "purchases"],
+    queryFn: () => api<{ purchases: PackPurchase[] }>("/driver/purchases"),
+  });
+}
+
 export interface NearbyCab {
   id: string;
   lat: number;
