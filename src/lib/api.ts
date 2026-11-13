@@ -242,27 +242,50 @@ export async function driverRequestOtp(phone: string): Promise<void> {
   await api("/auth/driver/request-otp", { method: "POST", auth: false, body: JSON.stringify({ phone }) });
 }
 
-/** Driver self-registration — creates account linked to vendor, sends OTP. */
-export async function driverRegister(input: {
+/**
+ * Driver self-registration, step 1: validate details + send OTP. The account
+ * is NOT created yet — it's created only after the OTP is confirmed.
+ */
+export async function driverRegisterRequestOtp(input: {
   phone: string;
   fullName: string;
   vendorCode: string;
 }): Promise<{ message: string; vendorName: string }> {
-  return api("/auth/driver/register", {
+  return api("/auth/driver/register/request-otp", {
     method: "POST",
     auth: false,
     body: JSON.stringify(input),
   });
 }
 
-export async function driverVerifyOtp(phone: string, otp: string): Promise<DriverSession> {
-  const data = await api<{ accessToken: string; refreshToken: string; driver: { id: string; fullName: string; vendorId: string } }>(
-    "/auth/driver/verify-otp",
-    { method: "POST", auth: false, body: JSON.stringify({ phone, otp }) },
-  );
+type DriverAuthResponse = {
+  accessToken: string;
+  refreshToken: string;
+  driver: { id: string; fullName: string; vendorId: string };
+};
+
+function storeDriverSession(data: DriverAuthResponse): DriverSession {
   const session: DriverSession = { id: data.driver.id, role: "driver", fullName: data.driver.fullName, vendorId: data.driver.vendorId };
   tokenStore.set(data.accessToken, data.refreshToken, session as unknown as AuthUser);
   return session;
+}
+
+/** Driver self-registration, step 2: verify OTP → account created + signed in. */
+export async function driverRegisterVerify(phone: string, otp: string): Promise<DriverSession> {
+  const data = await api<DriverAuthResponse>("/auth/driver/register/verify", {
+    method: "POST",
+    auth: false,
+    body: JSON.stringify({ phone, otp }),
+  });
+  return storeDriverSession(data);
+}
+
+export async function driverVerifyOtp(phone: string, otp: string): Promise<DriverSession> {
+  const data = await api<DriverAuthResponse>(
+    "/auth/driver/verify-otp",
+    { method: "POST", auth: false, body: JSON.stringify({ phone, otp }) },
+  );
+  return storeDriverSession(data);
 }
 
 export function getStoredDriver(): DriverSession | null {

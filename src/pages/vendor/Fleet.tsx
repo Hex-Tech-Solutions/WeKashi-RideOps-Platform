@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useDrivers, useCreateDriver } from "@/lib/queries";
+import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import { Car, Fuel, Users, Plus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,17 +16,17 @@ export default function Fleet() {
   const createDriver = useCreateDriver();
   const drivers = data?.drivers ?? [];
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "+91" });
+  // phone = the 10 mobile digits only; "+91" is fixed in the input.
+  const [form, setForm] = useState({ name: "", phone: "" });
 
   const submit = () => {
-    const digits = form.phone.replace(/[^\d]/g, "");
-    if (!form.name) { toast.error("Driver name is required"); return; }
-    if (digits.length < 10) { toast.error("Enter a valid phone number"); return; }
-    createDriver.mutate({ fullName: form.name, phone: digits }, {
+    if (form.name.trim().length < 2) { toast.error("Driver name is required"); return; }
+    if (!isValidMobile(form.phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
+    createDriver.mutate({ fullName: form.name.trim(), phone: toE164(form.phone) }, {
       onSuccess: () => {
         toast.success(`${form.name} added · awaiting approval`);
         setOpen(false);
-        setForm({ name: "", phone: "+91" });
+        setForm({ name: "", phone: "" });
       },
       onError: (e: any) => toast.error(e?.message ?? "Could not add driver"),
     });
@@ -67,7 +68,7 @@ export default function Fleet() {
           <DialogHeader><DialogTitle>Add driver</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-3 py-2">
             <div><Label>Driver name</Label><Input className="mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-            <div><Label>Phone</Label><Input className="mt-1" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+91 98xxxxxxxx" /></div>
+            <div><Label htmlFor="add-driver-phone">Phone</Label><PhoneInput id="add-driver-phone" className="mt-1" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} /></div>
             <div className="text-xs text-muted-foreground">The driver signs in on the mobile app with this phone (OTP). Vehicle &amp; document assignment is coming soon.</div>
           </div>
           <DialogFooter>

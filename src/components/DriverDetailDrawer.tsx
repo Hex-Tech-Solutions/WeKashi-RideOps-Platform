@@ -24,14 +24,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  useDriver, useDriverDocsForVendor, useSetDocumentStatus,
+  useDriver, useDriverDocsForVendor, useSetDocumentStatus, useRemoveDriver,
   type DocumentRow,
 } from "@/lib/queries";
 import { DocumentViewer } from "@/components/DocumentViewer";
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Loader2, Phone, Car, Building2, CreditCard, FileText,
   CheckCircle2, XCircle, Clock, AlertTriangle, Eye,
-  User, BadgeCheck,
+  User, BadgeCheck, Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -70,11 +74,16 @@ export function DriverDetailDrawer({
   driverId,
   onClose,
   canApprove = true,
+  deleteAs,
 }: {
   driverId: string | null;
   onClose: () => void;
   canApprove?: boolean;
+  /** Show "Delete account". Vendors can't delete a blacklisted driver. */
+  deleteAs?: "vendor" | "admin";
 }) {
+  const removeDriver = useRemoveDriver();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const { data: driver, isLoading: driverLoading } = useDriver(driverId);
   const { data: docsData, isLoading: docsLoading }  = useDriverDocsForVendor(driverId);
   const docs = docsData?.documents ?? [];
@@ -200,10 +209,77 @@ export function DriverDetailDrawer({
                   ))}
                 </div>
               </section>
+
+              {deleteAs && (
+                <>
+                  <Separator />
+                  <section className="space-y-2">
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                      Delete account
+                    </div>
+                    {driver.status === "blacklisted" && deleteAs === "vendor" ? (
+                      <p className="text-xs text-muted-foreground">
+                        Blacklisted drivers can only be deleted by an admin.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-xs text-muted-foreground">
+                          Use this when the driver leaves your fleet. Their trip and payment history is kept,
+                          and they can sign up again under another vendor.
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
+                          onClick={() => setConfirmDelete(true)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete driver account
+                        </Button>
+                      </>
+                    )}
+                  </section>
+                </>
+              )}
             </div>
           )}
         </ScrollArea>
       </SheetContent>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {driver?.fullName ?? "this driver"}'s account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              They will be signed out and removed from your fleet. Their history is kept for your records.
+              This can't be undone — to work with you again they would need to sign up afresh.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={removeDriver.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!driver) return;
+                removeDriver.mutate(driver.id, {
+                  onSuccess: () => {
+                    toast.success(`${driver.fullName}'s account deleted`);
+                    setConfirmDelete(false);
+                    onClose();
+                  },
+                  onError: (err: any) => {
+                    toast.error(err?.message ?? "Could not delete the account");
+                    setConfirmDelete(false);
+                  },
+                });
+              }}
+            >
+              {removeDriver.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete account"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

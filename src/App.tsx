@@ -44,6 +44,7 @@ import RegistrationRequests from "./pages/admin/RegistrationRequests";
 import SupervisorIssues from "./pages/supervisor/Issues";
 import VendorIssues from "./pages/vendor/Issues";
 import AdminIssues from "./pages/admin/Issues";
+import DuplicateFlags from "./pages/admin/DuplicateFlags";
 
 // Public legal/policy pages — must stay outside ProtectedRoute so a payment
 // gateway reviewer can open them without an account.
@@ -118,6 +119,7 @@ const App = () => (
               <Route path="analytics" element={<Analytics />} />
               <Route path="safety" element={<Safety />} />
               <Route path="issues" element={<AdminIssues />} />
+              <Route path="duplicates" element={<DuplicateFlags />} />
               <Route path="settings" element={<AdminSettings />} />
             </Route>
 

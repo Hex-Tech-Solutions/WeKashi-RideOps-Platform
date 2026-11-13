@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { driverRequestOtp, driverRegister, ApiError } from "@/lib/api";
+import { driverRequestOtp, driverRegisterRequestOtp, ApiError } from "@/lib/api";
+import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import { useDriverAuth } from "./useDriverAuth";
 import { toast } from "sonner";
 import { Loader2, Car, ArrowRight, CheckCircle2 } from "lucide-react";
@@ -11,13 +12,13 @@ type Mode = "signin" | "signup";
 type Step = "form" | "otp";
 
 export default function DriverLogin() {
-  const { login } = useDriverAuth();
+  const { login, completeSignup } = useDriverAuth();
   const [mode, setMode]   = useState<Mode>("signin");
   const [step, setStep]   = useState<Step>("form");
   const [busy, setBusy]   = useState(false);
 
-  // Shared
-  const [phone, setPhone] = useState("+91");
+  // Shared — the 10 mobile digits only; "+91" is fixed in the input.
+  const [phone, setPhone] = useState("");
   const [otp, setOtp]     = useState("");
 
   // Sign-up only
@@ -32,13 +33,12 @@ export default function DriverLogin() {
     setConfirmedVendor(null);
   };
 
-  // ── Sign in: send OTP ─────────────────────────────────────────────────────
+  // ── Sign in: send OTP (only if an account exists for the number) ─────────
   const handleSignIn = async () => {
-    const digits = phone.replace(/[^\d]/g, "");
-    if (digits.length < 10) { toast.error("Enter a valid phone number"); return; }
+    if (!isValidMobile(phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
     setBusy(true);
     try {
-      await driverRequestOtp("+" + digits);
+      await driverRequestOtp(toE164(phone));
       setStep("otp");
       toast.success("OTP sent");
     } catch (e) {
@@ -46,11 +46,10 @@ export default function DriverLogin() {
     } finally { setBusy(false); }
   };
 
-  // ── Sign up: register + send OTP ─────────────────────────────────────────
+  // ── Sign up: check details + send OTP (account created after OTP) ────────
   const handleSignUp = async () => {
-    const digits = phone.replace(/[^\d]/g, "");
-    if (digits.length < 10) { toast.error("Enter a valid phone number"); return; }
     if (fullName.trim().length < 2) { toast.error("Enter your full name"); return; }
+    if (!isValidMobile(phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
     const code = vendorCode.toUpperCase().replace(/[^A-Z0-9-]/g, "");
     if (!/^VND-[A-Z0-9]{6}$/.test(code)) {
       toast.error("Enter a valid vendor code (format: VND-XXXXXX)");
@@ -58,21 +57,26 @@ export default function DriverLogin() {
     }
     setBusy(true);
     try {
-      const res = await driverRegister({ phone: "+" + digits, fullName: fullName.trim(), vendorCode: code });
+      const res = await driverRegisterRequestOtp({ phone: toE164(phone), fullName: fullName.trim(), vendorCode: code });
       setConfirmedVendor(res.vendorName);
       setStep("otp");
-      toast.success(`Account created under ${res.vendorName}. OTP sent.`);
+      toast.success("OTP sent");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Registration failed");
     } finally { setBusy(false); }
   };
 
-  // ── Verify OTP (same for both flows) ────────────────────────────────────
+  // ── Verify OTP ───────────────────────────────────────────────────────────
   const handleVerify = async () => {
     setBusy(true);
     try {
-      await login("+" + phone.replace(/[^\d]/g, ""), otp);
-      toast.success("Welcome to Wekashi Cab");
+      if (mode === "signup") {
+        await completeSignup(toE164(phone), otp);
+        toast.success("Account created. Welcome to Wekashi Cab");
+      } else {
+        await login(toE164(phone), otp);
+        toast.success("Welcome to Wekashi Cab");
+      }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Invalid OTP");
     } finally { setBusy(false); }
@@ -126,8 +130,8 @@ export default function DriverLogin() {
                 <div className="flex items-center gap-2 rounded-md bg-success/10 border border-success/30 px-3 py-2.5">
                   <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
                   <div>
-                    <div className="text-sm font-medium text-success">Registered under {confirmedVendor}</div>
-                    <div className="text-xs text-success/80">Complete sign-in with the OTP below</div>
+                    <div className="text-sm font-medium text-success">Joining {confirmedVendor}</div>
+                    <div className="text-xs text-success/80">Enter the OTP to create your account</div>
                   </div>
                 </div>
               )}
@@ -140,14 +144,16 @@ export default function DriverLogin() {
                   placeholder="••••••"
                   inputMode="numeric"
                 />
-                <div className="text-xs text-muted-foreground mt-1">Sent to {phone}.</div>
+                <div className="text-xs text-muted-foreground mt-1">Sent to +91 {phone}.</div>
               </div>
               <Button
                 className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
                 onClick={handleVerify}
                 disabled={busy || otp.length !== 6}
               >
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Verify &amp; sign in <ArrowRight className="h-4 w-4" /></>}
+                {busy
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <>{mode === "signup" ? "Verify & create account" : "Verify & sign in"} <ArrowRight className="h-4 w-4" /></>}
               </Button>
               <Button variant="ghost" className="w-full" onClick={() => { setStep("form"); setOtp(""); }}>
                 Back
@@ -158,14 +164,8 @@ export default function DriverLogin() {
             /* ── Sign in form ── */
             <>
               <div>
-                <Label>Phone number</Label>
-                <Input
-                  className="mt-1"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+91 XXXXX XXXXX"
-                  inputMode="tel"
-                />
+                <Label htmlFor="signin-phone">Phone number</Label>
+                <PhoneInput id="signin-phone" className="mt-1" value={phone} onChange={setPhone} onEnter={handleSignIn} />
               </div>
               <Button
                 className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
@@ -189,14 +189,8 @@ export default function DriverLogin() {
                 />
               </div>
               <div>
-                <Label>Phone number</Label>
-                <Input
-                  className="mt-1"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+91 XXXXX XXXXX"
-                  inputMode="tel"
-                />
+                <Label htmlFor="signup-phone">Phone number</Label>
+                <PhoneInput id="signup-phone" className="mt-1" value={phone} onChange={setPhone} />
               </div>
               <div>
                 <Label>Vendor Code</Label>
@@ -217,7 +211,7 @@ export default function DriverLogin() {
                 onClick={handleSignUp}
                 disabled={busy}
               >
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Create account &amp; send OTP <ArrowRight className="h-4 w-4" /></>}
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Send OTP <ArrowRight className="h-4 w-4" /></>}
               </Button>
             </>
           )}

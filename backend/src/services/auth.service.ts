@@ -13,6 +13,7 @@ import {
   ValidationError,
 } from '../types';
 import { logger } from '../lib/logger';
+import { findDriverByPhone } from '../lib/identity';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -154,7 +155,9 @@ async function issueTokenPair(
 export async function loginDriverWithOtp(
   phone: string,
 ): Promise<TokenPair & { driver: { id: string; fullName: string; vendorId: string; status: string } }> {
-  const driver = await prisma.driver.findUnique({ where: { phone } });
+  // Canonical phone; legacy rows in other formats still match (identity.ts).
+  // Removed (deleted) accounts are invisible here.
+  const driver = await findDriverByPhone(phone);
   if (!driver) {
     throw new NotFoundError('No account found for this number. Please register first.');
   }

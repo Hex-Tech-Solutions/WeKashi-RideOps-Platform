@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import { PhoneInput, toE164, isValidMobile, mobileDigits } from "@/components/PhoneInput";
 import {
   useDriverMe, useSetDriverVehicle, useSetRentalOptIn,
   useUpdateDriverProfile,
@@ -141,7 +142,7 @@ export default function DriverAccount() {
 export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>["data"] }) {
   const update = useUpdateDriverProfile();
   const [fullName,    setFullName]    = useState(me?.fullName ?? "");
-  const [altPhone,    setAltPhone]    = useState(me?.altPhone ?? "");
+  const [altPhone,    setAltPhone]    = useState(mobileDigits(me?.altPhone));
   const [dlNumber,    setDlNumber]    = useState(me?.dlNumber ?? "");
   const [dlExpiry,    setDlExpiry]    = useState(
     me?.dlExpiry ? new Date(me.dlExpiry).toISOString().split("T")[0] : ""
@@ -151,7 +152,7 @@ export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>[
   useEffect(() => {
     if (me) {
       setFullName(me.fullName ?? "");
-      setAltPhone(me.altPhone ?? "");
+      setAltPhone(mobileDigits(me.altPhone));
       setDlNumber(me.dlNumber ?? "");
       setDlExpiry(me.dlExpiry ? new Date(me.dlExpiry).toISOString().split("T")[0] : "");
       setGovIdNumber(me.govIdNumber ?? "");
@@ -159,13 +160,24 @@ export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>[
   }, [me]);
 
   const submit = () => {
+    if (altPhone && !isValidMobile(altPhone)) {
+      toast.error("Alternate phone must be a valid 10-digit mobile number");
+      return;
+    }
+    const aadhaarDigits = govIdNumber.replace(/\D/g, "");
+    const aadhaarMasked = /^X{4}\s?X{4}\s?\d{4}$/i.test(govIdNumber.trim());
+    if (govIdNumber.trim() && !aadhaarMasked && aadhaarDigits.length !== 12) {
+      toast.error("Aadhaar number must be 12 digits");
+      return;
+    }
     update.mutate(
       {
         fullName:    fullName.trim() || undefined,
-        altPhone:    altPhone.trim() || null,
+        altPhone:    altPhone ? toE164(altPhone) : null,
         dlNumber:    dlNumber.trim() || null,
         dlExpiry:    dlExpiry ? new Date(dlExpiry).toISOString() : null,
-        govIdNumber: govIdNumber.trim() || null,
+        // Masked value = unchanged; the server keeps the stored hash.
+        govIdNumber: govIdNumber.trim() ? (aadhaarMasked ? govIdNumber.trim() : aadhaarDigits) : null,
       },
       {
         onSuccess: () => toast.success("Profile updated"),
@@ -192,8 +204,8 @@ export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>[
             <Input value={me?.phone ?? ""} disabled className="h-9 bg-muted/50 text-muted-foreground" />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Alternate Phone</Label>
-            <Input value={altPhone} onChange={(e) => setAltPhone(e.target.value)} className="h-9" placeholder="+91 …" maxLength={15} />
+            <Label htmlFor="alt-phone" className="text-xs">Alternate Phone</Label>
+            <PhoneInput id="alt-phone" value={altPhone} onChange={setAltPhone} className="h-9" aria-label="Alternate mobile number" />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -207,8 +219,21 @@ export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>[
           </div>
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Gov ID Number (Aadhaar / PAN / Voter ID)</Label>
-          <Input value={govIdNumber} onChange={(e) => setGovIdNumber(e.target.value)} className="h-9 font-mono" placeholder="XXXX XXXX XXXX" maxLength={30} />
+          <Label htmlFor="aadhaar" className="text-xs">Aadhaar Number</Label>
+          <Input
+            id="aadhaar"
+            value={govIdNumber}
+            // Typing replaces the masked value with a fresh 12-digit number.
+            onChange={(e) => setGovIdNumber(e.target.value.replace(/[^\dX ]/gi, "").slice(0, 14))}
+            onFocus={() => { if (/^X{4}\s?X{4}/i.test(govIdNumber)) setGovIdNumber(""); }}
+            className="h-9 font-mono"
+            placeholder="12-digit Aadhaar"
+            inputMode="numeric"
+            maxLength={14}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Only the last 4 digits are kept on file for display.
+          </p>
         </div>
         <Button
           className="w-full bg-foreground text-background hover:bg-foreground/90"

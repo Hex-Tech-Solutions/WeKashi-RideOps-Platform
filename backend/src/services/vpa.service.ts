@@ -13,6 +13,7 @@
 
 import { prisma } from '../lib/prisma';
 import { ValidationError } from '../types';
+import { normalizeVpa, assertNoIdentityConflict } from '../lib/identity';
 
 export interface SavedVpa {
   upiVpa: string;
@@ -25,11 +26,13 @@ export interface SavedVpa {
  * (Req 13.2 / 13.4 — stored and displayed; 13.3 — a malformed id is rejected.)
  */
 export async function saveAndValidateVpa(driverId: string, vpaRaw: string): Promise<SavedVpa> {
-  const vpa = vpaRaw.trim();
+  const vpa = normalizeVpa(vpaRaw);
   // UPI VPA format: handle@psp (e.g. name@okaxis, 9876543210@ybl).
   if (!/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/.test(vpa)) {
     throw new ValidationError('Enter a valid UPI ID (e.g. name@bank)');
   }
+  // One UPI ID per driver account (zero-tolerance duplicates).
+  await assertNoIdentityConflict({ upiVpa: vpa }, driverId, 'upi');
 
   const existing = await prisma.driver.findUnique({
     where: { id: driverId },

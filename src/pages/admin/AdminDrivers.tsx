@@ -204,6 +204,7 @@ export default function AdminDrivers() {
         driverId={selectedDriverId}
         onClose={() => setSelectedDriverId(null)}
         canApprove={true}
+        deleteAs="admin"
       />
     </div>
   );

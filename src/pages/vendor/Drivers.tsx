@@ -225,6 +225,7 @@ export default function Drivers() {
         driverId={selectedDriverId}
         onClose={() => setSelectedDriverId(null)}
         canApprove={true}
+        deleteAs="vendor"
       />
     </div>
   );

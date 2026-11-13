@@ -1,5 +1,5 @@
 import { Outlet } from "react-router-dom";
-import { LayoutDashboard, MapPin, Users, Building2, Briefcase, Wallet, BarChart3, Shield, Settings, AlertTriangle, UserPlus } from "lucide-react";
+import { LayoutDashboard, MapPin, Users, Building2, Briefcase, Wallet, BarChart3, Shield, Settings, AlertTriangle, UserPlus, Copy } from "lucide-react";
 import { RoleLayout, NavItem } from "@/components/RoleLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { useRegistrationRequests } from "@/lib/queries";
@@ -20,6 +20,7 @@ export default function AdminLayout() {
     { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
     { to: "/admin/safety", label: "Safety & SOS", icon: Shield },
     { to: "/admin/issues", label: "Issues", icon: AlertTriangle },
+    { to: "/admin/duplicates", label: "Possible duplicates", icon: Copy },
     { to: "/admin/settings", label: "Settings", icon: Settings },
   ];
 

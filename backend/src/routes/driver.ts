@@ -14,6 +14,70 @@ import { addDriverDocument, listDriverDocuments, deleteDriverDocument, assertCan
 import fs from 'fs';
 import { upload, USE_AZURE_STORAGE, uploadToAzureBlob } from '../lib/storage';
 import { validateDocDetails, DOC_TYPE_RULES } from '../lib/documentTypes';
+import {
+  requireIndianMobile, normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar,
+  isMaskedAadhaar, hashAadhaar, assertNoIdentityConflict, flagPossibleDuplicate,
+  IDENTITY_CONFLICT_MESSAGE,
+} from '../lib/identity';
+import { ValidationError, ConflictError } from '../types';
+import { logger } from '../lib/logger';
+
+/**
+ * Identity rules for document numbers. Returns the number to store.
+ *  - Aadhaar: must match the Aadhaar on the driver's profile; stored MASKED.
+ *  - DL: must match the profile DL number.
+ *  - RC: the registration number must not belong to another driver/vehicle.
+ */
+async function checkDocumentIdentity(driverId: string, type: string, number?: string): Promise<string | undefined> {
+  if (!number) return number;
+  const { prisma } = await import('../lib/prisma');
+
+  if (type === 'aadhaar') {
+    const aadhaar = normalizeAadhaar(number);
+    if (!aadhaar) throw new ValidationError('Aadhaar number must be 12 digits');
+    const me = await prisma.driver.findUnique({ where: { id: driverId }, select: { govIdHash: true, govIdNumber: true } });
+    const legacyDigits = me?.govIdNumber?.replace(/\D/g, '') ?? '';
+    const matches = me?.govIdHash ? me.govIdHash === hashAadhaar(aadhaar) : legacyDigits === aadhaar;
+    if (!me?.govIdHash && legacyDigits.length !== 12) {
+      throw new ValidationError('Add your Aadhaar number in Profile first, then upload the card');
+    }
+    if (!matches) throw new ValidationError('This Aadhaar number does not match the one in your profile');
+    return maskAadhaar(aadhaar);
+  }
+
+  if (type === 'dl') {
+    const dl = normalizeDl(number);
+    const me = await prisma.driver.findUnique({ where: { id: driverId }, select: { dlNumber: true } });
+    if (!me?.dlNumber) throw new ValidationError('Add your driving licence number in Profile first, then upload the licence');
+    if (normalizeDl(me.dlNumber) !== dl) {
+      throw new ValidationError('This licence number does not match the one in your profile');
+    }
+    return dl;
+  }
+
+  if (type === 'rc') {
+    const reg = normalizeDl(number); // same rule: uppercase letters + digits
+    const taken = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT d.id FROM driver_documents doc
+      JOIN drivers d ON d.id = doc.driver_id
+      WHERE doc.type = 'rc' AND d.id <> ${driverId} AND d.status <> 'removed'
+        AND upper(regexp_replace(coalesce(doc.number, ''), '[^A-Za-z0-9]', '', 'g')) = ${reg}
+      UNION
+      SELECT d.id FROM vehicles v
+      JOIN drivers d ON d.vehicle_id = v.id
+      WHERE d.id <> ${driverId} AND d.status <> 'removed'
+        AND upper(regexp_replace(v.reg_no, '[^A-Za-z0-9]', '', 'g')) = ${reg}
+      LIMIT 1
+    `;
+    if (taken.length > 0) {
+      logger.warn({ context: 'rc-upload', existingDriverId: taken[0].id, editingDriverId: driverId }, 'Duplicate identity blocked');
+      throw new ConflictError(IDENTITY_CONFLICT_MESSAGE);
+    }
+    return reg;
+  }
+
+  return number;
+}
 
 // Helper: after multer processes a file, get its final URL (local path or Azure Blob)
 async function resolveFileUrl(file: Express.Multer.File): Promise<string> {
@@ -78,6 +142,20 @@ router.post('/push-token', async (req: AuthRequest, res: Response, next: NextFun
     // A token is unique per device install. Clear it from any OTHER driver first
     // (shared device / account switch) so a broadcast never pushes to the wrong
     // person, then assign it to the current driver.
+    // Same device on another account = possible duplicate person. Flag it for
+    // admins (never block — families share phones), then move the token.
+    const others = await prisma.driver.findMany({
+      where: { fcmToken: token, NOT: { id: req.driver!.id }, status: { not: 'removed' } },
+      select: { id: true },
+    });
+    for (const o of others) {
+      await flagPossibleDuplicate({
+        kind: 'shared_device',
+        driverId: req.driver!.id,
+        otherDriverId: o.id,
+        detail: 'Same device signed into both accounts',
+      });
+    }
     await prisma.driver.updateMany({
       where: { fcmToken: token, NOT: { id: req.driver!.id } },
       data: { fcmToken: null },
@@ -203,15 +281,56 @@ router.patch('/profile', async (req: AuthRequest, res: Response, next: NextFunct
     });
     const body = ProfileSchema.parse(req.body);
     const { prisma } = await import('../lib/prisma');
+    const driverId = req.driver!.id;
+    const me = await prisma.driver.findUnique({ where: { id: driverId }, select: { phone: true } });
+
+    // Normalise every identity field and reject anything already in use.
+    const data: Record<string, unknown> = {};
+    const keys: Record<string, string | null> = {};
+
+    if (body.fullName !== undefined) data.fullName = body.fullName.trim();
+
+    if (body.altPhone !== undefined) {
+      if (!body.altPhone || !body.altPhone.trim()) {
+        data.altPhone = null;
+      } else {
+        const alt = requireIndianMobile(body.altPhone, 'Alternate phone');
+        if (me && normalizeIndianMobile(me.phone) === alt) {
+          throw new ValidationError('Alternate phone must be different from your main phone');
+        }
+        data.altPhone = alt;
+        keys.altPhone = alt;
+      }
+    }
+
+    if (body.dlNumber !== undefined) {
+      const dl = body.dlNumber ? normalizeDl(body.dlNumber) : '';
+      if (dl && (dl.length < 6 || dl.length > 20)) throw new ValidationError('Enter a valid driving licence number');
+      data.dlNumber = dl || null;
+      if (dl) keys.dlNumber = dl;
+    }
+    if (body.dlExpiry !== undefined) data.dlExpiry = body.dlExpiry ? new Date(body.dlExpiry) : null;
+
+    // Aadhaar: never stored in full — keyed hash for matching + masked display.
+    // The app sends the masked value back unchanged, which means "no change".
+    if (body.govIdNumber !== undefined && !(body.govIdNumber && isMaskedAadhaar(body.govIdNumber))) {
+      if (!body.govIdNumber || !body.govIdNumber.trim()) {
+        data.govIdNumber = null;
+        data.govIdHash = null;
+      } else {
+        const aadhaar = normalizeAadhaar(body.govIdNumber);
+        if (!aadhaar) throw new ValidationError('Aadhaar number must be 12 digits');
+        data.govIdNumber = maskAadhaar(aadhaar);
+        data.govIdHash = hashAadhaar(aadhaar);
+        keys.aadhaar = aadhaar;
+      }
+    }
+
+    await assertNoIdentityConflict(keys, driverId, 'profile');
+
     const d = await prisma.driver.update({
-      where: { id: req.driver!.id },
-      data: {
-        ...(body.fullName    !== undefined && { fullName: body.fullName }),
-        ...(body.altPhone    !== undefined && { altPhone: body.altPhone }),
-        ...(body.dlNumber    !== undefined && { dlNumber: body.dlNumber }),
-        ...(body.dlExpiry    !== undefined && { dlExpiry: body.dlExpiry ? new Date(body.dlExpiry) : null }),
-        ...(body.govIdNumber !== undefined && { govIdNumber: body.govIdNumber }),
-      },
+      where: { id: driverId },
+      data,
       select: { id: true, fullName: true, phone: true, altPhone: true, dlNumber: true, dlExpiry: true, govIdNumber: true },
     });
     res.json(d);
@@ -249,10 +368,14 @@ router.post('/documents', upload.single('file'), async (req: AuthRequest, res: R
       res.status(400).json({ error: detailError, code: 'VALIDATION_ERROR' });
       return;
     }
-    // A verified document is locked until it nears expiry or the vendor
-    // rejects it. Check before storing the file anywhere permanent.
+    // Checks before storing the file anywhere permanent:
+    //  - a verified document is locked until it nears expiry or is rejected;
+    //  - the document number must match the driver's own profile and not
+    //    belong to anyone else (zero-tolerance duplicates).
+    let storedNumber = number?.trim() || undefined;
     try {
       await assertCanUploadDocument(req.driver!.id, type);
+      storedNumber = await checkDocumentIdentity(req.driver!.id, type, storedNumber);
     } catch (e) {
       // Local disk mode has already written the file — remove it.
       if (!USE_AZURE_STORAGE && req.file.path) fs.promises.unlink(req.file.path).catch(() => undefined);
@@ -262,7 +385,7 @@ router.post('/documents', upload.single('file'), async (req: AuthRequest, res: R
     const doc = await addDriverDocument(req.driver!.id, {
       type,
       fileUrl: await resolveFileUrl(req.file),
-      number: number?.trim() || undefined,
+      number: storedNumber,
       // Only store an expiry for types that have one.
       expiry: rule.needsExpiry && expiry ? new Date(expiry) : undefined,
     });

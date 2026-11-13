@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { NotFoundError, ForbiddenError, NearbyDriver } from '../types';
+import { NotFoundError, ForbiddenError, ValidationError, NearbyDriver } from '../types';
 import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
 import { getDriverActiveRide } from '../lib/activeRideCache';
@@ -45,9 +45,10 @@ export async function listDrivers(filters: {
   const limit = filters.limit ?? 20;
   const skip = (page - 1) * limit;
 
-  const where: Record<string, unknown> = {};
+  // Deleted (removed) accounts are history only — never listed.
+  const where: Record<string, unknown> = { status: { not: 'removed' } };
   if (filters.vendorId) where.vendorId = filters.vendorId;
-  if (filters.status) where.status = filters.status;
+  if (filters.status && filters.status !== 'removed') where.status = filters.status;
 
   const [drivers, total] = await Promise.all([
     prisma.driver.findMany({
@@ -95,7 +96,8 @@ export async function updateDriverStatus(
   requestorVendorId?: string,
 ) {
   const driver = await prisma.driver.findUnique({ where: { id } });
-  if (!driver) throw new NotFoundError('Driver not found');
+  // A deleted account can't be brought back — the person signs up again.
+  if (!driver || driver.status === 'removed') throw new NotFoundError('Driver not found');
 
   if (requestorVendorId && driver.vendorId !== requestorVendorId) {
     throw new ForbiddenError('You can only update drivers belonging to your vendor');
@@ -123,6 +125,69 @@ export async function updateDriverStatus(
   }
 
   return updated;
+}
+
+/**
+ * Delete (soft-remove) a driver account — the vendor's way to let a driver
+ * move to another vendor.
+ *
+ * History (rides, payments, documents, credits) is kept. The phone is renamed
+ * so the number — and every other identity key, which the duplicate checks
+ * ignore on removed accounts — is free for a new sign-up.
+ *
+ * Rules:
+ *  - A vendor can only delete their own drivers.
+ *  - A BLACKLISTED driver can only be deleted by an admin, so deleting can't
+ *    be used to wipe a blacklist.
+ *  - Not allowed while the driver has any assigned / in-progress ride
+ *    (including claimed scheduled rides) or rental.
+ */
+export async function removeDriver(
+  driverId: string,
+  actor: { role: 'vendor' | 'admin'; vendorId?: string },
+): Promise<void> {
+  const driver = await prisma.driver.findUnique({ where: { id: driverId } });
+  if (!driver || driver.status === 'removed') throw new NotFoundError('Driver not found');
+  if (actor.role === 'vendor' && driver.vendorId !== actor.vendorId) {
+    throw new ForbiddenError('You can only delete drivers belonging to your vendor');
+  }
+  if (driver.status === 'blacklisted' && actor.role !== 'admin') {
+    throw new ForbiddenError('A blacklisted driver can only be deleted by an admin');
+  }
+
+  const [rides, rentals] = await Promise.all([
+    prisma.ride.count({ where: { driverId, status: { in: ['assigned', 'in_progress'] } } }),
+    prisma.rental.count({ where: { driverId, status: { in: ['assigned', 'in_progress'] } } }),
+  ]);
+  if (rides + rentals > 0) {
+    throw new ValidationError(
+      'This driver has rides or rentals assigned. They must finish or release them before the account can be deleted.',
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.driver.update({
+      where: { id: driverId },
+      data: {
+        status: 'removed',
+        removedAt: new Date(),
+        // Keep the original number inside the renamed value for the record.
+        phone: `removed:${driverId.slice(0, 8)}:${driver.phone}`,
+        isOnline: false,
+        locationUpdatedAt: null,
+        fcmToken: null,
+      },
+    });
+    // Withdraw any open ride offers.
+    await tx.$executeRaw`
+      UPDATE ride_offers SET response = 'expired'
+      WHERE driver_id = ${driverId} AND response = 'pending'
+    `;
+  });
+
+  const { revokeDriverAccess } = await import('./sessionRevocation');
+  await revokeDriverAccess(driverId);
+  logger.info({ driverId, by: actor.role }, 'Driver account removed');
 }
 
 export async function updateDriverLocation(

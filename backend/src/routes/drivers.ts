@@ -8,12 +8,14 @@ import {
   updateDriverStatus,
   updateDriverLocation,
   listLiveDriverLocations,
+  removeDriver,
 } from '../services/driver.service';
 import { listDocumentsForVendor, setDocumentStatus, countPendingDocsForVendor } from '../services/document.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
-import { ForbiddenError } from '../types';
+import { ForbiddenError, ConflictError } from '../types';
 import type { AuthRequest } from '../types';
+import { requireIndianMobile, assertNoIdentityConflict, IDENTITY_CONFLICT_MESSAGE } from '../lib/identity';
 import type { Server as IoServer } from 'socket.io';
 
 // Resolve the caller's vendor id for ownership scoping.
@@ -121,7 +123,15 @@ export function createDriversRouter(io: IoServer): Router {
         }
 
         const body = CreateDriverSchema.parse(req.body);
-        const driver = await createDriver({ ...body, vendorId: vendor.id });
+        const phone = requireIndianMobile(body.phone);
+        await assertNoIdentityConflict({ phone }, undefined, 'vendor-add-driver');
+        let driver;
+        try {
+          driver = await createDriver({ ...body, phone, vendorId: vendor.id });
+        } catch (e: any) {
+          if (e?.code === 'P2002') throw new ConflictError(IDENTITY_CONFLICT_MESSAGE);
+          throw e;
+        }
         res.status(201).json(driver);
       } catch (err) {
         next(err);
@@ -172,6 +182,23 @@ export function createDriversRouter(io: IoServer): Router {
 
         const driver = await updateDriverStatus(req.params.id, status, vendorId);
         res.json(driver);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // DELETE /drivers/:id — vendor (own driver) or admin. Soft delete that keeps
+  // history and frees the driver's details for a fresh sign-up elsewhere.
+  router.delete(
+    '/:id',
+    requireRole('vendor', 'admin'),
+    async (req: AuthRequest, res: Response, next: NextFunction) => {
+      try {
+        const role = req.user!.role === 'admin' ? 'admin' : 'vendor';
+        const vendorId = await vendorIdFor(req);
+        await removeDriver(req.params.id, { role, vendorId });
+        res.status(204).send();
       } catch (err) {
         next(err);
       }

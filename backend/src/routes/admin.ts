@@ -46,6 +46,43 @@ const VendorSchema = z.object({
   password: z.string().min(8).max(100),
 });
 
+// ─── Possible duplicate accounts (soft flags, never block) ──────────────────
+
+// GET /admin/identity-flags?status=open|all
+router.get('/identity-flags', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { prisma } = await import('../lib/prisma');
+    const openOnly = req.query.status !== 'all';
+    const flags = await prisma.identityFlag.findMany({
+      where: openOnly ? { resolvedAt: null } : {},
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const ids = [...new Set(flags.flatMap((f) => [f.driverId, f.otherDriverId]))];
+    const drivers = await prisma.driver.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, fullName: true, phone: true, status: true, vendor: { select: { name: true } } },
+    });
+    const byId = new Map(drivers.map((d) => [d.id, d]));
+    res.json({
+      flags: flags.map((f) => ({ ...f, driver: byId.get(f.driverId) ?? null, otherDriver: byId.get(f.otherDriverId) ?? null })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /admin/identity-flags/:id/resolve — mark a flag as reviewed
+router.post('/identity-flags/:id/resolve', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { prisma } = await import('../lib/prisma');
+    await prisma.identityFlag.update({ where: { id: req.params.id }, data: { resolvedAt: new Date() } });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── Tenants (company + supervisor) ─────────────────────────────────────────
 
 router.get('/tenants', async (_req: AuthRequest, res: Response, next: NextFunction) => {

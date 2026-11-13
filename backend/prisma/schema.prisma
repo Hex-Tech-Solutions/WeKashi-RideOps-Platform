@@ -64,8 +64,14 @@ model Driver {
   // ── Additional personal / licence details ─────────────────────────────────
   dlNumber        String?      @map("dl_number")
   dlExpiry        DateTime?    @map("dl_expiry")
+  /// Display only. For new entries this holds the MASKED Aadhaar
+  /// ("XXXX XXXX 1234"); the full number is never stored.
   govIdNumber     String?      @map("gov_id_number")
+  /// Keyed one-way hash of the Aadhaar (lib/identity.ts) — duplicate matching.
+  govIdHash       String?      @map("gov_id_hash")
   altPhone        String?      @map("alt_phone")
+  /// Set when the vendor/admin deletes the account (status 'removed').
+  removedAt       DateTime?    @map("removed_at")
   // ── Push notifications (FCM) ──────────────────────────────────────────────
   /// Firebase Cloud Messaging registration token for this driver's device.
   /// Set via POST /api/driver/push-token on login; cleared on logout or when
@@ -255,6 +261,23 @@ model IssueMessage {
 
   @@index([issueId])
   @@map("issue_messages")
+}
+
+/// Soft "possible duplicate account" signals for admins (never block anyone).
+/// e.g. kind 'shared_device': the same phone/app install signed into two
+/// different driver accounts.
+model IdentityFlag {
+  id            String    @id @default(uuid())
+  kind          String
+  driverId      String    @map("driver_id")
+  otherDriverId String    @map("other_driver_id")
+  detail        String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  resolvedAt    DateTime? @map("resolved_at")
+
+  @@index([resolvedAt])
+  @@index([driverId])
+  @@map("identity_flags")
 }
 
 model DriverOtp {
@@ -607,6 +630,10 @@ enum DriverStatus {
   active
   blacklisted
   expired
+  /// Deleted by the vendor (or admin). History is kept; the phone is renamed
+  /// and the account's identity keys are released so the person can sign up
+  /// again (e.g. under a new vendor).
+  removed
 }
 
 enum KycStatus {

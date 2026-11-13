@@ -1314,7 +1314,7 @@ export interface DriverRow {
   phone: string;
   altPhone?: string | null;
   vendorId: string;
-  status: "pending" | "active" | "blacklisted" | "expired";
+  status: "pending" | "active" | "blacklisted" | "expired" | "removed";
   kycStatus: "pending" | "approved" | "rejected" | "expired";
   isOnline: boolean;
   rating: number;
@@ -1379,6 +1379,51 @@ export function useCreateDriver() {
     mutationFn: (payload: { phone: string; fullName: string; vehicleId?: string }) =>
       api<DriverRow>("/drivers", { method: "POST", body: JSON.stringify(payload) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["drivers"] }),
+  });
+}
+
+// ─── Admin: possible duplicate accounts ─────────────────────────────────────
+
+type FlagDriver = { id: string; fullName: string; phone: string; status: string; vendor?: { name: string } | null } | null;
+
+export interface IdentityFlagRow {
+  id: string;
+  kind: string;
+  detail: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  driver: FlagDriver;
+  otherDriver: FlagDriver;
+}
+
+export function useIdentityFlags() {
+  return useQuery({
+    queryKey: ["identityFlags"],
+    queryFn: () => api<{ flags: IdentityFlagRow[] }>("/admin/identity-flags"),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useResolveIdentityFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api(`/admin/identity-flags/${id}/resolve`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["identityFlags"] }),
+  });
+}
+
+/**
+ * Vendor/admin deletes a driver account (soft delete: history kept, details
+ * freed so the person can sign up again, e.g. under another vendor).
+ */
+export function useRemoveDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (driverId: string) => api(`/drivers/${driverId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["drivers"] });
+      qc.invalidateQueries({ queryKey: ["pendingDocsCount"] });
+    },
   });
 }
 

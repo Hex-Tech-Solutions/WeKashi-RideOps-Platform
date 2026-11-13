@@ -12,6 +12,12 @@ import {
 } from '../services/admin.service';
 import { checkOtpRateLimit, generateOtp, storeOtp, verifyOtp } from '../lib/otp';
 import { smsSender } from '../lib/sms';
+import { prisma } from '../lib/prisma';
+import { redis } from '../lib/redis';
+import {
+  requireIndianMobile, findDriverByPhone, assertNoIdentityConflict, IDENTITY_CONFLICT_MESSAGE,
+} from '../lib/identity';
+import { ConflictError } from '../types';
 import { authenticate } from '../middleware/authenticate';
 import { authRateLimiter, refreshRateLimiter, otpRateLimiter } from '../middleware/rateLimiter';
 import type { AuthRequest } from '../types';
@@ -117,13 +123,27 @@ router.post(
   },
 );
 
-// POST /auth/driver/request-otp
+// POST /auth/driver/request-otp — SIGN IN. An OTP is sent only when an account
+// exists for the number and isn't suspended; no SMS is spent otherwise.
 router.post(
   '/auth/driver/request-otp',
   authRateLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { phone } = RequestOtpSchema.parse(req.body);
+      const phone = requireIndianMobile(RequestOtpSchema.parse(req.body).phone);
+
+      const driver = await findDriverByPhone(phone);
+      if (!driver) {
+        res.status(404).json({
+          error: 'No account found for this number. Ask your vendor to add you, or register as a new driver.',
+          code: 'NO_ACCOUNT',
+        });
+        return;
+      }
+      if (driver.status === 'blacklisted' || driver.status === 'expired') {
+        res.status(403).json({ error: 'This account is suspended. Contact your vendor.', code: 'ACCOUNT_SUSPENDED' });
+        return;
+      }
 
       await checkOtpRateLimit(phone);
       const otp = generateOtp();
@@ -136,54 +156,100 @@ router.post(
   },
 );
 
-// POST /auth/driver/register — driver self-registers using vendor code
+// ─── Driver self-registration (OTP first) ────────────────────────────────────
+// 1) /register/request-otp validates the details, checks for duplicates and
+//    texts an OTP. Nothing is created yet — the details wait in Redis.
+// 2) /register/verify checks the OTP, re-checks duplicates, then creates the
+//    account and signs the driver in. A number can't be claimed without
+//    proving the person holds that phone.
 const DriverRegisterSchema = z.object({
   phone: z.string().min(10).max(15),
-  fullName: z.string().min(2).max(100),
+  fullName: z.string().trim().min(2).max(100),
   vendorCode: z.string().min(1).max(20),
 });
+const PENDING_SIGNUP_TTL = 15 * 60; // seconds — longer than the OTP's 10 min
+const pendingSignupKey = (phone: string) => `signup:pending:${phone}`;
 
 router.post(
-  '/auth/driver/register',
+  '/auth/driver/register/request-otp',
   authRateLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { phone, fullName, vendorCode } = DriverRegisterSchema.parse(req.body);
-      const vendor = await (await import('../lib/prisma')).prisma.vendor.findUnique({
-        where: { vendorCode: vendorCode.toUpperCase() },
+      const body = DriverRegisterSchema.parse(req.body);
+      const phone = requireIndianMobile(body.phone);
+      const vendor = await prisma.vendor.findUnique({
+        where: { vendorCode: body.vendorCode.toUpperCase().trim() },
         select: { id: true, name: true },
       });
       if (!vendor) {
         res.status(400).json({ error: 'Invalid vendor code. Check with your fleet manager.', code: 'INVALID_VENDOR_CODE' });
         return;
       }
-      const existing = await (await import('../lib/prisma')).prisma.driver.findUnique({ where: { phone } });
-      if (existing) {
-        res.status(409).json({ error: 'A driver account with this phone number already exists. Please sign in instead.', code: 'DRIVER_EXISTS' });
-        return;
-      }
-      await (await import('../lib/prisma')).prisma.driver.create({
-        data: { phone, fullName, vendorId: vendor.id, status: 'pending', kycStatus: 'pending' },
-      });
-      // Send OTP to verify phone
+      await assertNoIdentityConflict({ phone }, undefined, 'self-register');
+
       await checkOtpRateLimit(phone);
+      await redis.set(
+        pendingSignupKey(phone),
+        JSON.stringify({ fullName: body.fullName, vendorId: vendor.id }),
+        'EX',
+        PENDING_SIGNUP_TTL,
+      );
       const otp = generateOtp();
       await storeOtp(phone, otp);
       await smsSender.sendLoginOtp(phone, otp);
-      res.status(201).json({ message: 'Account created. OTP sent to your phone.', vendorName: vendor.name });
+      res.json({ message: 'OTP sent. Enter it to create your account.', vendorName: vendor.name });
     } catch (err) {
       next(err);
     }
   },
 );
 
-// POST /auth/driver/verify-otp
+router.post(
+  '/auth/driver/register/verify',
+  authRateLimiter,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { otp, phone: rawPhone } = VerifyOtpSchema.parse(req.body);
+      const phone = requireIndianMobile(rawPhone);
+
+      const pendingRaw = await redis.get(pendingSignupKey(phone));
+      if (!pendingRaw) {
+        res.status(410).json({ error: 'Sign-up timed out. Please start again.', code: 'SIGNUP_EXPIRED' });
+        return;
+      }
+      if (!(await verifyOtp(phone, otp))) {
+        res.status(401).json({ error: 'Invalid or expired OTP', code: 'INVALID_OTP' });
+        return;
+      }
+      const pending = JSON.parse(pendingRaw) as { fullName: string; vendorId: string };
+
+      // Re-check: someone may have taken the number in the meantime.
+      await assertNoIdentityConflict({ phone }, undefined, 'self-register');
+      try {
+        await prisma.driver.create({
+          data: { phone, fullName: pending.fullName, vendorId: pending.vendorId, status: 'pending', kycStatus: 'pending' },
+        });
+      } catch (e: any) {
+        if (e?.code === 'P2002') throw new ConflictError(IDENTITY_CONFLICT_MESSAGE);
+        throw e;
+      }
+      await redis.del(pendingSignupKey(phone));
+
+      res.status(201).json(await loginDriverWithOtp(phone));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /auth/driver/verify-otp — SIGN IN with the OTP.
 router.post(
   '/auth/driver/verify-otp',
   authRateLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { phone, otp } = VerifyOtpSchema.parse(req.body);
+      const { otp, phone: rawPhone } = VerifyOtpSchema.parse(req.body);
+      const phone = requireIndianMobile(rawPhone);
       const valid = await verifyOtp(phone, otp);
       if (!valid) {
         res.status(401).json({ error: 'Invalid or expired OTP', code: 'INVALID_OTP' });
