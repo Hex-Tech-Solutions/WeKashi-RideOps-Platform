@@ -10,7 +10,8 @@ import {
   updateDriverLocation,
   setDriverOnlineStatus,
 } from '../services/driver.service';
-import { addDriverDocument, listDriverDocuments, deleteDriverDocument } from '../services/document.service';
+import { addDriverDocument, listDriverDocuments, deleteDriverDocument, assertCanUploadDocument } from '../services/document.service';
+import fs from 'fs';
 import { upload, USE_AZURE_STORAGE, uploadToAzureBlob } from '../lib/storage';
 import { validateDocDetails, DOC_TYPE_RULES } from '../lib/documentTypes';
 
@@ -247,6 +248,15 @@ router.post('/documents', upload.single('file'), async (req: AuthRequest, res: R
     if (detailError) {
       res.status(400).json({ error: detailError, code: 'VALIDATION_ERROR' });
       return;
+    }
+    // A verified document is locked until it nears expiry or the vendor
+    // rejects it. Check before storing the file anywhere permanent.
+    try {
+      await assertCanUploadDocument(req.driver!.id, type);
+    } catch (e) {
+      // Local disk mode has already written the file — remove it.
+      if (!USE_AZURE_STORAGE && req.file.path) fs.promises.unlink(req.file.path).catch(() => undefined);
+      throw e;
     }
     const rule = DOC_TYPE_RULES[type];
     const doc = await addDriverDocument(req.driver!.id, {

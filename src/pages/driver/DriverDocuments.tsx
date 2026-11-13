@@ -11,11 +11,13 @@ import {
   type DocumentRow,
 } from "@/lib/queries";
 import { DocumentViewer } from "@/components/DocumentViewer";
+import { format, subDays } from "date-fns";
 import {
   FileText,
   Upload,
   Trash2,
   Eye,
+  Lock,
   Loader2,
   CheckCircle2,
   XCircle,
@@ -23,6 +25,9 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+
+// Must match RENEWAL_WINDOW_DAYS in backend/src/lib/documentTypes.ts.
+const RENEWAL_WINDOW_DAYS = 30;
 
 const REQUIRED = [
   { type: "aadhaar",              label: "Aadhaar Card",             wantsNumber: true },
@@ -177,6 +182,18 @@ function DocCard({
   const needsDetails = !!(req.wantsNumber || req.wantsExpiry);
   const showDetailInputs = needsDetails && (!existing || replacing);
 
+  // Same rule as the server (backend/src/lib/documentTypes.ts):
+  //   pending  -> replace or delete (not reviewed yet)
+  //   rejected -> re-upload (the vendor asked for a new one), no delete
+  //   verified -> locked; replace only within RENEWAL_WINDOW_DAYS of expiry
+  const status = existing?.status;
+  const renewalDue =
+    !!existing?.expiry &&
+    new Date(existing.expiry).getTime() - Date.now() <= RENEWAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const canReplace = !existing || status !== "verified" || renewalDue;
+  const canDelete = status === "pending";
+  const locked = status === "verified" && !renewalDue;
+
   const detailInputs = (
     <div className="grid grid-cols-2 gap-2">
       {req.wantsNumber && (
@@ -259,31 +276,52 @@ function DocCard({
             <Button variant="outline" size="sm" className="flex-1" onClick={() => setViewing(true)}>
               <Eye className="h-3.5 w-3.5" /> View
             </Button>
-            <Button
-              variant={docExpired || existing.status === "rejected" ? "default" : "outline"}
-              size="sm"
-              className={`flex-1 ${docExpired || existing.status === "rejected" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}`}
-              onClick={() => (needsDetails && !replacing ? setReplacing(true) : pickFile())}
-              disabled={upload.isPending}
-            >
-              {upload.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-              {replacing ? "Choose file" : docExpired || existing.status === "rejected" ? "Re-upload" : "Replace"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground hover:text-destructive"
-              disabled={del.isPending}
-              onClick={() =>
-                del.mutate(existing.id, {
-                  onSuccess: () => toast.success("Removed"),
-                  onError: (e: any) => toast.error(e?.message ?? "Failed"),
-                })
-              }
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            {canReplace && (
+              <Button
+                variant={docExpired || renewalDue || status === "rejected" ? "default" : "outline"}
+                size="sm"
+                className={`flex-1 ${docExpired || renewalDue || status === "rejected" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}`}
+                onClick={() => (needsDetails && !replacing ? setReplacing(true) : pickFile())}
+                disabled={upload.isPending}
+              >
+                {upload.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                {replacing
+                  ? "Choose file"
+                  : status === "verified" ? "Renew"
+                  : status === "rejected" ? "Re-upload"
+                  : "Replace"}
+              </Button>
+            )}
+            {canDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={`Withdraw ${req.label}`}
+                disabled={del.isPending}
+                onClick={() =>
+                  del.mutate(existing.id, {
+                    onSuccess: () => toast.success("Removed"),
+                    onError: (e: any) => toast.error(e?.message ?? "Failed"),
+                  })
+                }
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
+          {locked && (
+            <p className="text-xs text-muted-foreground flex items-start gap-1">
+              <Lock className="h-3 w-3 mt-0.5 shrink-0" />
+              Verified and locked.
+              {existing.expiry
+                ? ` You can renew it from ${format(subDays(new Date(existing.expiry), RENEWAL_WINDOW_DAYS), "dd MMM yyyy")}.`
+                : " Contact your vendor if it needs to change."}
+            </p>
+          )}
+          {renewalDue && status === "verified" && !docExpired && (
+            <p className="text-xs text-destructive">Expiring soon — upload the renewed document.</p>
+          )}
           {replacing && (
             <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setReplacing(false)}>
               Cancel

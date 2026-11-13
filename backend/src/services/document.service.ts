@@ -3,6 +3,21 @@ import path from 'path';
 import { prisma } from '../lib/prisma';
 import { UPLOAD_DIR } from '../lib/storage';
 import { NotFoundError, ForbiddenError, ValidationError } from '../types';
+import { DOC_TYPE_RULES, replaceBlockedReason } from '../lib/documentTypes';
+
+/**
+ * Check, before the file is stored, that the driver may upload a new version
+ * of this type. Throws a ValidationError explaining why not.
+ */
+export async function assertCanUploadDocument(driverId: string, type: string): Promise<void> {
+  const latest = await prisma.driverDocument.findFirst({
+    where: { driverId, type },
+    orderBy: { createdAt: 'desc' },
+    select: { status: true, expiry: true },
+  });
+  const reason = replaceBlockedReason(latest, DOC_TYPE_RULES[type]?.label ?? 'document');
+  if (reason) throw new ValidationError(reason);
+}
 
 export async function addDriverDocument(
   driverId: string,
@@ -26,6 +41,11 @@ export async function listDriverDocuments(driverId: string) {
 export async function deleteDriverDocument(id: string, driverId: string) {
   const doc = await prisma.driverDocument.findUnique({ where: { id } });
   if (!doc || doc.driverId !== driverId) throw new NotFoundError('Document not found');
+  // Only an upload the vendor hasn't reviewed yet can be withdrawn. Verified and
+  // rejected documents are kept so the vendor always has the record.
+  if (doc.status !== 'pending') {
+    throw new ValidationError('Reviewed documents cannot be deleted.');
+  }
   await prisma.driverDocument.delete({ where: { id } });
   // Best-effort file cleanup (local dev only)
   const filename = path.basename(doc.fileUrl);

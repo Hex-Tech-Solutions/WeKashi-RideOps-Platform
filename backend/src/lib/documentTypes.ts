@@ -23,6 +23,33 @@ export const DOC_TYPE_RULES: Record<string, DocTypeRule> = {
   photo:               { label: 'Profile Photo',       needsNumber: false, needsExpiry: false },
 };
 
+/**
+ * A verified document is locked. The driver may only upload a replacement when
+ * it expires within this many days (or has expired). The vendor can also ask
+ * for a new one by rejecting it.
+ */
+export const RENEWAL_WINDOW_DAYS = 30;
+
+/** Is this verified document due for renewal (expired or expiring soon)? */
+export function isInRenewalWindow(expiry: Date | null | undefined, now = new Date()): boolean {
+  if (!expiry) return false;
+  return expiry.getTime() - now.getTime() <= RENEWAL_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * Why a driver can't upload a new version of this type right now, or null if
+ * they can. Based on their latest upload of the type.
+ */
+export function replaceBlockedReason(
+  latest: { status: string; expiry: Date | null } | null,
+  label: string,
+): string | null {
+  if (!latest) return null;                       // first upload
+  if (latest.status !== 'verified') return null;  // pending or rejected
+  if (isInRenewalWindow(latest.expiry)) return null;
+  return `Your ${label} is verified and locked. You can upload a new one when it is within ${RENEWAL_WINDOW_DAYS} days of expiry, or if your vendor asks for it.`;
+}
+
 /** Every type a driver must have verified for KYC to be approved. */
 export const REQUIRED_DOC_TYPES = Object.keys(DOC_TYPE_RULES);
 
