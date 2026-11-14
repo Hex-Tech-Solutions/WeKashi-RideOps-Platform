@@ -2,38 +2,50 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { driverRequestOtp, driverRegisterRequestOtp, ApiError } from "@/lib/api";
+import { driverRequestOtp, driverRegister, ApiError } from "@/lib/api";
 import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import { useDriverAuth } from "./useDriverAuth";
 import { toast } from "sonner";
-import { Loader2, Car, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Loader2, Car, ArrowRight, CheckCircle2, Clock } from "lucide-react";
 
 type Mode = "signin" | "signup";
-type Step = "form" | "otp";
+type Step = "form" | "otp" | "requested";
 
+/** Same rule as the server (backend/src/lib/identity.ts). */
+const normalizeRegNo = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+const isValidRegNo = (s: string) =>
+  /^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{4}$/.test(s) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(s);
+
+/**
+ * Driver sign-in / sign-up.
+ *  - Sign in: phone -> OTP (only sent for an approved account).
+ *  - New driver: name, phone, vehicle number, vendor code -> a sign-up REQUEST
+ *    for the vendor to approve. No OTP is sent at sign-up; the driver signs in
+ *    once the vendor approves.
+ */
 export default function DriverLogin() {
-  const { login, completeSignup } = useDriverAuth();
+  const { login } = useDriverAuth();
   const [mode, setMode]   = useState<Mode>("signin");
   const [step, setStep]   = useState<Step>("form");
   const [busy, setBusy]   = useState(false);
 
-  // Shared — the 10 mobile digits only; "+91" is fixed in the input.
+  // The 10 mobile digits only; "+91" is fixed in the input.
   const [phone, setPhone] = useState("");
   const [otp, setOtp]     = useState("");
 
   // Sign-up only
-  const [fullName, setFullName]       = useState("");
-  const [vendorCode, setVendorCode]   = useState("");
-  const [confirmedVendor, setConfirmedVendor] = useState<string | null>(null);
+  const [fullName, setFullName]     = useState("");
+  const [vehicleNo, setVehicleNo]   = useState("");
+  const [vendorCode, setVendorCode] = useState("");
+  const [requestedVendor, setRequestedVendor] = useState<string | null>(null);
 
   const switchMode = (m: Mode) => {
     setMode(m);
     setStep("form");
     setOtp("");
-    setConfirmedVendor(null);
   };
 
-  // ── Sign in: send OTP (only if an account exists for the number) ─────────
+  // ── Sign in: send OTP ───────────────────────────────────────────────────
   const handleSignIn = async () => {
     if (!isValidMobile(phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
     setBusy(true);
@@ -46,10 +58,22 @@ export default function DriverLogin() {
     } finally { setBusy(false); }
   };
 
-  // ── Sign up: check details + send OTP (account created after OTP) ────────
+  const handleVerify = async () => {
+    setBusy(true);
+    try {
+      await login(toE164(phone), otp);
+      toast.success("Welcome to Wekashi Cab");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Invalid OTP");
+    } finally { setBusy(false); }
+  };
+
+  // ── Sign up: send the request to the vendor ─────────────────────────────
   const handleSignUp = async () => {
     if (fullName.trim().length < 2) { toast.error("Enter your full name"); return; }
     if (!isValidMobile(phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
+    const reg = normalizeRegNo(vehicleNo);
+    if (!isValidRegNo(reg)) { toast.error("Enter a valid vehicle number (e.g. KA05AB1234)"); return; }
     const code = vendorCode.toUpperCase().replace(/[^A-Z0-9-]/g, "");
     if (!/^VND-[A-Z0-9]{6}$/.test(code)) {
       toast.error("Enter a valid vendor code (format: VND-XXXXXX)");
@@ -57,30 +81,20 @@ export default function DriverLogin() {
     }
     setBusy(true);
     try {
-      const res = await driverRegisterRequestOtp({ phone: toE164(phone), fullName: fullName.trim(), vendorCode: code });
-      setConfirmedVendor(res.vendorName);
-      setStep("otp");
-      toast.success("OTP sent");
+      const res = await driverRegister({
+        phone: toE164(phone), fullName: fullName.trim(), vehicleNo: reg, vendorCode: code,
+      });
+      setRequestedVendor(res.vendorName);
+      setStep("requested");
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Registration failed");
+      toast.error(e instanceof ApiError ? e.message : "Could not send your request");
     } finally { setBusy(false); }
   };
 
-  // ── Verify OTP ───────────────────────────────────────────────────────────
-  const handleVerify = async () => {
-    setBusy(true);
-    try {
-      if (mode === "signup") {
-        await completeSignup(toE164(phone), otp);
-        toast.success("Account created. Welcome to Wekashi Cab");
-      } else {
-        await login(toE164(phone), otp);
-        toast.success("Welcome to Wekashi Cab");
-      }
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Invalid OTP");
-    } finally { setBusy(false); }
-  };
+  const subtitle =
+    step === "otp" ? "Enter the OTP sent to your phone"
+    : step === "requested" ? "Request sent"
+    : "Sign in or create a new account";
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-background">
@@ -92,57 +106,68 @@ export default function DriverLogin() {
             <Car className="h-7 w-7 text-gold-foreground" />
           </div>
           <div className="font-bold text-xl">Wekashi Cabs</div>
-          <div className="text-sm text-muted-foreground">
-            {step === "otp" ? "Enter the OTP sent to your phone" : "Sign in or create a new account"}
-          </div>
+          <div className="text-sm text-muted-foreground">{subtitle}</div>
         </div>
 
-        {/* Mode tabs — only shown on the form step */}
+        {/* Mode tabs — form step only */}
         {step === "form" && (
-          <div className="flex rounded-lg border p-1 mb-4 bg-muted">
-            <button
-              type="button"
-              onClick={() => switchMode("signin")}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                mode === "signin" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              onClick={() => switchMode("signup")}
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                mode === "signup" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              New driver
-            </button>
+          <div className="flex rounded-lg border p-1 mb-4 bg-muted" role="tablist">
+            {(["signin", "signup"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => switchMode(m)}
+                className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                  mode === m ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                {m === "signin" ? "Sign in" : "New driver"}
+              </button>
+            ))}
           </div>
         )}
 
         <div className="rounded-2xl border bg-card p-6 shadow-card space-y-4">
 
-          {/* ── OTP step (shared) ── */}
-          {step === "otp" ? (
+          {step === "requested" ? (
+            /* ── Sign-up request sent ── */
             <>
-              {confirmedVendor && (
-                <div className="flex items-center gap-2 rounded-md bg-success/10 border border-success/30 px-3 py-2.5">
-                  <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
-                  <div>
-                    <div className="text-sm font-medium text-success">Joining {confirmedVendor}</div>
-                    <div className="text-xs text-success/80">Enter the OTP to create your account</div>
+              <div className="flex items-start gap-3 rounded-md bg-success/10 border border-success/30 px-3 py-3">
+                <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-sm font-medium text-success">
+                    Request sent to {requestedVendor}
+                  </div>
+                  <div className="text-xs text-success/80 mt-0.5">
+                    Your vendor will review your details. Once they approve your account, sign in with
+                    +91 {phone} — we'll send the OTP then.
                   </div>
                 </div>
-              )}
+              </div>
+              <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Clock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                Requests that aren't approved within 7 days expire and you can apply again.
+              </div>
+              <Button className="w-full" variant="outline" onClick={() => switchMode("signin")}>
+                Go to sign in
+              </Button>
+            </>
+
+          ) : step === "otp" ? (
+            /* ── Sign-in OTP ── */
+            <>
               <div>
-                <Label>Enter OTP</Label>
+                <Label htmlFor="otp">Enter OTP</Label>
                 <Input
+                  id="otp"
                   className="mt-1 tracking-[0.5em] text-center text-lg"
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   placeholder="••••••"
                   inputMode="numeric"
+                  autoComplete="one-time-code"
                 />
                 <div className="text-xs text-muted-foreground mt-1">Sent to +91 {phone}.</div>
               </div>
@@ -151,9 +176,7 @@ export default function DriverLogin() {
                 onClick={handleVerify}
                 disabled={busy || otp.length !== 6}
               >
-                {busy
-                  ? <Loader2 className="h-4 w-4 animate-spin" />
-                  : <>{mode === "signup" ? "Verify & create account" : "Verify & sign in"} <ArrowRight className="h-4 w-4" /></>}
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Verify &amp; sign in <ArrowRight className="h-4 w-4" /></>}
               </Button>
               <Button variant="ghost" className="w-full" onClick={() => { setStep("form"); setOtp(""); }}>
                 Back
@@ -180,12 +203,14 @@ export default function DriverLogin() {
             /* ── Sign up form ── */
             <>
               <div>
-                <Label>Full name</Label>
+                <Label htmlFor="signup-name">Full name</Label>
                 <Input
+                  id="signup-name"
                   className="mt-1"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Your full name"
+                  autoComplete="name"
                 />
               </div>
               <div>
@@ -193,8 +218,21 @@ export default function DriverLogin() {
                 <PhoneInput id="signup-phone" className="mt-1" value={phone} onChange={setPhone} />
               </div>
               <div>
-                <Label>Vendor Code</Label>
+                <Label htmlFor="signup-vehicle">Vehicle number</Label>
                 <Input
+                  id="signup-vehicle"
+                  className="mt-1 font-mono tracking-widest uppercase"
+                  value={normalizeRegNo(vehicleNo)}
+                  onChange={(e) => setVehicleNo(e.target.value)}
+                  placeholder="KA05AB1234"
+                  maxLength={12}
+                  autoCapitalize="characters"
+                />
+              </div>
+              <div>
+                <Label htmlFor="signup-vendor">Vendor Code</Label>
+                <Input
+                  id="signup-vendor"
                   className="mt-1 font-mono tracking-widest uppercase"
                   value={vendorCode.toUpperCase().replace(/[^A-Z0-9-]/g, "")}
                   onChange={(e) => setVendorCode(e.target.value)}
@@ -211,7 +249,7 @@ export default function DriverLogin() {
                 onClick={handleSignUp}
                 disabled={busy}
               >
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Send OTP <ArrowRight className="h-4 w-4" /></>}
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Send for approval <ArrowRight className="h-4 w-4" /></>}
               </Button>
             </>
           )}

@@ -72,6 +72,9 @@ model Driver {
   altPhone        String?      @map("alt_phone")
   /// Set when the vendor/admin deletes the account (status 'removed').
   removedAt       DateTime?    @map("removed_at")
+  /// How the account was created: 'self' (driver sign-up request, needs vendor
+  /// approval) or 'vendor' (added by the vendor). NULL for older rows.
+  signupSource    String?      @map("signup_source")
   // ── Push notifications (FCM) ──────────────────────────────────────────────
   /// Firebase Cloud Messaging registration token for this driver's device.
   /// Set via POST /api/driver/push-token on login; cleared on logout or when
@@ -387,8 +390,10 @@ model Vehicle {
   id        String   @id @default(uuid())
   vendorId  String   @map("vendor_id")
   regNo     String   @unique @map("reg_no")
-  capacity  Int
-  fuelType  String   @map("fuel_type")
+  /// Seats / fuel are filled in later (driver Vehicle info); the vehicle row is
+  /// created at sign-up with just its registration number.
+  capacity  Int?
+  fuelType  String?  @map("fuel_type")
   documents Json     @default("{}")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -634,6 +639,10 @@ enum DriverStatus {
   /// and the account's identity keys are released so the person can sign up
   /// again (e.g. under a new vendor).
   removed
+  /// A self sign-up request the vendor rejected (or that expired unapproved).
+  /// NOT a blacklist: the phone is renamed and the details are released so the
+  /// person can apply again.
+  rejected
 }
 
 enum KycStatus {

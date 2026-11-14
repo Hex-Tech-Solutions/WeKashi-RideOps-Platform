@@ -45,10 +45,10 @@ export async function listDrivers(filters: {
   const limit = filters.limit ?? 20;
   const skip = (page - 1) * limit;
 
-  // Deleted (removed) accounts are history only — never listed.
-  const where: Record<string, unknown> = { status: { not: 'removed' } };
+  // Deleted (removed) accounts and rejected sign-up requests are history only.
+  const where: Record<string, unknown> = { status: { notIn: ['removed', 'rejected'] } };
   if (filters.vendorId) where.vendorId = filters.vendorId;
-  if (filters.status && filters.status !== 'removed') where.status = filters.status;
+  if (filters.status && filters.status !== 'removed' && filters.status !== 'rejected') where.status = filters.status;
 
   const [drivers, total] = await Promise.all([
     prisma.driver.findMany({
@@ -96,8 +96,11 @@ export async function updateDriverStatus(
   requestorVendorId?: string,
 ) {
   const driver = await prisma.driver.findUnique({ where: { id } });
-  // A deleted account can't be brought back — the person signs up again.
-  if (!driver || driver.status === 'removed') throw new NotFoundError('Driver not found');
+  // A deleted account or rejected request can't be brought back — the person
+  // signs up again.
+  if (!driver || driver.status === 'removed' || driver.status === 'rejected') {
+    throw new NotFoundError('Driver not found');
+  }
 
   if (requestorVendorId && driver.vendorId !== requestorVendorId) {
     throw new ForbiddenError('You can only update drivers belonging to your vendor');
@@ -147,7 +150,9 @@ export async function removeDriver(
   actor: { role: 'vendor' | 'admin'; vendorId?: string },
 ): Promise<void> {
   const driver = await prisma.driver.findUnique({ where: { id: driverId } });
-  if (!driver || driver.status === 'removed') throw new NotFoundError('Driver not found');
+  if (!driver || driver.status === 'removed' || driver.status === 'rejected') {
+    throw new NotFoundError('Driver not found');
+  }
   if (actor.role === 'vendor' && driver.vendorId !== actor.vendorId) {
     throw new ForbiddenError('You can only delete drivers belonging to your vendor');
   }
@@ -183,6 +188,20 @@ export async function removeDriver(
       UPDATE ride_offers SET response = 'expired'
       WHERE driver_id = ${driverId} AND response = 'pending'
     `;
+    // Free the vehicle number for a new sign-up, unless another active driver
+    // still uses this vehicle. The row is kept (rename) so trip history still
+    // points at it.
+    if (driver.vehicleId) {
+      const others = await tx.driver.count({
+        where: { vehicleId: driver.vehicleId, id: { not: driverId }, status: { notIn: ['removed', 'rejected'] } },
+      });
+      if (others === 0) {
+        await tx.$executeRaw`
+          UPDATE vehicles SET reg_no = ${'removed:' + driverId.slice(0, 8) + ':'} || reg_no
+          WHERE id = ${driver.vehicleId} AND reg_no NOT LIKE 'removed:%'
+        `;
+      }
+    }
   });
 
   const { revokeDriverAccess } = await import('./sessionRevocation');

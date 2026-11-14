@@ -243,15 +243,16 @@ export async function driverRequestOtp(phone: string): Promise<void> {
 }
 
 /**
- * Driver self-registration, step 1: validate details + send OTP. The account
- * is NOT created yet — it's created only after the OTP is confirmed.
+ * Driver sign-up REQUEST — no OTP. The vendor approves the request; only then
+ * can the driver sign in (which is when the OTP is sent).
  */
-export async function driverRegisterRequestOtp(input: {
+export async function driverRegister(input: {
   phone: string;
   fullName: string;
+  vehicleNo: string;
   vendorCode: string;
 }): Promise<{ message: string; vendorName: string }> {
-  return api("/auth/driver/register/request-otp", {
+  return api("/auth/driver/register", {
     method: "POST",
     auth: false,
     body: JSON.stringify(input),
@@ -268,16 +269,6 @@ function storeDriverSession(data: DriverAuthResponse): DriverSession {
   const session: DriverSession = { id: data.driver.id, role: "driver", fullName: data.driver.fullName, vendorId: data.driver.vendorId };
   tokenStore.set(data.accessToken, data.refreshToken, session as unknown as AuthUser);
   return session;
-}
-
-/** Driver self-registration, step 2: verify OTP → account created + signed in. */
-export async function driverRegisterVerify(phone: string, otp: string): Promise<DriverSession> {
-  const data = await api<DriverAuthResponse>("/auth/driver/register/verify", {
-    method: "POST",
-    auth: false,
-    body: JSON.stringify({ phone, otp }),
-  });
-  return storeDriverSession(data);
 }
 
 export async function driverVerifyOtp(phone: string, otp: string): Promise<DriverSession> {

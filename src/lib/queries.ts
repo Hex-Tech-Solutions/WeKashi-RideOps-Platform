@@ -595,7 +595,7 @@ export interface DriverProfile {
   dlExpiry?: string | null;
   govIdNumber?: string | null;
   vendor?: { name: string; vendorCode?: string };
-  vehicle?: { regNo: string; capacity: number; fuelType: string } | null;
+  vehicle?: { regNo: string; capacity: number | null; fuelType: string | null } | null;
   /** Document types that are verified but have expired. */
   expiredDocTypes?: string[];
 }
@@ -857,7 +857,7 @@ export interface RideDetail {
     phone: string;
     rating: number;
     vehicleType: string | null;
-    vehicle: { regNo: string; capacity: number; fuelType: string } | null;
+    vehicle: { regNo: string; capacity: number | null; fuelType: string | null } | null;
   } | null;
   vendor: { name: string } | null;
   passengers: RidePassenger[];
@@ -1314,7 +1314,7 @@ export interface DriverRow {
   phone: string;
   altPhone?: string | null;
   vendorId: string;
-  status: "pending" | "active" | "blacklisted" | "expired" | "removed";
+  status: "pending" | "active" | "blacklisted" | "expired" | "removed" | "rejected";
   kycStatus: "pending" | "approved" | "rejected" | "expired";
   isOnline: boolean;
   rating: number;
@@ -1324,8 +1324,20 @@ export interface DriverRow {
   dlExpiry?: string | null;
   govIdNumber?: string | null;
   vendor?: { name: string };
-  vehicle?: { regNo: string; capacity: number; fuelType: string } | null;
+  // Seats / fuel are filled in later; a new sign-up has only the reg number.
+  vehicle?: { regNo: string; capacity: number | null; fuelType: string | null } | null;
+  /** Driver-entered vehicle info (Vehicle info card) — fallback for display. */
+  vehicleType?: string | null;
+  seats?: number | null;
   expiredDocTypes?: string[];
+}
+
+/** One-line vehicle summary, e.g. "Sedan · Diesel · 4 seats". Never "null". */
+export function vehicleSummary(d: Pick<DriverRow, "vehicle" | "vehicleType" | "seats">): string {
+  const type = d.vehicleType ? d.vehicleType[0].toUpperCase() + d.vehicleType.slice(1) : null;
+  const seats = d.vehicle?.capacity ?? d.seats ?? null;
+  const parts = [type, d.vehicle?.fuelType ?? null, seats ? `${seats} seats` : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Details not added yet";
 }
 
 export function useDriver(id: string | null) {
@@ -1409,6 +1421,18 @@ export function useResolveIdentityFlag() {
   return useMutation({
     mutationFn: (id: string) => api(`/admin/identity-flags/${id}/resolve`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["identityFlags"] }),
+  });
+}
+
+/**
+ * Vendor/admin rejects a pending sign-up request. NOT a blacklist — the phone
+ * and vehicle number are freed so the person can apply again.
+ */
+export function useRejectSignup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (driverId: string) => api(`/drivers/${driverId}/reject-signup`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["drivers"] }),
   });
 }
 

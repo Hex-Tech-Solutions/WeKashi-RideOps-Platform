@@ -91,6 +91,60 @@ export function normalizeVpa(input: string): string {
   return input.trim().toLowerCase();
 }
 
+// ─── Vehicle registration number ─────────────────────────────────────────────
+
+/** Uppercase letters + digits only ("ka-05 ab 1234" -> "KA05AB1234"). */
+export function normalizeRegNo(input: string): string {
+  return input.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Indian registration formats:
+ *   standard  KA05AB1234, KA051234, DL3CAB1234  (state, district, series, number)
+ *   BH series 22BH1234AB
+ */
+export function isValidIndianRegNo(normalized: string): boolean {
+  return (
+    /^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{4}$/.test(normalized) ||
+    /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(normalized)
+  );
+}
+
+export function requireIndianRegNo(input: string): string {
+  const reg = normalizeRegNo(input);
+  if (!isValidIndianRegNo(reg)) {
+    throw new ValidationError('Enter a valid vehicle number (e.g. KA05AB1234)');
+  }
+  return reg;
+}
+
+/**
+ * Is this registration number already used — by any vehicle on the platform,
+ * or on another active driver's RC document? Neutral error, logged for admins.
+ */
+export async function assertRegNoAvailable(
+  reg: string,
+  excludeDriverId?: string,
+  db: Prisma.TransactionClient = prisma,
+): Promise<void> {
+  const exclude = excludeDriverId ?? '';
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT v.id FROM vehicles v
+    WHERE upper(regexp_replace(v.reg_no, '[^A-Za-z0-9]', '', 'g')) = ${reg}
+      AND NOT EXISTS (SELECT 1 FROM drivers d WHERE d.vehicle_id = v.id AND d.id = ${exclude})
+    UNION ALL
+    SELECT doc.id FROM driver_documents doc
+    JOIN drivers d ON d.id = doc.driver_id
+    WHERE doc.type = 'rc' AND d.id <> ${exclude}
+      AND d.status NOT IN ('removed', 'rejected')
+      AND upper(regexp_replace(coalesce(doc.number, ''), '[^A-Za-z0-9]', '', 'g')) = ${reg}
+    LIMIT 1
+  `;
+  if (rows.length === 0) return;
+  logger.warn({ context: 'reg-no', regNo: reg, editingDriverId: excludeDriverId ?? null }, 'Duplicate identity blocked');
+  throw new ConflictError(IDENTITY_CONFLICT_MESSAGE);
+}
+
 // ─── Duplicate detection ─────────────────────────────────────────────────────
 
 export interface IdentityKeys {
@@ -116,7 +170,7 @@ export async function findIdentityConflict(
   db: Prisma.TransactionClient = prisma,
 ): Promise<IdentityConflict | null> {
   const exclude = excludeDriverId ?? '';
-  const base = Prisma.sql`status <> 'removed' AND id <> ${exclude}`;
+  const base = Prisma.sql`status NOT IN ('removed', 'rejected') AND id <> ${exclude}`;
   const digits10 = (col: Prisma.Sql) => Prisma.sql`right(regexp_replace(coalesce(${col}, ''), '\\D', '', 'g'), 10)`;
 
   const checks: Array<{ field: keyof IdentityKeys; where: Prisma.Sql }> = [];
@@ -182,12 +236,12 @@ export async function assertNoIdentityConflict(
  */
 export async function findDriverByPhone(canonical: string) {
   const exact = await prisma.driver.findFirst({
-    where: { phone: canonical, status: { not: 'removed' } },
+    where: { phone: canonical, status: { notIn: ['removed', 'rejected'] } },
   });
   if (exact) return exact;
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     SELECT id FROM drivers
-    WHERE status <> 'removed'
+    WHERE status NOT IN ('removed', 'rejected')
       AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = ${last10(canonical)}
     ORDER BY created_at DESC
     LIMIT 1

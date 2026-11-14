@@ -50,10 +50,14 @@ export default function Fleet() {
                   <div className="h-12 w-12 rounded-md bg-foreground text-background flex items-center justify-center"><Car className="h-5 w-5" /></div>
                   <Badge variant="outline" className={d.status === "active" ? "border-success/40 text-success" : d.status === "blacklisted" ? "border-destructive/40 text-destructive" : "border-warning/40 text-warning"}>{d.status}</Badge>
                 </div>
-                <div className="font-bold">{d.vehicle ? `${d.vehicle.fuelType} vehicle` : "No vehicle assigned"}</div>
+                <div className="font-bold capitalize">
+                  {d.vehicle || d.vehicleType
+                    ? `${d.vehicleType ?? d.vehicle?.fuelType ?? "Vehicle"}${d.vehicleType && d.vehicle?.fuelType ? ` · ${d.vehicle.fuelType}` : ""}`
+                    : "No vehicle added"}
+                </div>
                 <div className="text-xs text-muted-foreground font-mono mt-1">{d.vehicle?.regNo ?? "—"}</div>
                 <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
-                  <div className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-muted-foreground" /> {d.vehicle?.capacity ?? "—"} seater</div>
+                  <div className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-muted-foreground" /> {d.vehicle?.capacity ?? d.seats ?? "—"} seater</div>
                   <div className="flex items-center gap-1.5"><Fuel className="h-3.5 w-3.5 text-muted-foreground" /> {d.vehicle?.fuelType ?? "—"}</div>
                 </div>
                 <div className="border-t mt-4 pt-3 text-xs text-muted-foreground">Driver: <span className="text-foreground font-medium">{d.fullName}</span> · {d.isOnline ? "online" : "offline"}</div>

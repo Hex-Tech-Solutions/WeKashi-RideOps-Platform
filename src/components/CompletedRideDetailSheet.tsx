@@ -221,8 +221,8 @@ export function CompletedRideDetailSheet({ rideId, onClose }: Props) {
                     {ride.driver.vehicle && (
                       <InfoGrid>
                         <InfoRow label="Reg. No." value={ride.driver.vehicle.regNo} />
-                        <InfoRow label="Capacity" value={`${ride.driver.vehicle.capacity} seats`} />
-                        <InfoRow label="Fuel" value={ride.driver.vehicle.fuelType} />
+                        <InfoRow label="Capacity" value={ride.driver.vehicle.capacity ? `${ride.driver.vehicle.capacity} seats` : "—"} />
+                        <InfoRow label="Fuel" value={ride.driver.vehicle.fuelType ?? "—"} />
                       </InfoGrid>
                     )}
 

@@ -179,8 +179,9 @@ export function DriverDetailDrawer({
                 {driver.vehicle ? (
                   <div className="space-y-2 text-sm">
                     <InfoRow icon={Car} label="Reg No"      value={driver.vehicle.regNo} mono />
-                    <InfoRow icon={Car} label="Fuel Type"   value={driver.vehicle.fuelType} />
-                    <InfoRow icon={Car} label="Capacity"    value={`${driver.vehicle.capacity} seats`} />
+                    <InfoRow icon={Car} label="Type"        value={driver.vehicleType ?? "—"} />
+                    <InfoRow icon={Car} label="Fuel Type"   value={driver.vehicle.fuelType ?? "—"} />
+                    <InfoRow icon={Car} label="Capacity"    value={(driver.vehicle.capacity ?? driver.seats) ? `${driver.vehicle.capacity ?? driver.seats} seats` : "—"} />
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No vehicle assigned.</p>

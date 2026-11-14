@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/RoleLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useDrivers, useUpdateDriverStatus, type DriverRow } from "@/lib/queries";
+import { useDrivers, useUpdateDriverStatus, useRejectSignup, type DriverRow } from "@/lib/queries";
 import { Check, X, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -18,14 +18,23 @@ import { toast } from "sonner";
 export default function Approvals() {
   const { data, isLoading } = useDrivers();
   const updateStatus = useUpdateDriverStatus();
+  const rejectSignup = useRejectSignup();
   const drivers = data?.drivers ?? [];
   const pending = drivers.filter((d) => d.status === "pending");
   const [filter, setFilter] = useState<"pending" | "all">("pending");
   const list = filter === "pending" ? pending : drivers;
 
-  const act = (id: string, status: "active" | "blacklisted", name: string) =>
-    updateStatus.mutate({ id, status }, {
-      onSuccess: () => (status === "active" ? toast.success(`${name} approved`) : toast.error(`${name} rejected`)),
+  const approve = (id: string, name: string) =>
+    updateStatus.mutate({ id, status: "active" }, {
+      onSuccess: () => toast.success(`${name} approved — they can now sign in`),
+      onError: (e: any) => toast.error(e?.message ?? "Failed"),
+    });
+
+  // Rejecting a sign-up is NOT a blacklist: their details are freed so they
+  // can apply again (or join another vendor).
+  const reject = (id: string, name: string) =>
+    rejectSignup.mutate(id, {
+      onSuccess: () => toast(`${name}'s request rejected`),
       onError: (e: any) => toast.error(e?.message ?? "Failed"),
     });
 
@@ -63,9 +72,9 @@ export default function Approvals() {
               <ApprovalRow
                 key={d.id}
                 driver={d}
-                busy={updateStatus.isPending}
-                onApprove={() => act(d.id, "active", d.fullName)}
-                onReject={() => act(d.id, "blacklisted", d.fullName)}
+                busy={updateStatus.isPending || rejectSignup.isPending}
+                onApprove={() => approve(d.id, d.fullName)}
+                onReject={() => reject(d.id, d.fullName)}
               />
             ))}
           </ul>

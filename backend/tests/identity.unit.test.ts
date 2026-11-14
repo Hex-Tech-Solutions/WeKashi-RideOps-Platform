@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar, isMaskedAadhaar,
-  hashAadhaar, normalizeVpa,
+  hashAadhaar, normalizeVpa, normalizeRegNo, isValidIndianRegNo,
 } from '../src/lib/identity';
 
 describe('identity normalisation', () => {
@@ -15,6 +15,16 @@ describe('identity normalisation', () => {
   it('rejects numbers that are not Indian mobiles', () => {
     for (const input of ['', '12345', '5741194444', '97411944441', '+14155552671']) {
       expect(normalizeIndianMobile(input)).toBeNull();
+    }
+  });
+
+  it('normalises and validates Indian vehicle numbers', () => {
+    expect(normalizeRegNo('ka-05 ab 1234')).toBe('KA05AB1234');
+    for (const ok of ['KA05AB1234', 'MH12CD5678', 'KA051234', 'DL3CAB1234', '22BH1234AB', '22BH1234A']) {
+      expect(isValidIndianRegNo(ok)).toBe(true);
+    }
+    for (const bad of ['', 'KA', '1234', 'KA05AB123', 'KA05ABCD1234', 'BH221234AB']) {
+      expect(isValidIndianRegNo(bad)).toBe(false);
     }
   });
 

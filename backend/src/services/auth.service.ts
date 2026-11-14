@@ -161,8 +161,11 @@ export async function loginDriverWithOtp(
   if (!driver) {
     throw new NotFoundError('No account found for this number. Please register first.');
   }
-  // Allow pending drivers to log in so they can upload KYC docs.
-  // Only block blacklisted or expired accounts.
+  // Only approved (active) accounts can sign in. A pending sign-up request
+  // waits for the vendor; blacklisted / expired accounts are suspended.
+  if (driver.status === 'pending') {
+    throw new UnauthorizedError('Your account is waiting for your vendor\'s approval.');
+  }
   if (driver.status === 'blacklisted' || driver.status === 'expired') {
     throw new UnauthorizedError('Driver account is suspended. Contact your vendor.');
   }

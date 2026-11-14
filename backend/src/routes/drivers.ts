@@ -16,6 +16,7 @@ import { requireRole } from '../middleware/requireRole';
 import { ForbiddenError, ConflictError } from '../types';
 import type { AuthRequest } from '../types';
 import { requireIndianMobile, assertNoIdentityConflict, IDENTITY_CONFLICT_MESSAGE } from '../lib/identity';
+import { rejectSignup } from '../services/signup.service';
 import type { Server as IoServer } from 'socket.io';
 
 // Resolve the caller's vendor id for ownership scoping.
@@ -182,6 +183,24 @@ export function createDriversRouter(io: IoServer): Router {
 
         const driver = await updateDriverStatus(req.params.id, status, vendorId);
         res.json(driver);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // POST /drivers/:id/reject-signup — vendor (own) or admin rejects a pending
+  // sign-up request. NOT a blacklist: the phone and vehicle number are freed so
+  // the person can apply again.
+  router.post(
+    '/:id/reject-signup',
+    requireRole('vendor', 'admin'),
+    async (req: AuthRequest, res: Response, next: NextFunction) => {
+      try {
+        const role = req.user!.role === 'admin' ? 'admin' : 'vendor';
+        const vendorId = await vendorIdFor(req);
+        await rejectSignup(req.params.id, { role, vendorId });
+        res.status(204).send();
       } catch (err) {
         next(err);
       }

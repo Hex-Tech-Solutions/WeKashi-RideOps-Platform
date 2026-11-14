@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useDrivers, useUpdateDriverStatus } from "@/lib/queries";
+import { useDrivers, useUpdateDriverStatus, vehicleSummary } from "@/lib/queries";
 import { DriverDetailDrawer } from "@/components/DriverDetailDrawer";
 import { Ban, RotateCcw, Loader2, AlertTriangle, Search, Eye } from "lucide-react";
 import { toast } from "sonner";
@@ -133,7 +133,7 @@ export default function AdminDrivers() {
                       <td className="px-6 py-3">
                         {d.vehicle ? (
                           <>
-                            <div className="text-xs">{d.vehicle.fuelType} · {d.vehicle.capacity} seats</div>
+                            <div className="text-xs">{vehicleSummary(d)}</div>
                             <div className="text-[10px] text-muted-foreground font-mono">{d.vehicle.regNo}</div>
                           </>
                         ) : (

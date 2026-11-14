@@ -1278,7 +1278,7 @@ export interface RideDetailResult {
     phone: string;
     rating: number;
     vehicleType: string | null;
-    vehicle: { regNo: string; capacity: number; fuelType: string } | null;
+    vehicle: { regNo: string; capacity: number | null; fuelType: string | null } | null;
   } | null;
   vendor: { name: string } | null;
   passengers: Array<{

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { driverVerifyOtp, driverRegisterVerify, getStoredDriver, logoutRequest, clearPushToken, tokenStore, type DriverSession } from "@/lib/api";
+import { driverVerifyOtp, getStoredDriver, logoutRequest, clearPushToken, tokenStore, type DriverSession } from "@/lib/api";
 import { initPushNotifications, teardownPushNotifications } from "@/lib/pushNotifications";
 import { syncNativeAuth, clearNativeAuth } from "@/lib/nativeAuth";
 import { TERMS_ACCEPTED_KEY } from "./DriverTerms";
@@ -7,15 +7,12 @@ import { TERMS_ACCEPTED_KEY } from "./DriverTerms";
 interface DriverAuthState {
   session: DriverSession | null;
   login: (phone: string, otp: string) => Promise<DriverSession>;
-  /** Finish self-registration (OTP verified → account created → signed in). */
-  completeSignup: (phone: string, otp: string) => Promise<DriverSession>;
   logout: () => Promise<void>;
 }
 
 const Ctx = createContext<DriverAuthState>({
   session: null,
   login: async () => { throw new Error("DriverAuthProvider not mounted"); },
-  completeSignup: async () => { throw new Error("DriverAuthProvider not mounted"); },
   logout: async () => {},
 });
 
@@ -42,7 +39,6 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (phone: string, otp: string) => startSession(await driverVerifyOtp(phone, otp));
-  const completeSignup = async (phone: string, otp: string) => startSession(await driverRegisterVerify(phone, otp));
 
   const logout = async () => {
     // Clear the token server-side and tear down native listeners BEFORE the
@@ -55,7 +51,7 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
   };
 
-  return <Ctx.Provider value={{ session, login, completeSignup, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ session, login, logout }}>{children}</Ctx.Provider>;
 }
 
 export const useDriverAuth = () => useContext(Ctx);
