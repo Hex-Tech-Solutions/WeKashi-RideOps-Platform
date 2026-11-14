@@ -6,6 +6,7 @@ import { NotFoundError, ForbiddenError, ValidationError } from '../types';
 import { DOC_TYPE_RULES, replaceBlockedReason } from '../lib/documentTypes';
 import { recomputeKycStatus, grantBonusIfKycApproved } from './kyc.service';
 import { logger } from '../lib/logger';
+import { notifyDocumentRejected } from './driverNotice.service';
 
 /**
  * Check, before the file is stored, that the driver may upload a new version
@@ -115,6 +116,11 @@ export async function setDocumentStatus(
   await grantBonusIfKycApproved(doc.driverId, kyc).catch((err) =>
     logger.error({ err, driverId: doc.driverId }, 'Joining bonus grant after KYC approval failed'),
   );
+  // Rejected (incl. a renewal upload): KYC is now rejected; tell the driver to
+  // upload a new copy. Best-effort, never blocks the review.
+  if (status === 'rejected') {
+    void notifyDocumentRejected(doc.driverId, doc.type, rejectionNote);
+  }
   return updated;
 }
 

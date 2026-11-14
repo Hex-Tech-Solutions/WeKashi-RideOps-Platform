@@ -21,7 +21,7 @@ import DriverBoarding from "./DriverBoarding";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
 import { OfferCountdown } from "./OfferCountdown";
 import { DriverEarningsCard } from "./DriverEarningsCard";
-import { JoiningBonusBanner } from "./DriverAccount";
+import { JoiningBonusBanner, KycBlockedBanner } from "./DriverAccount";
 import { MadeInIndiaFooter } from "@/components/MadeInIndiaFooter";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
 import { format } from "date-fns";
@@ -370,7 +370,10 @@ export default function DriverHome() {
               <LocateFixed className="h-3.5 w-3.5" /> Live location is being shared.
             </div>
           )}
-          {me?.joiningBonus === "awaiting_kyc" && (
+          {(me?.kycStatus === "rejected" || me?.kycStatus === "expired") && (
+            <div className="mt-3"><KycBlockedBanner me={me} /></div>
+          )}
+          {me?.joiningBonus === "awaiting_kyc" && me.kycStatus !== "rejected" && me.kycStatus !== "expired" && (
             <div className="mt-3"><JoiningBonusBanner me={me} /></div>
           )}
         </div>

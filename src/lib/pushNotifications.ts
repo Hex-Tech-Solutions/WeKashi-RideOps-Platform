@@ -49,6 +49,21 @@ export async function initPushNotifications(
     return;
   }
 
+  // Normal-priority channel for account notices (document rejected / KYC
+  // updates). Must match ACCOUNT_CHANNEL_ID in backend/src/lib/fcm.ts. Without
+  // it, Android would use the app's default channel, which is the ride-alert
+  // channel (ringtone, bypasses Do Not Disturb). Idempotent.
+  try {
+    await PushNotifications.createChannel({
+      id: "account_updates",
+      name: "Account updates",
+      description: "Document and KYC updates from your vendor",
+      importance: 3,      // default: sound, no heads-up takeover
+      visibility: 0,      // private on the lock screen
+      vibration: true,
+    });
+  } catch { /* older devices / plugin without channels — ignore */ }
+
   const onRegistration = await PushNotifications.addListener("registration", (tok) => {
     // tok.value is the FCM registration token for this device.
     void registerPushToken(tok.value);

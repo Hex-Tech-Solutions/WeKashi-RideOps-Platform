@@ -46,23 +46,52 @@ export function KycExpiredBanner({ kycExpired }: { kycExpired: boolean }) {
  * is waiting for KYC approval; it disappears once the credits are granted
  * (or if the bonus was withheld for a repeat account).
  */
+const bonusText = (me: DriverProfile) => {
+  const n = me.joiningBonusCredits ?? 1;
+  return `${n} free ride credit${n === 1 ? "" : "s"}`;
+};
+
 export function JoiningBonusBanner({ me, onDocumentsTab = false }: { me?: DriverProfile; onDocumentsTab?: boolean }) {
   if (!me || me.joiningBonus !== "awaiting_kyc" || me.status !== "active") return null;
-  const n = me.joiningBonusCredits ?? 1;
-  const credits = `${n} free ride credit${n === 1 ? "" : "s"}`;
+  // A rejected/expired KYC shows KycBlockedBanner instead (it mentions the bonus).
+  if (me.kycStatus === "rejected" || me.kycStatus === "expired") return null;
+  const credits = bonusText(me);
   const where = onDocumentsTab ? "below" : "in the Documents tab";
-  const detail =
-    me.kycStatus === "rejected"
-      ? `A document was rejected. Upload a new copy ${where}.`
-      : me.kycStatus === "expired"
-        ? `A document has expired. Upload a valid copy ${where}.`
-        : `Upload all your documents ${where}. You'll get the credits as soon as your vendor verifies them.`;
+  const detail = `Upload all your documents ${where}. You'll get the credits as soon as your vendor verifies them.`;
   return (
     <div role="status" className="flex items-start gap-3 rounded-lg border border-gold/50 bg-gold/10 p-4">
       <Gift className="h-5 w-5 text-gold-dark mt-0.5 shrink-0" aria-hidden="true" />
       <div>
         <div className="font-semibold text-sm">Complete your KYC to get {credits}</div>
         <div className="text-xs text-muted-foreground mt-0.5">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * KYC rejected (a document — including a renewal — was rejected) or expired:
+ * rides are blocked until a new copy is verified. Disappears once KYC is
+ * approved again.
+ */
+export function KycBlockedBanner({ me, onDocumentsTab = false }: { me?: DriverProfile; onDocumentsTab?: boolean }) {
+  if (!me || (me.kycStatus !== "rejected" && me.kycStatus !== "expired")) return null;
+  const rejected = me.kycStatus === "rejected";
+  const where = onDocumentsTab ? "below" : "in the Documents tab";
+  const bonus = me.joiningBonus === "awaiting_kyc" ? ` Your ${bonusText(me)} are added once it's verified.` : "";
+  return (
+    <div role="alert" className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4">
+      <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" aria-hidden="true" />
+      <div>
+        <div className="font-semibold text-sm text-destructive">
+          {rejected ? "KYC rejected — rides blocked" : "KYC expired — rides blocked"}
+        </div>
+        <div className="text-xs text-destructive/80 mt-0.5">
+          {rejected
+            ? `Your vendor rejected a document. See the reason and upload a new copy ${where}.`
+            : `A document has expired. Upload a valid copy ${where}.`}
+          {bonus}
+        </div>
       </div>
     </div>
   );

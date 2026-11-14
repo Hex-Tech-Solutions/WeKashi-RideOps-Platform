@@ -161,6 +161,44 @@ export async function sendRideBroadcastPush(
   }
 }
 
+/** Android channel for account notices. Created by the web app on login
+ *  (src/lib/pushNotifications.ts). Never use the ride-alert channel here. */
+export const ACCOUNT_CHANNEL_ID = 'account_updates';
+
+/**
+ * Send a normal account notice (e.g. "document rejected") to one device.
+ * Unlike ride broadcasts this carries a `notification` block, so Android shows
+ * it in the tray itself when the app is in the background; the native ride
+ * service ignores its `kind`, and with the app open the in-app banners cover
+ * it. Best-effort; returns true if FCM reports the token as stale.
+ */
+export async function sendDriverNoticePush(
+  token: string,
+  notice: { title: string; body: string; kind: string },
+): Promise<{ stale: boolean }> {
+  const client = getMessaging();
+  if (!client || !token) return { stale: false };
+  try {
+    await client.send({
+      token,
+      notification: { title: notice.title, body: notice.body },
+      data: { kind: notice.kind },
+      android: {
+        priority: 'normal',
+        notification: { channelId: ACCOUNT_CHANNEL_ID },
+      },
+    });
+    return { stale: false };
+  } catch (err: any) {
+    const code = err?.code ?? err?.errorInfo?.code ?? '';
+    if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+      return { stale: true };
+    }
+    logger.error({ err, kind: notice.kind }, 'FCM notice send failed');
+    return { stale: false };
+  }
+}
+
 /**
  * Tell drivers' devices to DISMISS the incoming-ride alert for a ride that is
  * no longer available (cancelled, expired, or taken by someone else). This is a
