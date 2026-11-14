@@ -12,22 +12,34 @@ import { grantJoiningBonus } from './creditPack.service';
 export const FINISHING_DISTANCE_KM = 0.3;
 
 export interface CreateDriverInput {
+  /** Canonical +91 mobile (caller normalises + checks for duplicates). */
   phone: string;
   fullName: string;
   vendorId: string;
-  vehicleId?: string;
+  /** Canonical reg no (caller validates + checks availability). */
+  regNo: string;
 }
 
+/**
+ * Vendor "Add driver" (#22). The vendor vouches for the driver, so the account
+ * starts ACTIVE (no Approvals step) and can sign in with OTP straight away.
+ * KYC is still pending, so the driver gets no rides until documents are
+ * verified. The Vehicle row (reg no only) is created and linked atomically.
+ */
 export async function createDriver(input: CreateDriverInput) {
-  const driver = await prisma.driver.create({
-    data: {
-      phone: input.phone,
-      fullName: input.fullName,
-      vendorId: input.vendorId,
-      vehicleId: input.vehicleId,
-      status: 'pending',
-      kycStatus: 'pending',
-    },
+  const driver = await prisma.$transaction(async (tx) => {
+    const vehicle = await tx.vehicle.create({ data: { vendorId: input.vendorId, regNo: input.regNo } });
+    return tx.driver.create({
+      data: {
+        phone: input.phone,
+        fullName: input.fullName,
+        vendorId: input.vendorId,
+        vehicleId: vehicle.id,
+        status: 'active',
+        kycStatus: 'pending',
+        signupSource: 'vendor',
+      },
+    });
   });
   // Grant the one-time joining-bonus credit so a newly onboarded driver can
   // start receiving broadcasts before buying a pack (Req 7).

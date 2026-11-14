@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useDrivers, useCreateDriver } from "@/lib/queries";
 import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
+import { normalizeRegNo, isValidRegNo } from "@/lib/vehicleNo";
 import { Car, Fuel, Users, Plus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,16 +18,18 @@ export default function Fleet() {
   const drivers = data?.drivers ?? [];
   const [open, setOpen] = useState(false);
   // phone = the 10 mobile digits only; "+91" is fixed in the input.
-  const [form, setForm] = useState({ name: "", phone: "" });
+  const [form, setForm] = useState({ name: "", phone: "", vehicleNo: "" });
 
   const submit = () => {
     if (form.name.trim().length < 2) { toast.error("Driver name is required"); return; }
     if (!isValidMobile(form.phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
-    createDriver.mutate({ fullName: form.name.trim(), phone: toE164(form.phone) }, {
+    const reg = normalizeRegNo(form.vehicleNo);
+    if (!isValidRegNo(reg)) { toast.error("Enter a valid vehicle number (e.g. KA05AB1234)"); return; }
+    createDriver.mutate({ fullName: form.name.trim(), phone: toE164(form.phone), vehicleNo: reg }, {
       onSuccess: () => {
-        toast.success(`${form.name} added · awaiting approval`);
+        toast.success(`${form.name.trim()} added · they can sign in now`);
         setOpen(false);
-        setForm({ name: "", phone: "" });
+        setForm({ name: "", phone: "", vehicleNo: "" });
       },
       onError: (e: any) => toast.error(e?.message ?? "Could not add driver"),
     });
@@ -73,7 +76,19 @@ export default function Fleet() {
           <div className="grid grid-cols-1 gap-3 py-2">
             <div><Label>Driver name</Label><Input className="mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
             <div><Label htmlFor="add-driver-phone">Phone</Label><PhoneInput id="add-driver-phone" className="mt-1" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} /></div>
-            <div className="text-xs text-muted-foreground">The driver signs in on the mobile app with this phone (OTP). Vehicle &amp; document assignment is coming soon.</div>
+            <div>
+              <Label htmlFor="add-driver-vehicle">Vehicle number</Label>
+              <Input
+                id="add-driver-vehicle"
+                className="mt-1 font-mono tracking-widest uppercase"
+                value={normalizeRegNo(form.vehicleNo)}
+                onChange={(e) => setForm({ ...form, vehicleNo: e.target.value })}
+                placeholder="KA05AB1234"
+                maxLength={12}
+                autoComplete="off"
+              />
+            </div>
+            <div className="text-xs text-muted-foreground">The account is active straight away, so the driver can sign in on the mobile app with this phone (OTP). They get rides once their documents are verified.</div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

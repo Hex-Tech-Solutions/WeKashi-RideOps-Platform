@@ -1388,7 +1388,7 @@ export function useUpdateDriverStatus() {
 export function useCreateDriver() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { phone: string; fullName: string; vehicleId?: string }) =>
+    mutationFn: (payload: { phone: string; fullName: string; vehicleNo: string }) =>
       api<DriverRow>("/drivers", { method: "POST", body: JSON.stringify(payload) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["drivers"] }),
   });

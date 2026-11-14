@@ -8,13 +8,10 @@ import { useDriverAuth } from "./useDriverAuth";
 import { toast } from "sonner";
 import { Loader2, Car, ArrowRight, CheckCircle2, Clock } from "lucide-react";
 
+import { normalizeRegNo, isValidRegNo } from "@/lib/vehicleNo";
+
 type Mode = "signin" | "signup";
 type Step = "form" | "otp" | "requested";
-
-/** Same rule as the server (backend/src/lib/identity.ts). */
-const normalizeRegNo = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
-const isValidRegNo = (s: string) =>
-  /^[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{4}$/.test(s) || /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(s);
 
 /**
  * Driver sign-in / sign-up.
