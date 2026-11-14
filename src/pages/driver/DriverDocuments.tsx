@@ -11,6 +11,7 @@ import {
   type DocumentRow,
 } from "@/lib/queries";
 import { DocumentViewer } from "@/components/DocumentViewer";
+import { JoiningBonusBanner } from "./DriverAccount";
 import { format, subDays } from "date-fns";
 import {
   FileText,
@@ -81,6 +82,7 @@ export default function DriverDocuments() {
 
   return (
     <div className="px-4 py-4 space-y-3">
+      <JoiningBonusBanner me={meData} onDocumentsTab />
       {/* ── KYC suspended banner ── */}
       {kycExpired && (
         <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4">

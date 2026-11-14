@@ -12,8 +12,10 @@
  * Overall: any rejected -> 'rejected', else any expired -> 'expired',
  * else any pending -> 'pending', else 'approved'.
  *
- * This only ever writes Driver.kycStatus. It never grants or changes credits:
- * KYC approval, renewal and re-verification must not add credits.
+ * Credits: the ONLY credit effect of KYC is the one-time joining bonus, granted
+ * when KYC is approved (grantBonusIfKycApproved). It is guarded once per
+ * account and once per person, so renewals and re-verification never add
+ * credits.
  */
 import type { KycStatus, Prisma } from '@prisma/client';
 import { logger } from '../lib/logger';
@@ -60,7 +62,7 @@ export function computeKycStatus(docs: KycDoc[], now = new Date()): KycStatus {
 export async function recomputeKycStatus(
   driverId: string,
   tx: Prisma.TransactionClient,
-): Promise<KycStatus> {
+): Promise<{ from: KycStatus; to: KycStatus }> {
   await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
   const [driver, docs] = await Promise.all([
     tx.driver.findUnique({ where: { id: driverId }, select: { kycStatus: true } }),
@@ -69,12 +71,23 @@ export async function recomputeKycStatus(
       select: { type: true, status: true, expiry: true, createdAt: true },
     }),
   ]);
-  if (!driver) return 'pending';
+  if (!driver) return { from: 'pending', to: 'pending' };
 
   const next = computeKycStatus(docs);
   if (next !== driver.kycStatus) {
     await tx.driver.update({ where: { id: driverId }, data: { kycStatus: next } });
     logger.info({ driverId, from: driver.kycStatus, to: next }, 'Driver KYC status changed');
   }
-  return next;
+  return { from: driver.kycStatus, to: next };
+}
+
+/**
+ * After a review is committed: if KYC is now approved, try the joining bonus.
+ * grantJoiningBonus is once per account AND once per person, so later
+ * approvals (renewals, re-verification) never add credits again.
+ */
+export async function grantBonusIfKycApproved(driverId: string, result: { to: KycStatus }): Promise<void> {
+  if (result.to !== 'approved') return;
+  const { grantJoiningBonus } = await import('./creditPack.service');
+  await grantJoiningBonus(driverId);
 }

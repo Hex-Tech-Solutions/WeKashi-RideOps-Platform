@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { PhoneInput, toE164, isValidMobile, mobileDigits } from "@/components/PhoneInput";
 import {
   useDriverMe, useSetDriverVehicle, useSetRentalOptIn,
-  useUpdateDriverProfile,
+  useUpdateDriverProfile, type DriverProfile,
 } from "@/lib/queries";
 import { VEHICLE_LABELS, type VehicleType } from "@/lib/pricing";
 import { useDriverAuth } from "./useDriverAuth";
@@ -19,7 +19,7 @@ import { DriverUpiCard } from "./DriverUpiCard";
 import {
   LogOut, Star, Building2, BadgeCheck, Phone, Car,
   AlertTriangle, Loader2,
-  FileText, Save,
+  FileText, Save, Gift,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,6 +36,33 @@ export function KycExpiredBanner({ kycExpired }: { kycExpired: boolean }) {
         <div className="text-xs text-destructive/80 mt-0.5">
           You're not receiving ride broadcasts. Re-upload expired documents in the Documents tab.
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Complete KYC to get your joining bonus" notice. Shown only while the bonus
+ * is waiting for KYC approval; it disappears once the credits are granted
+ * (or if the bonus was withheld for a repeat account).
+ */
+export function JoiningBonusBanner({ me, onDocumentsTab = false }: { me?: DriverProfile; onDocumentsTab?: boolean }) {
+  if (!me || me.joiningBonus !== "awaiting_kyc" || me.status !== "active") return null;
+  const n = me.joiningBonusCredits ?? 1;
+  const credits = `${n} free ride credit${n === 1 ? "" : "s"}`;
+  const where = onDocumentsTab ? "below" : "in the Documents tab";
+  const detail =
+    me.kycStatus === "rejected"
+      ? `A document was rejected. Upload a new copy ${where}.`
+      : me.kycStatus === "expired"
+        ? `A document has expired. Upload a valid copy ${where}.`
+        : `Upload all your documents ${where}. You'll get the credits as soon as your vendor verifies them.`;
+  return (
+    <div role="status" className="flex items-start gap-3 rounded-lg border border-gold/50 bg-gold/10 p-4">
+      <Gift className="h-5 w-5 text-gold-dark mt-0.5 shrink-0" aria-hidden="true" />
+      <div>
+        <div className="font-semibold text-sm">Complete your KYC to get {credits}</div>
+        <div className="text-xs text-muted-foreground mt-0.5">{detail}</div>
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { NotFoundError, ForbiddenError, ValidationError, NearbyDriver } from '..
 import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
 import { getDriverActiveRide } from '../lib/activeRideCache';
-import { grantJoiningBonus } from './creditPack.service';
+import { JOINING_BONUS_CREDITS } from '../lib/creditPacks';
 
 // Next-ride queueing: a driver whose in-progress ride's drop is within this
 // straight-line distance of their current location is "finishing" and becomes
@@ -41,9 +41,7 @@ export async function createDriver(input: CreateDriverInput) {
       },
     });
   });
-  // Grant the one-time joining-bonus credit so a newly onboarded driver can
-  // start receiving broadcasts before buying a pack (Req 7).
-  await grantJoiningBonus(driver.id);
+  // No credits yet: the joining bonus is granted when KYC is first approved.
   return driver;
 }
 
@@ -94,11 +92,25 @@ export async function getDriver(id: string) {
     select: { type: true },
   });
 
+  // Joining bonus state for the driver app banner:
+  //   granted      — already received
+  //   awaiting_kyc — will be granted when KYC is first approved
+  //   not_eligible — withheld (same person already had a bonus on another account)
+  let joiningBonus: 'granted' | 'awaiting_kyc' | 'not_eligible' = 'granted';
+  if (!driver.joiningBonusGrantedAt) {
+    const withheld = await prisma.identityFlag.count({
+      where: { kind: 'repeat_joining_bonus', driverId: id },
+    });
+    joiningBonus = withheld > 0 ? 'not_eligible' : 'awaiting_kyc';
+  }
+
   // walletBalance is intentionally omitted — the in-app wallet has been removed.
   const { walletBalance: _walletBalance, ...driverPublic } = driver as typeof driver & { walletBalance?: number };
   return {
     ...driverPublic,
     expiredDocTypes: expiredDocs.map((d) => d.type),
+    joiningBonus,
+    joiningBonusCredits: JOINING_BONUS_CREDITS,
   };
 }
 
@@ -134,9 +146,8 @@ export async function updateDriverStatus(
     await revokeDriverAccess(id);
   } else if (status === 'active') {
     await clearDriverBlock(id);
-    // Ensure the joining-bonus credit exists once a driver is activated (safety
-    // net for drivers onboarded before the bonus existed). Grant-once guarded.
-    await grantJoiningBonus(id);
+    // No credits here: the joining bonus is granted only when KYC is first
+    // approved (kyc.service / setDocumentStatus).
   }
 
   return updated;

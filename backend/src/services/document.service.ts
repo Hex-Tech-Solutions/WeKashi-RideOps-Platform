@@ -4,7 +4,8 @@ import { prisma } from '../lib/prisma';
 import { UPLOAD_DIR } from '../lib/storage';
 import { NotFoundError, ForbiddenError, ValidationError } from '../types';
 import { DOC_TYPE_RULES, replaceBlockedReason } from '../lib/documentTypes';
-import { recomputeKycStatus } from './kyc.service';
+import { recomputeKycStatus, grantBonusIfKycApproved } from './kyc.service';
+import { logger } from '../lib/logger';
 
 /**
  * Check, before the file is stored, that the driver may upload a new version
@@ -95,9 +96,8 @@ export async function setDocumentStatus(
     throw new ValidationError('A newer version of this document has been uploaded. Review that one instead.');
   }
 
-  // Store the review and the resulting KYC status together (#1). The KYC
-  // recompute never touches credits.
-  return prisma.$transaction(async (tx) => {
+  // Store the review and the resulting KYC status together (#1).
+  const { updated, kyc } = await prisma.$transaction(async (tx) => {
     const updated = await tx.driverDocument.update({
       where: { id: docId },
       data: {
@@ -107,9 +107,15 @@ export async function setDocumentStatus(
         rejectionNote: status === 'rejected' ? (rejectionNote ?? null) : null,
       },
     });
-    await recomputeKycStatus(doc.driverId, tx);
-    return updated;
+    const kyc = await recomputeKycStatus(doc.driverId, tx);
+    return { updated, kyc };
   });
+  // Joining bonus is granted only once KYC is approved (once per person).
+  // A failure here must not undo the review that was just saved.
+  await grantBonusIfKycApproved(doc.driverId, kyc).catch((err) =>
+    logger.error({ err, driverId: doc.driverId }, 'Joining bonus grant after KYC approval failed'),
+  );
+  return updated;
 }
 
 // Count pending documents per vendor — used for approval badge in vendor nav

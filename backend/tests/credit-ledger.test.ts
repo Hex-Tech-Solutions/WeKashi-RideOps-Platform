@@ -149,6 +149,15 @@ describe('grantJoiningBonus (Req 7.3)', () => {
     expect(await availableCredits(driverId)).toBe(1);
   });
 
+  it('grants nothing until KYC is approved', async () => {
+    await prisma.driver.update({ where: { id: driverId }, data: { kycStatus: 'pending' } });
+    await grantJoiningBonus(driverId);
+    expect(await availableCredits(driverId)).toBe(0);
+    await prisma.driver.update({ where: { id: driverId }, data: { kycStatus: 'approved' } });
+    await grantJoiningBonus(driverId);
+    expect(await availableCredits(driverId)).toBe(1);
+  });
+
   it('withholds the bonus when the same person re-joins after their account was deleted', async () => {
     await grantJoiningBonus(driverId);
     const first = await prisma.driver.findUniqueOrThrow({ where: { id: driverId } });
@@ -159,7 +168,7 @@ describe('grantJoiningBonus (Req 7.3)', () => {
     });
 
     const again = await prisma.driver.create({
-      data: { phone: first.phone, fullName: 'Ledger Driver', vendorId, status: 'active', kycStatus: 'pending' },
+      data: { phone: first.phone, fullName: 'Ledger Driver', vendorId, status: 'active', kycStatus: 'approved' },
     });
     await grantJoiningBonus(again.id);
     expect(await availableCredits(again.id)).toBe(0);

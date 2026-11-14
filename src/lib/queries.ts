@@ -598,6 +598,9 @@ export interface DriverProfile {
   vehicle?: { regNo: string; capacity: number | null; fuelType: string | null } | null;
   /** Document types that are verified but have expired. */
   expiredDocTypes?: string[];
+  /** Joining bonus: granted, waiting for KYC approval, or withheld (repeat account). */
+  joiningBonus?: "granted" | "awaiting_kyc" | "not_eligible";
+  joiningBonusCredits?: number;
 }
 
 export function useDriverMe() {

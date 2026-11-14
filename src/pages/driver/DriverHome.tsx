@@ -21,6 +21,7 @@ import DriverBoarding from "./DriverBoarding";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
 import { OfferCountdown } from "./OfferCountdown";
 import { DriverEarningsCard } from "./DriverEarningsCard";
+import { JoiningBonusBanner } from "./DriverAccount";
 import { MadeInIndiaFooter } from "@/components/MadeInIndiaFooter";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
 import { format } from "date-fns";
@@ -368,6 +369,9 @@ export default function DriverHome() {
             <div className="mt-2 flex items-center gap-2 text-[11px] text-success">
               <LocateFixed className="h-3.5 w-3.5" /> Live location is being shared.
             </div>
+          )}
+          {me?.joiningBonus === "awaiting_kyc" && (
+            <div className="mt-3"><JoiningBonusBanner me={me} /></div>
           )}
         </div>
 

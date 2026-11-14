@@ -175,8 +175,9 @@ async function findPriorBonusAccount(
 }
 
 /**
- * Grant the one-time joining-bonus credit. Once per PERSON, not just per
- * account:
+ * Grant the one-time joining-bonus credit. Called only when the driver's KYC
+ * is approved (kyc.service grantBonusIfKycApproved); requires status active +
+ * kycStatus approved. Once per PERSON, not just per account:
  *  - Driver.joiningBonusGrantedAt makes it once per account (atomic claim).
  *  - findPriorBonusAccount stops a second bonus when the same person already
  *    got one on another account (deleted and re-joined, etc.). The match is
@@ -189,8 +190,17 @@ export async function grantJoiningBonus(driverId: string): Promise<void> {
     const now = new Date();
     // Serialise grants for this driver, then check for an earlier bonus.
     await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
-    const fresh = await tx.driver.findUnique({ where: { id: driverId }, select: { joiningBonusGrantedAt: true } });
+    const fresh = await tx.driver.findUnique({
+      where: { id: driverId },
+      select: { joiningBonusGrantedAt: true, status: true, kycStatus: true },
+    });
     if (!fresh || fresh.joiningBonusGrantedAt) return;
+    // Only an active account with approved KYC earns the bonus.
+    if (fresh.status !== 'active' || fresh.kycStatus !== 'approved') return;
+    // Already withheld once (flag recorded) — don't re-check or re-flag on
+    // every later KYC review.
+    const withheld = await tx.identityFlag.count({ where: { kind: 'repeat_joining_bonus', driverId } });
+    if (withheld > 0) return;
     check.repeatOf = await findPriorBonusAccount(driverId, tx);
     if (check.repeatOf) return; // same person already had a bonus — grant nothing
 
