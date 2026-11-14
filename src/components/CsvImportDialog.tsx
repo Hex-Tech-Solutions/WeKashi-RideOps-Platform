@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useBulkCreateEmployees, buildEmployeePayload, type CreateEmployeePayload } from "@/lib/queries";
+import { normalizeMobile } from "@/components/PhoneInput";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
 
@@ -24,6 +25,7 @@ function parseCsvToPayload(csv: string): { rows: CreateEmployeePayload[]; errors
     if (cols.length < 6) { errors.push(`Row ${i + 1}: needs at least empId,name,gender,phone,pickup,drop`); return; }
     const [empId, name, gender, phone, pickup, drop, loginTime, logoutTime] = cols;
     if (!name || !empId) { errors.push(`Row ${i + 1}: missing name/empId`); return; }
+    if (phone && !normalizeMobile(phone)) { errors.push(`Row ${i + 1}: phone must be a 10-digit Indian mobile number`); return; }
     rows.push(buildEmployeePayload({
       empId, name, gender, phone, pickup: pickup || "Jayanagar 4th Block", drop,
       loginTime: loginTime || "08:30", logoutTime: logoutTime || "18:30",

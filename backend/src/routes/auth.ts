@@ -12,7 +12,7 @@ import {
 } from '../services/admin.service';
 import { checkOtpRateLimit, generateOtp, storeOtp, verifyOtp } from '../lib/otp';
 import { smsSender } from '../lib/sms';
-import { requireIndianMobile, findDriverByPhone } from '../lib/identity';
+import { requireIndianMobile, findDriverByPhone, zIndianMobile } from '../lib/identity';
 import { submitSignupRequest } from '../services/signup.service';
 import { authenticate } from '../middleware/authenticate';
 import { authRateLimiter, refreshRateLimiter, otpRateLimiter } from '../middleware/rateLimiter';
@@ -215,7 +215,7 @@ const RegistrationRequestSchema = z.object({
   fullName:    z.string().min(2).max(100),
   email:       z.string().email(),
   password:    z.string().min(8).max(100),
-  mobile:      z.string().min(10).max(15),
+  mobile:      zIndianMobile(),
   companyName: z.string().min(2).max(100),
   gstin:       z.string().max(20).optional(),
   address:     z.string().min(5).max(300),

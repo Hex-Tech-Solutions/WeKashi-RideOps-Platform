@@ -12,6 +12,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PlacesInput } from "@/components/PlacesInput";
+import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import { RentalDetailSheet } from "@/components/RentalDetailSheet";
 import {
   useRentalPacks, useRentals, useCreateRental, useCancelRental, useRemoveRental,
@@ -501,7 +502,7 @@ function BookRentalDialog({
   const submit = () => {
     if (!pack) return;
     if (!name.trim()) { toast.error("Enter the customer name"); return; }
-    if (phone.replace(/\D/g, "").length < 10) { toast.error("Enter a valid mobile number"); return; }
+    if (!isValidMobile(phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
     if (!pickup) { toast.error("Select the pickup location"); return; }
     // Pickup time is optional (a rental can start "now"); when set it must be
     // in the future so a driver isn't handed an already-past pickup.
@@ -514,7 +515,7 @@ function BookRentalDialog({
     }
     onSubmit({
       customerName: name.trim(),
-      customerPhone: phone.trim(),
+      customerPhone: toE164(phone),
       vehicleType: pack.vehicleType,
       packageKey: pack.key,
       pickupAddress: pickup.address,
@@ -535,7 +536,7 @@ function BookRentalDialog({
         <div className="space-y-3 py-1">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Customer name</Label><Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div><Label>Mobile number</Label><Input className="mt-1" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 …" /></div>
+            <div><Label htmlFor="rental-customer-phone">Mobile number</Label><PhoneInput id="rental-customer-phone" className="mt-1" value={phone} onChange={setPhone} /></div>
           </div>
           <div>
             <Label>Pickup location</Label>

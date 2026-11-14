@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useVendors, useCreateVendorAccount } from "@/lib/queries";
+import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,12 +19,12 @@ export default function Vendors() {
   const [form, setForm] = useState({ company: "", contactName: "", contactEmail: "", contactPhone: "", email: "", password: "" });
 
   const submit = () => {
-    const digits = form.contactPhone.replace(/[^\d]/g, "");
+
     if (!form.company || !form.contactName || !form.contactEmail || !form.email || form.password.length < 8) {
       toast.error("All fields required · password ≥ 8 chars"); return;
     }
-    if (digits.length < 10) { toast.error("Enter a valid contact phone"); return; }
-    createVendor.mutate({ ...form, contactPhone: digits }, {
+    if (!isValidMobile(form.contactPhone)) { toast.error("Enter a valid 10-digit contact phone"); return; }
+    createVendor.mutate({ ...form, contactPhone: toE164(form.contactPhone) }, {
       onSuccess: () => { toast.success(`Vendor ${form.company} created`); setOpen(false); setForm({ company: "", contactName: "", contactEmail: "", contactPhone: "", email: "", password: "" }); },
       onError: (e: any) => toast.error(e?.message ?? "Could not create vendor"),
     });
@@ -85,7 +86,7 @@ export default function Vendors() {
           <div className="grid grid-cols-2 gap-3 py-2">
             <div className="col-span-2"><Label>Company</Label><Input className="mt-1" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Apex Fleet" /></div>
             <div><Label>Contact name</Label><Input className="mt-1" value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} /></div>
-            <div><Label>Contact phone</Label><Input className="mt-1" value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} placeholder="+91 98xxxxxxxx" /></div>
+            <div><Label htmlFor="vendor-contact-phone">Contact phone</Label><PhoneInput id="vendor-contact-phone" className="mt-1" value={form.contactPhone} onChange={(contactPhone) => setForm({ ...form, contactPhone })} /></div>
             <div><Label>Contact email</Label><Input type="email" className="mt-1" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} /></div>
             <div><Label>Login email</Label><Input type="email" className="mt-1" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
             <div className="col-span-2"><Label>Temporary password</Label><Input type="text" className="mt-1" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="≥ 8 characters" /></div>

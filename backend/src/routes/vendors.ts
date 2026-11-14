@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { zIndianMobile } from '../lib/identity';
 import { parsePagination } from '../lib/pagination';
 import {
   createVendor,
@@ -18,7 +19,7 @@ const router = Router();
 const VendorSchema = z.object({
   name: z.string().min(2).max(100),
   contactName: z.string().min(2).max(100),
-  contactPhone: z.string().min(10).max(15),
+  contactPhone: zIndianMobile('Contact phone'),
   contactEmail: z.string().email(),
   payoutDetails: z.record(z.unknown()).optional(),
   userId: z.string().uuid(), // admin provides the userId, but we validate role server-side

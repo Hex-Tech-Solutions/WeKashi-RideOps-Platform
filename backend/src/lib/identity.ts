@@ -14,6 +14,7 @@
  * is the guard for every new write.
  */
 import crypto from 'crypto';
+import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { logger } from './logger';
@@ -47,6 +48,20 @@ export function requireIndianMobile(input: string, label = 'Phone number'): stri
 }
 
 const last10 = (canonical: string) => canonical.slice(-10);
+
+/**
+ * Zod field for any Indian mobile number (contacts, employees, customers,
+ * passengers). Accepts the usual formats and stores "+91XXXXXXXXXX".
+ */
+export const zIndianMobile = (label = 'Mobile number') =>
+  z.string().transform((v, ctx) => {
+    const p = normalizeIndianMobile(v);
+    if (!p) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must be a valid 10-digit Indian mobile number` });
+      return z.NEVER;
+    }
+    return p;
+  });
 
 // ─── DL / Gov ID / VPA ───────────────────────────────────────────────────────
 

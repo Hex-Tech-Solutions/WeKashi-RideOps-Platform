@@ -17,6 +17,7 @@ import {
   type OfficeLocationRow,
 } from "@/lib/queries";
 import { OfficeMapPicker } from "@/components/OfficeMapPicker";
+import { PhoneInput, toE164, isValidMobile, mobileDigits } from "@/components/PhoneInput";
 import { rideArea } from "@/lib/rideArea";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -29,7 +30,7 @@ export default function SupervisorSettings() {
   const saveFacility = useSetFacility();
   const [phone, setPhone] = useState("");
   const [facility, setFacility] = useState("");
-  useEffect(() => { if (office?.phone) setPhone(office.phone); }, [office?.phone]);
+  useEffect(() => { if (office?.phone) setPhone(mobileDigits(office.phone)); }, [office?.phone]);
   useEffect(() => { if (office?.facility) setFacility(office.facility); }, [office?.facility]);
 
   return (
@@ -58,14 +59,17 @@ export default function SupervisorSettings() {
             </div>
             <div><Label>Default broadcast radius (km)</Label><Input defaultValue="10" type="number" className="mt-1" /></div>
             <div className="col-span-2">
-              <Label>Your contact number (POC for female employees)</Label>
+              <Label htmlFor="supervisor-phone">Your contact number (POC for female employees)</Label>
               <div className="flex gap-2 mt-1">
-                <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98xxxxxxxx" />
+                <PhoneInput id="supervisor-phone" value={phone} onChange={setPhone} />
                 <Button variant="outline" className="shrink-0" disabled={savePhone.isPending}
-                  onClick={() => savePhone.mutate(phone, {
-                    onSuccess: () => toast.success("Contact number saved"),
-                    onError: (e: any) => toast.error(e?.message ?? "Failed"),
-                  })}>
+                  onClick={() => {
+                    if (!isValidMobile(phone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
+                    savePhone.mutate(toE164(phone), {
+                      onSuccess: () => toast.success("Contact number saved"),
+                      onError: (e: any) => toast.error(e?.message ?? "Failed"),
+                    });
+                  }}>
                   Save
                 </Button>
               </div>

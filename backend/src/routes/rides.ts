@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { zIndianMobile } from '../lib/identity';
 import { parsePagination } from '../lib/pagination';
 import {
   createRide,
@@ -73,7 +74,7 @@ const AirportRideSchema = z.object({
   cityPoint: GeoPointSchema,
   cityAddress: z.string().min(1).max(300),
   paxName: z.string().min(1).max(100),
-  paxPhone: z.string().min(10).max(15),
+  paxPhone: zIndianMobile('Passenger mobile number'),
   flightNumber: z.string().max(20).optional().nullable(),
   vehicleType: z.enum(['hatchback', 'sedan', 'suv']),
   distanceKm: z.number().positive(),

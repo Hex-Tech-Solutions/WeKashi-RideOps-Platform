@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { zIndianMobile } from '../lib/identity';
 import { parsePagination } from '../lib/pagination';
 import {
   createEmployee,
@@ -25,7 +26,7 @@ const EmployeeSchema = z.object({
   empId: z.string().min(1).max(50),
   name: z.string().min(2).max(100),
   gender: z.enum(['male', 'female', 'other']),
-  phone: z.string().min(10).max(15).optional(),
+  phone: zIndianMobile('Employee phone').optional(),
   pickupLocation: GeoPointSchema,
   dropLocation: GeoPointSchema,
   pickupAddress: z.string().min(1),

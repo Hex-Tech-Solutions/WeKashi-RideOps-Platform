@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { zIndianMobile } from '../lib/identity';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
 import {
@@ -41,7 +42,7 @@ const VendorSchema = z.object({
   company: z.string().min(2).max(100),
   contactName: z.string().min(2).max(100),
   contactEmail: z.string().email(),
-  contactPhone: z.string().min(10).max(15),
+  contactPhone: zIndianMobile('Contact phone'),
   email: z.string().email(),
   password: z.string().min(8).max(100),
 });

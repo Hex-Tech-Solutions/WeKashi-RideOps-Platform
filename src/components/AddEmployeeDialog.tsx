@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PlacesInput } from "@/components/PlacesInput";
+import { PhoneInput, toE164, isValidMobile, normalizeMobile } from "@/components/PhoneInput";
 import { TimeSelect } from "@/components/TimeSelect";
 import { useCreateEmployee, useSupervisorOffice, useOfficeLocations, type CreateEmployeePayload } from "@/lib/queries";
 import { getPoint, DROP } from "@/lib/geo";
@@ -52,11 +53,16 @@ export function AddEmployeeDialog({ open, onOpenChange }: { open: boolean; onOpe
       toast.error("Set your contact number in Settings first (POC for female employees)");
       return;
     }
-    const digits = effectivePhone.replace(/[^\d]/g, "");
+    // Male: optional own number (10 digits, "+91" fixed). Female: the
+    // supervisor's POC number.
+    if (!isFemale && form.phone && !isValidMobile(form.phone)) {
+      toast.error("Enter a valid 10-digit mobile number, or leave it empty");
+      return;
+    }
     const payload: CreateEmployeePayload = {
       empId: form.empId, name: form.name,
       gender: isFemale ? "female" : "male",
-      phone: digits.length >= 10 && digits.length <= 15 ? digits : undefined,
+      phone: (isFemale ? normalizeMobile(effectivePhone) : form.phone ? toE164(form.phone) : null) ?? undefined,
       pickupLocation: { lat: home.lat, lng: home.lng },
       dropLocation: { lat: officeLoc.lat, lng: officeLoc.lng },
       pickupAddress: home.address, dropAddress: officeLoc.address,
@@ -102,7 +108,7 @@ export function AddEmployeeDialog({ open, onOpenChange }: { open: boolean; onOpe
                 <Label>Phone {isFemale && <span className="text-[10px] text-muted-foreground">(supervisor POC)</span>}</Label>
                 {isFemale
                   ? <Input className="mt-1" value={officeData?.phone ?? "Set your number in Settings"} readOnly />
-                  : <Input className="mt-1" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+91 ..." />
+                  : <PhoneInput className="mt-1" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} aria-label="Employee mobile number" />
                 }
               </div>
 

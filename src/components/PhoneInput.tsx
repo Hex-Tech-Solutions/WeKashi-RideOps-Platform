@@ -11,6 +11,19 @@ export const toE164 = (digits: string) => `+91${digits}`;
 /** True for a valid Indian mobile: 10 digits starting 6–9. */
 export const isValidMobile = (digits: string) => /^[6-9]\d{9}$/.test(digits);
 
+/**
+ * Any typed/pasted/CSV format ("98xxxxxxxx", "+91 98…", "098…") to
+ * "+91XXXXXXXXXX", or null if it isn't a valid Indian mobile. Same rule as the
+ * server (backend/src/lib/identity.ts normalizeIndianMobile).
+ */
+export function normalizeMobile(input?: string | null): string | null {
+  if (!input) return null;
+  let d = input.replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  return isValidMobile(d) ? toE164(d) : null;
+}
+
 /** Strip "+91" / leading 0 / punctuation from a stored number for editing. */
 export function mobileDigits(stored?: string | null): string {
   if (!stored) return "";

@@ -15,6 +15,7 @@ import { AddEmployeeDialog, PinMap } from "@/components/AddEmployeeDialog";
 import { CsvImportDialog } from "@/components/CsvImportDialog";
 import { PlacesInput } from "@/components/PlacesInput";
 import { TimeSelect } from "@/components/TimeSelect";
+import { PhoneInput, toE164, isValidMobile, mobileDigits } from "@/components/PhoneInput";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -227,7 +228,7 @@ function EditEmployeeDialog({
   const qc = useQueryClient();
   const [form, setForm] = useState({
     name: employee.name,
-    phone: employee.phone ?? "",
+    phone: mobileDigits(employee.phone),
     gender: employee.gender?.toUpperCase().startsWith("F") ? "F" : "M",
     shiftStart: employee.shiftStart,
     shiftEnd: employee.shiftEnd,
@@ -242,13 +243,20 @@ function EditEmployeeDialog({
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
+    // Phone: "+91" fixed, 10 digits. Only sent when changed, so an older
+    // number saved in another format doesn't block other edits.
+    const phoneChanged = form.phone !== mobileDigits(employee.phone);
+    if (phoneChanged && form.phone && !isValidMobile(form.phone)) {
+      toast.error("Enter a valid 10-digit mobile number");
+      return;
+    }
     setSaving(true);
     try {
       await api(`/employees/${employee.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           name: form.name,
-          phone: form.phone || undefined,
+          phone: phoneChanged && form.phone ? toE164(form.phone) : undefined,
           gender: form.gender === "F" ? "female" : "male",
           shiftStart: form.shiftStart,
           shiftEnd: form.shiftEnd,
@@ -299,8 +307,8 @@ function EditEmployeeDialog({
               </div>
 
               <div>
-                <Label>Phone</Label>
-                <Input className="mt-1" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+91 ..." />
+                <Label htmlFor="edit-employee-phone">Phone</Label>
+                <PhoneInput id="edit-employee-phone" className="mt-1" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} />
               </div>
 
               {/* Pickup location */}

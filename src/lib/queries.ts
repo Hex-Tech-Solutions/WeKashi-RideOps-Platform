@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, tokenStore } from "@/lib/api";
 import { getPoint, DROP } from "@/lib/geo";
+import { normalizeMobile } from "@/components/PhoneInput";
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
@@ -1503,12 +1504,12 @@ export function buildEmployeePayload(row: {
   const pickup = getPoint(row.pickup);
   const dropName = row.drop || DROP;
   const drop = getPoint(dropName);
-  const digits = (row.phone ?? "").replace(/[^\d]/g, "");
   return {
     empId: row.empId,
     name: row.name,
     gender: row.gender?.toUpperCase().startsWith("F") ? "female" : "male",
-    phone: digits.length >= 10 && digits.length <= 15 ? digits : undefined,
+    // "+91XXXXXXXXXX", or omitted if it isn't a valid Indian mobile.
+    phone: normalizeMobile(row.phone) ?? undefined,
     pickupLocation: { lat: pickup.lat, lng: pickup.lng },
     dropLocation: { lat: drop.lat, lng: drop.lng },
     pickupAddress: row.pickup,

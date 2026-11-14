@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { zIndianMobile } from '../lib/identity';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -26,7 +27,7 @@ router.get('/office', async (req: AuthRequest, res: Response, next: NextFunction
 
 router.patch('/phone', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { phone } = z.object({ phone: z.string().min(10).max(20) }).parse(req.body);
+    const { phone } = z.object({ phone: zIndianMobile('Contact number') }).parse(req.body);
     const u = await prisma.user.update({ where: { id: req.user!.id }, data: { phone }, select: { phone: true } });
     res.json(u);
   } catch (err) {
@@ -482,7 +483,7 @@ router.post('/rentals', async (req: AuthRequest, res: Response, next: NextFuncti
   try {
     const body = z.object({
       customerName: z.string().min(1).max(100),
-      customerPhone: z.string().min(10).max(15),
+      customerPhone: zIndianMobile('Customer mobile number'),
       vehicleType: z.enum(['sedan', 'suv']),
       packageKey: z.string().min(1),
       pickupAddress: z.string().min(1),

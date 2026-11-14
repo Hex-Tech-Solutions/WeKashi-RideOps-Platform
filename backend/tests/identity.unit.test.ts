@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar, isMaskedAadhaar,
-  hashAadhaar, normalizeVpa, normalizeRegNo, isValidIndianRegNo,
+  hashAadhaar, normalizeVpa, normalizeRegNo, isValidIndianRegNo, zIndianMobile,
 } from '../src/lib/identity';
 
 describe('identity normalisation', () => {
@@ -16,6 +16,15 @@ describe('identity normalisation', () => {
     for (const input of ['', '12345', '5741194444', '97411944441', '+14155552671']) {
       expect(normalizeIndianMobile(input)).toBeNull();
     }
+  });
+
+  it('zIndianMobile stores contact numbers as +91XXXXXXXXXX and rejects others', () => {
+    const schema = zIndianMobile('Contact phone');
+    expect(schema.parse('98111 22233')).toBe('+919811122233');
+    expect(schema.parse('+91 98111-22233')).toBe('+919811122233');
+    const bad = schema.safeParse('12345');
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(bad.error.issues[0].message).toContain('Contact phone');
   });
 
   it('normalises and validates Indian vehicle numbers', () => {

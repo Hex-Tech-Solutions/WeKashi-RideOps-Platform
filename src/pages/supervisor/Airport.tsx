@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PlacesInput } from "@/components/PlacesInput";
 import { OfficeMapPicker } from "@/components/OfficeMapPicker";
+import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import {
   useAirportRides, useCreateAirportRide, useCancelAirportRide, useComputeRoute,
   type AirportRideRow,
@@ -94,7 +95,7 @@ function AirportBookingForm() {
   const submit = (scheduled: boolean) => {
     if (!city) { toast.error("Set the " + cityLabel.toLowerCase()); return; }
     if (!paxName.trim()) { toast.error("Enter the passenger name"); return; }
-    if (paxPhone.trim().length < 10) { toast.error("Enter a valid mobile number"); return; }
+    if (!isValidMobile(paxPhone)) { toast.error("Enter a valid 10-digit mobile number"); return; }
     if (route == null) { toast.error("Wait for the route distance to calculate"); return; }
     let scheduledFor: string | undefined;
     if (scheduled) {
@@ -109,7 +110,7 @@ function AirportBookingForm() {
         cityPoint: { lat: city.lat, lng: city.lng },
         cityAddress: city.address,
         paxName: paxName.trim(),
-        paxPhone: paxPhone.trim(),
+        paxPhone: toE164(paxPhone),
         vehicleType,
         distanceKm: route.km,
         tollCharge: toll > 0 ? toll : undefined,
@@ -200,8 +201,8 @@ function AirportBookingForm() {
             <Input value={paxName} onChange={(e) => setPaxName(e.target.value)} placeholder="Full name" />
           </div>
           <div>
-            <Label className="text-xs">Mobile number</Label>
-            <Input value={paxPhone} onChange={(e) => setPaxPhone(e.target.value)} placeholder="10-digit mobile" inputMode="tel" />
+            <Label htmlFor="airport-pax-phone" className="text-xs">Mobile number</Label>
+            <PhoneInput id="airport-pax-phone" value={paxPhone} onChange={setPaxPhone} />
           </div>
         </div>
 

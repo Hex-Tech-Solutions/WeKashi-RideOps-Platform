@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import { CubeField } from "@/components/CubeField";
 import { Logo } from "@/components/Logo";
 import { useAuth, type AppRole } from "@/hooks/useAuth";
@@ -120,8 +121,7 @@ function RegistrationForm({ onBack }: { onBack: () => void }) {
     }
     if (form.password.length < 8) { toast.error("Password must be at least 8 characters"); return; }
     if (form.password !== form.confirmPassword) { toast.error("Passwords do not match"); return; }
-    const digits = form.mobile.replace(/[^\d]/g, "");
-    if (digits.length < 10 || digits.length > 15) { toast.error("Enter a valid mobile number (10–15 digits)"); return; }
+    if (!isValidMobile(form.mobile)) { toast.error("Enter a valid 10-digit mobile number"); return; }
 
     submit.mutate(
       {
@@ -129,7 +129,7 @@ function RegistrationForm({ onBack }: { onBack: () => void }) {
         fullName: form.fullName.trim(),
         email: form.email.trim(),
         password: form.password,
-        mobile: digits,
+        mobile: toE164(form.mobile),
         companyName: form.companyName.trim(),
         gstin: form.gstin.trim() || undefined,
         address: form.address.trim(),
@@ -199,7 +199,15 @@ function RegistrationForm({ onBack }: { onBack: () => void }) {
           </div>
           <Field label="Password *" value={form.password} onChange={f("password")} type="password" />
           <Field label="Confirm password *" value={form.confirmPassword} onChange={f("confirmPassword")} type="password" />
-          <Field label="Mobile number *" value={form.mobile} onChange={f("mobile")} type="tel" />
+          <div className="space-y-1.5">
+            <Label htmlFor="reg-mobile" className="text-white/80 text-xs">Mobile number *</Label>
+            <PhoneInput
+              id="reg-mobile"
+              value={form.mobile}
+              onChange={(mobile) => setForm((p) => ({ ...p, mobile }))}
+              className="bg-white/5 border-white/10 text-white h-9"
+            />
+          </div>
           <Field label={role === "vendor" ? "Company name *" : "Organisation *"} value={form.companyName} onChange={f("companyName")} />
           <div className="col-span-2">
             <Field label="GSTIN (optional)" value={form.gstin} onChange={f("gstin")} />
