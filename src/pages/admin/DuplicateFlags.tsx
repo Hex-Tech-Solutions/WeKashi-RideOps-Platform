@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 const KIND_LABELS: Record<string, string> = {
   shared_device: "Same device",
+  repeat_joining_bonus: "Repeat joining bonus",
 };
 
 /**

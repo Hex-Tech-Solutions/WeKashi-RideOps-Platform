@@ -148,6 +148,24 @@ describe('grantJoiningBonus (Req 7.3)', () => {
     expect(bonuses).toHaveLength(1);
     expect(await availableCredits(driverId)).toBe(1);
   });
+
+  it('withholds the bonus when the same person re-joins after their account was deleted', async () => {
+    await grantJoiningBonus(driverId);
+    const first = await prisma.driver.findUniqueOrThrow({ where: { id: driverId } });
+    // Vendor deletes the account the way removeDriver() does (phone renamed).
+    await prisma.driver.update({
+      where: { id: driverId },
+      data: { status: 'removed', removedAt: new Date(), phone: `removed:${driverId.slice(0, 8)}:${first.phone}` },
+    });
+
+    const again = await prisma.driver.create({
+      data: { phone: first.phone, fullName: 'Ledger Driver', vendorId, status: 'active', kycStatus: 'pending' },
+    });
+    await grantJoiningBonus(again.id);
+    expect(await availableCredits(again.id)).toBe(0);
+    const flag = await prisma.identityFlag.findFirst({ where: { kind: 'repeat_joining_bonus', driverId: again.id } });
+    expect(flag?.otherDriverId).toBe(driverId);
+  });
 });
 
 describe('activatePurchasedPack (Req 6.3 / 8.1)', () => {

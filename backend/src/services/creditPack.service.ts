@@ -7,7 +7,9 @@
 //     not past expiry.
 //   - consumeOneCredit burns exactly one credit per completed ride, never on
 //     cancel/no-show, and never twice for the same ride (Ride.creditConsumed).
-//   - grantJoiningBonus runs at most once per driver (joiningBonusGrantedAt).
+//   - grantJoiningBonus runs at most once per driver (joiningBonusGrantedAt)
+//     and at most once per person (identity match against earlier bonus
+//     accounts, including deleted ones).
 //   - activatePurchasedPack is idempotent via the caller's PackOrder guard.
 
 import { Prisma } from '@prisma/client';
@@ -103,12 +105,95 @@ async function expireStalePacks(driverId: string): Promise<void> {
 }
 
 /**
- * Grant the one-time joining-bonus credit. Guarded by Driver.joiningBonusGrantedAt
- * so it can never grant twice. (Req 7.1, 7.3)
+ * Has the same PERSON already received a joining bonus on another account?
+ * Matches this driver's identity keys against every other account that was
+ * granted a bonus, including removed (deleted) and rejected ones, so deleting
+ * an account and joining again (e.g. with another vendor) doesn't earn a
+ * second bonus. Keys: phone / alt phone (last 10 digits, either column),
+ * DL number, Aadhaar hash, UPI ID, vehicle reg no (linked vehicle or RC doc).
+ * Renamed values on removed/rejected rows ("removed:<id8>:...") still match.
+ */
+async function findPriorBonusAccount(
+  driverId: string,
+  db: Prisma.TransactionClient,
+): Promise<{ id: string; field: string } | null> {
+  const rows = await db.$queryRaw<Array<{ id: string; field: string }>>`
+    WITH me AS (
+      SELECT
+        d.id,
+        NULLIF(right(regexp_replace(d.phone, '\\D', '', 'g'), 10), '')                        AS p1,
+        NULLIF(right(regexp_replace(coalesce(d.alt_phone, ''), '\\D', '', 'g'), 10), '')      AS p2,
+        NULLIF(upper(regexp_replace(coalesce(d.dl_number, ''), '[^A-Za-z0-9]', '', 'g')), '') AS dl,
+        NULLIF(d.gov_id_hash, '')                                                             AS gid,
+        NULLIF(lower(coalesce(d.upi_vpa, '')), '')                                            AS upi,
+        NULLIF(upper(regexp_replace(
+          regexp_replace(coalesce(v.reg_no, ''), '^(removed|rejected):[^:]*:', ''),
+          '[^A-Za-z0-9]', '', 'g')), '')                                                     AS reg
+      FROM drivers d
+      LEFT JOIN vehicles v ON v.id = d.vehicle_id
+      WHERE d.id = ${driverId}
+    ),
+    other AS (
+      SELECT
+        o.id,
+        NULLIF(right(regexp_replace(o.phone, '\\D', '', 'g'), 10), '')                        AS p1,
+        NULLIF(right(regexp_replace(coalesce(o.alt_phone, ''), '\\D', '', 'g'), 10), '')      AS p2,
+        NULLIF(upper(regexp_replace(coalesce(o.dl_number, ''), '[^A-Za-z0-9]', '', 'g')), '') AS dl,
+        NULLIF(o.gov_id_hash, '')                                                             AS gid,
+        NULLIF(lower(coalesce(o.upi_vpa, '')), '')                                            AS upi,
+        NULLIF(upper(regexp_replace(
+          regexp_replace(coalesce(ov.reg_no, ''), '^(removed|rejected):[^:]*:', ''),
+          '[^A-Za-z0-9]', '', 'g')), '')                                                     AS reg,
+        o.created_at
+      FROM drivers o
+      LEFT JOIN vehicles ov ON ov.id = o.vehicle_id
+      WHERE o.id <> ${driverId} AND o.joining_bonus_granted_at IS NOT NULL
+    )
+    SELECT o.id,
+      CASE
+        WHEN me.p1 IN (o.p1, o.p2) OR me.p2 IN (o.p1, o.p2) THEN 'phone'
+        WHEN me.dl  = o.dl  THEN 'dlNumber'
+        WHEN me.gid = o.gid THEN 'aadhaar'
+        WHEN me.upi = o.upi THEN 'upiVpa'
+        ELSE 'regNo'
+      END AS field
+    FROM other o, me
+    WHERE me.p1 IN (o.p1, o.p2)
+       OR me.p2 IN (o.p1, o.p2)
+       OR me.dl  = o.dl
+       OR me.gid = o.gid
+       OR me.upi = o.upi
+       OR me.reg = o.reg
+       OR (me.reg IS NOT NULL AND EXISTS (
+            SELECT 1 FROM driver_documents doc
+            WHERE doc.driver_id = o.id AND doc.type = 'rc'
+              AND upper(regexp_replace(coalesce(doc.number, ''), '[^A-Za-z0-9]', '', 'g')) = me.reg))
+    ORDER BY o.created_at
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Grant the one-time joining-bonus credit. Once per PERSON, not just per
+ * account:
+ *  - Driver.joiningBonusGrantedAt makes it once per account (atomic claim).
+ *  - findPriorBonusAccount stops a second bonus when the same person already
+ *    got one on another account (deleted and re-joined, etc.). The match is
+ *    logged and flagged to admins (/admin/duplicates); nothing is granted.
+ * (Req 7.1, 7.3)
  */
 export async function grantJoiningBonus(driverId: string): Promise<void> {
+  const check: { repeatOf: { id: string; field: string } | null } = { repeatOf: null };
   await prisma.$transaction(async (tx) => {
     const now = new Date();
+    // Serialise grants for this driver, then check for an earlier bonus.
+    await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
+    const fresh = await tx.driver.findUnique({ where: { id: driverId }, select: { joiningBonusGrantedAt: true } });
+    if (!fresh || fresh.joiningBonusGrantedAt) return;
+    check.repeatOf = await findPriorBonusAccount(driverId, tx);
+    if (check.repeatOf) return; // same person already had a bonus — grant nothing
+
     // Claim the grant atomically: only the one call that flips
     // joiningBonusGrantedAt from NULL proceeds. Re-activation, KYC renewal,
     // document re-verification or concurrent calls can never grant twice.
@@ -131,6 +216,21 @@ export async function grantJoiningBonus(driverId: string): Promise<void> {
       },
     });
   });
+
+  if (check.repeatOf) {
+    const prior = check.repeatOf;
+    logger.warn(
+      { driverId, priorDriverId: prior.id, field: prior.field },
+      'Joining bonus withheld: same person already received one on another account',
+    );
+    const { flagPossibleDuplicate } = await import('../lib/identity');
+    await flagPossibleDuplicate({
+      kind: 'repeat_joining_bonus',
+      driverId,
+      otherDriverId: prior.id,
+      detail: `Joining bonus not granted — matched on ${prior.field}`,
+    });
+  }
 }
 
 /**
