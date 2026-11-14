@@ -42,13 +42,21 @@ export function stopKycSweeper(): void {
  */
 export async function sweepExpiredKyc(): Promise<void> {
   try {
-    // Find all drivers with at least one verified-but-expired document.
+    // Drivers whose CURRENT copy of some document type (the newest reviewed
+    // upload of that type — same rule as kyc.service computeKycStatus) is
+    // verified but expired. Older copies replaced by a renewal are ignored,
+    // otherwise a renewed driver would flip back to expired.
     const expiredDriverIds = await prisma.$queryRaw<Array<{ driver_id: string }>>`
       SELECT DISTINCT driver_id
-      FROM driver_documents
-      WHERE status  = 'verified'
-        AND expiry IS NOT NULL
-        AND expiry  < NOW()
+      FROM (
+        SELECT DISTINCT ON (driver_id, type) driver_id, status, expiry
+        FROM driver_documents
+        WHERE status <> 'pending'
+        ORDER BY driver_id, type, created_at DESC
+      ) cur
+      WHERE cur.status = 'verified'
+        AND cur.expiry IS NOT NULL
+        AND cur.expiry < NOW()
     `;
 
     if (expiredDriverIds.length === 0) return;

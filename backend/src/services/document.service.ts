@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { UPLOAD_DIR } from '../lib/storage';
 import { NotFoundError, ForbiddenError, ValidationError } from '../types';
 import { DOC_TYPE_RULES, replaceBlockedReason } from '../lib/documentTypes';
+import { recomputeKycStatus } from './kyc.service';
 
 /**
  * Check, before the file is stored, that the driver may upload a new version
@@ -94,14 +95,20 @@ export async function setDocumentStatus(
     throw new ValidationError('A newer version of this document has been uploaded. Review that one instead.');
   }
 
-  return prisma.driverDocument.update({
-    where: { id: docId },
-    data: {
-      status,
-      reviewedBy,
-      reviewedAt: new Date(),
-      rejectionNote: status === 'rejected' ? (rejectionNote ?? null) : null,
-    },
+  // Store the review and the resulting KYC status together (#1). The KYC
+  // recompute never touches credits.
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.driverDocument.update({
+      where: { id: docId },
+      data: {
+        status,
+        reviewedBy,
+        reviewedAt: new Date(),
+        rejectionNote: status === 'rejected' ? (rejectionNote ?? null) : null,
+      },
+    });
+    await recomputeKycStatus(doc.driverId, tx);
+    return updated;
   });
 }
 
