@@ -228,6 +228,20 @@ model DriverDocument {
   @@map("driver_documents")
 }
 
+/// Expiry reminder sent for a document (#13). threshold = days before expiry
+/// (30, 15, 7, 1) or 0 = expired. Unique per document + step: sent once.
+model DocExpiryNotice {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  driverId   String   @map("driver_id")
+  threshold  Int
+  sentAt     DateTime @default(now()) @map("sent_at")
+
+  @@unique([documentId, threshold])
+  @@index([driverId])
+  @@map("doc_expiry_notices")
+}
+
 model DriverIssue {
   id           String   @id @default(uuid())
   supervisorId String   @map("supervisor_id")

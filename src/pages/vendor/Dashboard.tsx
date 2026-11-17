@@ -2,6 +2,7 @@ import { PageHeader, StatCard } from "@/components/RoleLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDrivers, useRides } from "@/lib/queries";
 import { useAuth } from "@/hooks/useAuth";
+import { ExpiringDocsCard } from "@/components/ExpiringDocsCard";
 import { CheckCircle2, Users, Radio, FileCheck, Wallet } from "lucide-react";
 
 export default function VendorDashboard() {
@@ -42,6 +43,8 @@ export default function VendorDashboard() {
             <Row label="Blacklisted" value={drivers.filter((d) => d.status === "blacklisted").length} />
           </CardContent>
         </Card>
+
+        <div className="lg:col-span-2"><ExpiringDocsCard /></div>
 
         <Card className="shadow-card">
           <CardHeader><CardTitle className="text-base flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-success" /> Top performers</CardTitle></CardHeader>

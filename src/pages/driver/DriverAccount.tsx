@@ -72,6 +72,50 @@ export function JoiningBonusBanner({ me, onDocumentsTab = false }: { me?: Driver
   );
 }
 
+const EXPIRY_DOC_LABELS: Record<string, string> = {
+  aadhaar: "Aadhaar Card", dl: "Driving Licence", rc: "Vehicle RC", puc: "PUC Certificate",
+  insurance: "Insurance", fitness_certificate: "Fitness Certificate",
+  commercial_permit: "Commercial Permit", road_tax: "Road Tax", photo: "Profile Photo",
+};
+
+/**
+ * #13: verified documents expiring within 30 days (or expired). Disappears
+ * once a renewed copy is verified. Expired items are left to KycBlockedBanner
+ * once KYC has been marked expired.
+ */
+export function DocExpiryBanner({ me, onDocumentsTab = false }: { me?: DriverProfile; onDocumentsTab?: boolean }) {
+  const items = (me?.expiringDocs ?? []).filter((d) => !(d.daysLeft <= 0 && me?.kycStatus === "expired"));
+  if (items.length === 0) return null;
+  const anyExpired = items.some((d) => d.daysLeft <= 0);
+  const where = onDocumentsTab ? "below" : "in the Documents tab";
+  return (
+    <div
+      role={anyExpired ? "alert" : "status"}
+      className={`flex items-start gap-3 rounded-lg border p-4 ${anyExpired ? "border-destructive/40 bg-destructive/10" : "border-warning/40 bg-warning/10"}`}
+    >
+      <AlertTriangle className={`h-5 w-5 mt-0.5 shrink-0 ${anyExpired ? "text-destructive" : "text-warning"}`} aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="font-semibold text-sm">{anyExpired ? "Document expired — rides blocked" : "Documents expiring soon"}</div>
+        <ul className="text-xs mt-1 space-y-0.5">
+          {items.map((d) => {
+            const label = EXPIRY_DOC_LABELS[d.type] ?? d.type;
+            const when = d.daysLeft <= 0 ? "expired" : d.daysLeft === 1 ? "expires tomorrow" : `expires in ${d.daysLeft} days`;
+            return (
+              <li key={d.type}>
+                <span className="font-medium">{label}</span> {when}
+                {d.renewalPending && <span className="text-muted-foreground"> · renewal uploaded, waiting for your vendor</span>}
+              </li>
+            );
+          })}
+        </ul>
+        {items.some((d) => !d.renewalPending) && (
+          <div className="text-xs text-muted-foreground mt-1">Upload the renewed copy {where} so your rides don't stop.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * KYC rejected (a document — including a renewal — was rejected) or expired:
  * rides are blocked until a new copy is verified. Disappears once KYC is

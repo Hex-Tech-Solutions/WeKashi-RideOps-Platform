@@ -15,6 +15,7 @@ import {
 } from '../lib/pricing';
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import { spareCredits, consumeOneCredit } from './creditPack.service';
+import { assertDriverCanTakeRides, noExpiredDocSql } from '../lib/rideEligibility';
 import { promoteQueuedRide } from '../lib/ridePromotion';
 import { emitDriverBroadcast } from '../lib/driverBroadcast';
 import { randomInt } from 'crypto';
@@ -260,6 +261,9 @@ export async function acceptRide(rideId: string, driverId: string): Promise<{ qu
     // Serialise this driver's accepts/claims so two at once can't both spend
     // the same last credit.
     await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
+
+    // Active + KYC approved + no expired document (#13).
+    await assertDriverCanTakeRides(driverId, tx);
 
     // Credit gate: the driver needs a credit that isn't already committed to
     // another accepted/claimed ride (applies to a normal or queued accept).
@@ -737,6 +741,8 @@ export async function claimScheduledRide(rideId: string, driverId: string): Prom
     // Lock the driver row so two claims at once can't both pass the credit
     // check, then require a credit not already committed to another ride.
     await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
+    // Scheduled claims had no KYC check before (#13).
+    await assertDriverCanTakeRides(driverId, tx);
     if ((await spareCredits(driverId, tx)) < 1) {
       throw new ForbiddenError('No ride credits left — buy a pack to claim this ride');
     }
@@ -798,6 +804,7 @@ export async function nearbyDriversForRide(rideId: string, radiusKm: number) {
     WHERE d.is_online = true
       AND d.status = 'active'
       AND d.kyc_status = 'approved'
+      AND ${noExpiredDocSql('d.id')}
       AND d.current_location IS NOT NULL
       AND ST_DWithin(d.current_location, ST_Point(${lng}, ${lat})::geography, ${radiusKm * 1000})
       -- Active-ride gate: block drivers on an active ride unless finishing it
@@ -888,6 +895,7 @@ export async function manualAssignRide(
 
     // Credit gate — same as an accept (driver row locked to serialise).
     await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
+    await assertDriverCanTakeRides(driverId, tx, 'other');
     const credits = await spareCredits(driverId, tx);
     if (credits < 1) {
       throw new ForbiddenError('Driver has no ride credits');

@@ -19,6 +19,35 @@ async function pushNotice(driverId: string, notice: { title: string; body: strin
   }
 }
 
+/** #13: a verified document expires in `daysLeft` days (30 / 15 / 7 / 1). */
+export async function notifyDocumentExpiring(driverId: string, docType: string, daysLeft: number): Promise<void> {
+  const label = DOC_TYPE_RULES[docType]?.label ?? 'document';
+  const when = daysLeft <= 1 ? 'tomorrow' : `in ${daysLeft} days`;
+  try {
+    await pushNotice(driverId, {
+      kind: 'document_expiring',
+      title: `${label} expires ${when}`,
+      body: `Upload your renewed ${label} in the Documents tab before it expires, or you won't get rides.`,
+    });
+  } catch (err) {
+    logger.error({ err, driverId, docType }, 'Document-expiring notice failed');
+  }
+}
+
+/** #13: a verified document has expired — rides are blocked until a new copy is verified. */
+export async function notifyDocumentExpired(driverId: string, docType: string): Promise<void> {
+  const label = DOC_TYPE_RULES[docType]?.label ?? 'document';
+  try {
+    await pushNotice(driverId, {
+      kind: 'document_expired',
+      title: `${label} expired — rides blocked`,
+      body: `Your ${label} has expired. Upload a valid copy in the Documents tab. You won't get rides until it's verified.`,
+    });
+  } catch (err) {
+    logger.error({ err, driverId, docType }, 'Document-expired notice failed');
+  }
+}
+
 /** Vendor/admin rejected a document: KYC is now rejected until a new copy is verified. */
 export async function notifyDocumentRejected(driverId: string, docType: string, note?: string | null): Promise<void> {
   const label = DOC_TYPE_RULES[docType]?.label ?? 'document';

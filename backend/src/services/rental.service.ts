@@ -10,6 +10,7 @@ import { getRentalPack, computeRentalOverage, type RentalVehicle } from '../lib/
 import { NotFoundError, ValidationError, ConflictError } from '../types';
 import { logger } from '../lib/logger';
 import { spareCredits } from './creditPack.service';
+import { assertDriverCanTakeRides } from '../lib/rideEligibility';
 import { randomInt } from 'crypto';
 
 // A driver's dismissed rentals persist across refreshes (so a declined card
@@ -471,6 +472,9 @@ export async function listEligibleRentalsForDriver(driverId: string) {
     return [];
   }
 
+  // Any expired document = no rentals (#13).
+  try { await assertDriverCanTakeRides(driverId, prisma); } catch { return []; }
+
   // Needs a credit not already committed to an accepted/claimed ride.
   if ((await spareCredits(driverId)) < 1) return [];
 
@@ -568,6 +572,7 @@ export async function acceptRental(rentalId: string, driverId: string): Promise<
     // A credit already committed to an accepted/claimed ride can't also be
     // spent on this rental.
     await tx.$queryRaw`SELECT id FROM drivers WHERE id = ${driverId} FOR UPDATE`;
+    await assertDriverCanTakeRides(driverId, tx);
     if ((await spareCredits(driverId, tx)) < 1) {
       throw new ValidationError('No ride credits available — buy a pack to accept rentals');
     }

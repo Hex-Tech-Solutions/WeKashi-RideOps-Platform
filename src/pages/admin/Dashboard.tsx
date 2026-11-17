@@ -2,6 +2,7 @@ import { PageHeader, StatCard } from "@/components/RoleLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LiveCabMap } from "@/components/LiveCabMap";
+import { ExpiringDocsCard } from "@/components/ExpiringDocsCard";
 import { statusColor } from "@/lib/rideStatus";
 import { useAnalyticsOverview, useRides, useVendors, usePayouts, useLiveDriverLocations } from "@/lib/queries";
 import { Activity, Car, Users, Clock, IndianRupee, CheckCircle2, Wallet } from "lucide-react";
@@ -45,6 +46,8 @@ export default function AdminDashboard() {
         <StatCard label="Total vendor payouts" value={`₹${totalPayouts.toLocaleString()}`} hint={`${payoutsList.length} payout record${payoutsList.length === 1 ? "" : "s"}`} icon={Wallet} />
         <StatCard label="Vendors" value={vendors.length} hint="Fleet partners" icon={Users} />
       </div>
+
+      <div className="mb-6"><ExpiringDocsCard showVendor /></div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <Card className="lg:col-span-2 shadow-card">

@@ -12,6 +12,7 @@ import {
   setDriverVehicle,
 } from '../services/driver.service';
 import { FUEL_TYPES } from '../lib/driverProfile';
+import { listExpiringDocs } from '../services/docExpiry.service';
 import { listDocumentsForVendor, setDocumentStatus, countPendingDocsForVendor } from '../services/document.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -96,6 +97,31 @@ export function createDriversRouter(io: IoServer): Router {
         if (!vendorId) { res.json({ count: 0 }); return; }
         const count = await countPendingDocsForVendor(vendorId);
         res.json({ count });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // GET /drivers/expiring-docs — vendor (own drivers) / admin: verified
+  // documents expiring within 30 days or already expired (#13). Before /:id.
+  router.get(
+    '/expiring-docs',
+    requireRole('vendor', 'admin'),
+    async (req: AuthRequest, res: Response, next: NextFunction) => {
+      try {
+        const vendorId = await vendorIdFor(req);
+        const docs = await listExpiringDocs({ vendorId });
+        const { prisma } = await import('../lib/prisma');
+        const drivers = await prisma.driver.findMany({
+          where: { id: { in: [...new Set(docs.map((d) => d.driverId))] } },
+          select: { id: true, fullName: true, phone: true, vendor: { select: { name: true } } },
+        });
+        const byId = new Map(drivers.map((d) => [d.id, d]));
+        res.json({
+          documents: docs.map((d) => ({ ...d, driver: byId.get(d.driverId) ?? null })),
+          expiredCount: docs.filter((d) => d.daysLeft <= 0).length,
+        });
       } catch (err) {
         next(err);
       }

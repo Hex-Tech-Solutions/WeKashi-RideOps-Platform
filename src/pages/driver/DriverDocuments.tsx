@@ -13,7 +13,7 @@ import {
   PROFILE_ITEM_LABELS,
 } from "@/lib/queries";
 import { DocumentViewer } from "@/components/DocumentViewer";
-import { JoiningBonusBanner, KycBlockedBanner } from "./DriverAccount";
+import { JoiningBonusBanner, KycBlockedBanner, DocExpiryBanner } from "./DriverAccount";
 import { format, subDays } from "date-fns";
 import {
   FileText,
@@ -88,6 +88,7 @@ export default function DriverDocuments({ onOpenAccount }: { onOpenAccount?: (se
       <JoiningBonusBanner me={meData} onDocumentsTab />
       {/* Rejected KYC (expired has its own banner below) */}
       {meData?.kycStatus === "rejected" && <KycBlockedBanner me={meData} onDocumentsTab />}
+      <DocExpiryBanner me={meData} onDocumentsTab />
       {/* ── KYC suspended banner ── */}
       {kycExpired && (
         <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4">

@@ -604,6 +604,27 @@ export interface DriverProfile {
   joiningBonusCredits?: number;
   /** #9: details still to fill in before documents can be uploaded. */
   profileMissing?: ProfileItem[];
+  /** #13: verified documents expiring within 30 days (daysLeft <= 0 = expired). */
+  expiringDocs?: { type: string; expiry: string; daysLeft: number; renewalPending: boolean }[];
+}
+
+export interface ExpiringDocRow {
+  documentId: string;
+  driverId: string;
+  type: string;
+  expiry: string;
+  daysLeft: number;
+  renewalPending: boolean;
+  driver: { id: string; fullName: string; phone: string; vendor?: { name: string } | null } | null;
+}
+
+/** Vendor (own drivers) / admin: documents expiring within 30 days or expired (#13). */
+export function useExpiringDocs() {
+  return useQuery({
+    queryKey: ["drivers", "expiring-docs"],
+    queryFn: () => api<{ documents: ExpiringDocRow[]; expiredCount: number }>("/drivers/expiring-docs"),
+    refetchInterval: 5 * 60_000,
+  });
 }
 
 export function useDriverMe() {

@@ -21,7 +21,7 @@ import DriverBoarding from "./DriverBoarding";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
 import { OfferCountdown } from "./OfferCountdown";
 import { DriverEarningsCard } from "./DriverEarningsCard";
-import { JoiningBonusBanner, KycBlockedBanner } from "./DriverAccount";
+import { JoiningBonusBanner, KycBlockedBanner, DocExpiryBanner } from "./DriverAccount";
 import { MadeInIndiaFooter } from "@/components/MadeInIndiaFooter";
 import { RideTypeBadge } from "@/components/RideTypeLabel";
 import { format } from "date-fns";
@@ -372,6 +372,9 @@ export default function DriverHome() {
           )}
           {(me?.kycStatus === "rejected" || me?.kycStatus === "expired") && (
             <div className="mt-3"><KycBlockedBanner me={me} /></div>
+          )}
+          {(me?.expiringDocs?.length ?? 0) > 0 && (
+            <div className="mt-3"><DocExpiryBanner me={me} /></div>
           )}
           {me?.joiningBonus === "awaiting_kyc" && me.kycStatus !== "rejected" && me.kycStatus !== "expired" && (
             <div className="mt-3"><JoiningBonusBanner me={me} /></div>

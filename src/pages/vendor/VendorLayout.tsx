@@ -1,7 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { LayoutDashboard, Users, FileCheck, Car, History, Wallet, Settings, AlertTriangle } from "lucide-react";
 import { RoleLayout, NavItem } from "@/components/RoleLayout";
-import { useDrivers, useVendorProfile } from "@/lib/queries";
+import { useDrivers, useVendorProfile, useExpiringDocs } from "@/lib/queries";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function VendorLayout() {
@@ -9,8 +9,11 @@ export default function VendorLayout() {
   const { data } = useDrivers();
   const { data: vendorProfile } = useVendorProfile();
   const pendingKyc = (data?.drivers ?? []).filter((d) => d.status === "pending").length;
+  // #13: expiring / expired documents → badge on the Dashboard (list lives there).
+  const { data: expiring } = useExpiringDocs();
+  const expiringCount = expiring?.documents.length ?? 0;
   const nav: NavItem[] = [
-    { to: "/vendor", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/vendor", label: "Dashboard", icon: LayoutDashboard, badge: expiringCount || undefined },
     { to: "/vendor/approvals", label: "Driver Approvals", icon: FileCheck, badge: pendingKyc || undefined },
     { to: "/vendor/drivers", label: "Drivers", icon: Users },
     { to: "/vendor/fleet", label: "Fleet", icon: Car },

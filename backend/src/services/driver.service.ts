@@ -3,6 +3,8 @@ import { prisma } from '../lib/prisma';
 import { NotFoundError, ForbiddenError, ValidationError, ConflictError, NearbyDriver } from '../types';
 import { requireIndianRegNo, assertRegNoAvailable, normalizeRegNo, IDENTITY_CONFLICT_MESSAGE } from '../lib/identity';
 import { profileMissing, type FuelType } from '../lib/driverProfile';
+import { noExpiredDocSql } from '../lib/rideEligibility';
+import { listExpiringDocs } from './docExpiry.service';
 import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
 import { getDriverActiveRide } from '../lib/activeRideCache';
@@ -199,6 +201,10 @@ export async function getDriver(id: string) {
     joiningBonusCredits: JOINING_BONUS_CREDITS,
     // #9: what must be filled in before documents can be uploaded.
     profileMissing: profileMissing(driver),
+    // #13: verified documents expiring within 30 days (or expired).
+    expiringDocs: (await listExpiringDocs({ driverId: id })).map((d) => ({
+      type: d.type, expiry: d.expiry, daysLeft: d.daysLeft, renewalPending: d.renewalPending,
+    })),
   };
 }
 
@@ -387,6 +393,7 @@ export async function findNearbyDrivers(
     WHERE is_online = true
       AND status = 'active'
       AND kyc_status = 'approved'
+      AND ${noExpiredDocSql('drivers.id')}
       AND current_location IS NOT NULL
       AND (${vt}::text IS NULL OR vehicle_type = ${vt})
       AND ST_DWithin(
@@ -460,6 +467,7 @@ export async function vehicleAvailability(
     WHERE is_online = true
       AND status = 'active'
       AND kyc_status = 'approved'
+      AND ${noExpiredDocSql('drivers.id')}
       AND current_location IS NOT NULL
       AND vehicle_type IS NOT NULL
       AND ST_DWithin(current_location, ST_Point(${lng}, ${lat})::geography, ${radiusKm * 1000})
@@ -626,6 +634,7 @@ export async function listNearbyCabs(
     WHERE is_online = true
       AND status = 'active'
       AND kyc_status = 'approved'
+      AND ${noExpiredDocSql('drivers.id')}
       AND current_location IS NOT NULL
       AND (${vt}::text IS NULL OR vehicle_type = ${vt})
       AND ST_DWithin(current_location, ST_Point(${lng}, ${lat})::geography, ${radiusKm * 1000})
