@@ -98,6 +98,7 @@ import { listRides, listScheduledRidesForDriver } from '../services/ride.service
 import { listPackCatalog } from '../lib/creditPacks';
 import { availableCredits, listPacks, getDriverStats } from '../services/creditPack.service';
 import { createOrder, confirmAndActivate, getPackInvoice } from '../services/packOrder.service';
+import { listDriverTrips } from '../services/driverTrips.service';
 import { saveAndValidateVpa } from '../services/vpa.service';
 import {
   setRentalOptIn,
@@ -198,6 +199,17 @@ router.get('/offers', async (req: AuthRequest, res: Response, next: NextFunction
       countDriverOffers(req.driver!.id),
     ]);
     res.json({ offers, totalCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/driver/trips?range=today|last7|prev7 — Recent trips (#16):
+// completed rides + rentals in the IST period with trip/earnings totals.
+router.get('/trips', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { range } = z.object({ range: z.enum(['today', 'last7', 'prev7']).default('today') }).parse(req.query);
+    res.json(await listDriverTrips(req.driver!.id, range));
   } catch (err) {
     next(err);
   }

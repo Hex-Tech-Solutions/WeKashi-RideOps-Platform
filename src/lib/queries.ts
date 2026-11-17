@@ -1922,6 +1922,7 @@ export function useMarkRideReceived() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["driver", "rides"] });
+      qc.invalidateQueries({ queryKey: ["driver", "trips"] });
     },
   });
 }
@@ -2428,7 +2429,42 @@ export function useMarkRentalReceived() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api(`/driver/rentals/${id}/received`, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "rentals", "history"] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["driver", "rentals", "history"] });
+      void qc.invalidateQueries({ queryKey: ["driver", "trips"] });
+    },
+  });
+}
+
+/** #16: Recent trips period. today | last 7 days | 8–14 days ago (IST). */
+export type TripRange = "today" | "last7" | "prev7";
+
+export interface DriverTripRide {
+  id: string;
+  type: string;
+  status: string;
+  pickupAddress: string;
+  dropAddress: string;
+  price: number | null;
+  escortCharge: number | null;
+  completedAt: string | null;
+  createdAt: string;
+  paymentStatus: string;
+  paymentRef: string | null;
+  paidAt: string | null;
+  paymentReceivedAt: string | null;
+}
+
+/** Completed rides + rentals in the period, with trip / earnings totals (cancelled excluded). */
+export function useDriverTrips(range: TripRange) {
+  return useQuery({
+    queryKey: ["driver", "trips", range],
+    queryFn: () => api<{
+      rides: DriverTripRide[];
+      rentals: RentalHistoryRow[];
+      summary: { trips: number; earnings: number };
+    }>(`/driver/trips?range=${range}`),
+    refetchInterval: 60_000,
   });
 }
 

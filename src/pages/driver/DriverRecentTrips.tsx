@@ -1,6 +1,8 @@
 /**
- * Recent trips list for the driver account side panel. Shows completed and
- * cancelled rides; tapping one opens the completed-ride detail sheet. Moved
+ * Recent trips list for the driver account side panel (#16). Filters Today /
+ * Last 7 days / 8–14 days ago (IST) with Trips + Earnings tiles from the
+ * server; only completed rides and rentals (cancelled are hidden and not
+ * counted). Tapping a ride opens the completed-ride detail sheet. Moved
  * here out of DriverHome so the home screen stays focused on going online and
  * live broadcasts.
  *
@@ -14,19 +16,29 @@ import { ChevronRight, CheckCircle2, Loader2, BadgeIndianRupee, CarFront } from 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  useDriverRides, useMarkRideReceived,
-  useDriverRentalHistory, useMarkRentalReceived,
-  type RideRow, type RentalHistoryRow,
+  useMarkRideReceived,
+  useDriverTrips, useMarkRentalReceived,
+  type DriverTripRide, type RentalHistoryRow, type TripRange,
 } from "@/lib/queries";
 import { CompletedRideDetailSheet } from "@/components/CompletedRideDetailSheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { format } from "date-fns";
+
+const RANGE_LABELS: Record<TripRange, string> = {
+  today: "Today",
+  last7: "Last 7 days",
+  prev7: "8–14 days ago",
+};
+
+const money = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 export function DriverRecentTrips() {
-  const { data: ridesData } = useDriverRides();
-  const { data: rentalData } = useDriverRentalHistory();
-  const rides = ridesData?.rides ?? [];
-  const rentals = rentalData?.rentals ?? [];
-  const history = rides.filter((r) => ["completed", "cancelled"].includes(r.status));
+  // #16: periods + totals come from the server; cancelled rides are excluded.
+  const [range, setRange] = useState<TripRange>("today");
+  const { data, isLoading } = useDriverTrips(range);
+  const history = data?.rides ?? [];
+  const rentals = data?.rentals ?? [];
   const [detailRideId, setDetailRideId] = useState<string | undefined>(undefined);
   const [openRental, setOpenRental] = useState<string | undefined>(undefined);
 
@@ -34,6 +46,28 @@ export function DriverRecentTrips() {
 
   return (
     <div className="space-y-2">
+      <Tabs value={range} onValueChange={(v) => setRange(v as TripRange)}>
+        <TabsList className="grid grid-cols-3 w-full">
+          {(Object.keys(RANGE_LABELS) as TripRange[]).map((k) => (
+            <TabsTrigger key={k} value={k} className="text-xs px-1">{RANGE_LABELS[k]}</TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg border p-3">
+          <div className="text-[11px] text-muted-foreground uppercase tracking-wider">Trips</div>
+          <div className="text-2xl font-bold">{data?.summary.trips ?? (isLoading ? "…" : 0)}</div>
+        </div>
+        <div className="rounded-lg border p-3">
+          <div className="text-[11px] text-muted-foreground uppercase tracking-wider">Earnings</div>
+          <div className="text-2xl font-bold">{data ? money(data.summary.earnings) : isLoading ? "…" : money(0)}</div>
+        </div>
+      </div>
+
+      {isLoading && (
+        <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-gold" /></div>
+      )}
       {/* Completed rentals — shown as their own cards with a trip summary. */}
       {rentals.map((r) => (
         <RentalHistoryCard
@@ -44,9 +78,9 @@ export function DriverRecentTrips() {
         />
       ))}
 
-      {empty ? (
+      {isLoading ? null : empty ? (
         <div className="text-xs text-muted-foreground text-center py-8 border-2 border-dashed rounded-lg">
-          No trips yet. Completed rides will show up here.
+          No completed trips {range === "today" ? "today" : `in ${RANGE_LABELS[range].toLowerCase()}`}.
         </div>
       ) : (
         history.map((r) => (
@@ -61,10 +95,14 @@ export function DriverRecentTrips() {
               >
                 <div className="min-w-0">
                   <div className="truncate">{r.pickupAddress} → {r.dropAddress}</div>
-                  <div className="text-xs text-muted-foreground capitalize">{r.status}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Completed · {format(new Date(r.completedAt ?? r.createdAt), "dd MMM, h:mm a")}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="font-semibold">{r.price != null ? `₹${r.price}` : "—"}</span>
+                  <span className="font-semibold">
+                    {r.price != null ? money((r.price ?? 0) + (r.escortCharge ?? 0)) : "—"}
+                  </span>
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </div>
               </div>
@@ -180,7 +218,7 @@ function RentalHistoryCard({ rental: r, expanded, onToggle }: { rental: RentalHi
 }
 
 /** UTR receipt + "mark as received" for a supervisor-paid ride. */
-function PaymentReceipt({ ride }: { ride: RideRow }) {
+function PaymentReceipt({ ride }: { ride: Pick<DriverTripRide, "id" | "paymentRef" | "paymentReceivedAt"> }) {
   const markReceived = useMarkRideReceived();
   const received = !!ride.paymentReceivedAt;
 
