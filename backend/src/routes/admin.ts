@@ -31,6 +31,16 @@ router.get('/pack-sales', async (req: AuthRequest, res: Response, next: NextFunc
   }
 });
 
+// GET /admin/pack-sales/:id/invoice — GST tax invoice for any paid order (#5)
+router.get('/pack-sales/:id/invoice', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { getPackInvoice } = await import('../services/packOrder.service');
+    res.json(await getPackInvoice(req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
 const TenantSchema = z.object({
   company: z.string().min(2).max(100),
   fullName: z.string().min(2).max(100),

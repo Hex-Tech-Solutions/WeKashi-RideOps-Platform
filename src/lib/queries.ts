@@ -1931,8 +1931,67 @@ export function useMarkRideReceived() {
 export interface PackDefinition {
   key: string;
   credits: number;
+  /** Base price before GST. */
   price: number;
   validityDays: number;
+  /** #5: GST amount and the total the driver pays. */
+  gst: number;
+  total: number;
+  gstRatePercent: number;
+}
+
+/** GST tax invoice (#5) — same shape for driver and admin. */
+export interface InvoiceView {
+  invoiceNo: string;
+  invoiceDate: string;
+  seller: { legalName: string; gstin: string; state: string; stateCode: string; address: string | null };
+  buyer: { name: string; phone: string; state: string };
+  placeOfSupply: string;
+  item: { description: string; sac: string | null; quantity: number; credits: number };
+  amounts: { taxable: number; cgstRate: number; cgst: number; sgstRate: number; sgst: number; total: number };
+  amountInWords: string;
+  payment: { gatewayOrderId: string; gatewayPaymentId: string | null };
+}
+
+/** Fetch an invoice: driver `/driver/purchases/:id/invoice`, admin `/admin/pack-sales/:id/invoice`. */
+export function useInvoice(path: string | null) {
+  return useQuery({
+    queryKey: ["invoice", path],
+    queryFn: () => api<InvoiceView>(path!),
+    enabled: !!path,
+    staleTime: Infinity,
+  });
+}
+
+export interface PackSaleRow {
+  id: string;
+  driverId: string;
+  driverName: string | null;
+  driverPhone: string | null;
+  vendorName: string | null;
+  packKey: string;
+  credits: number;
+  amount: number;
+  baseAmount: number;
+  gstAmount: number;
+  invoiceNo: string | null;
+  gatewayOrderId: string;
+  gatewayPaymentId: string | null;
+  paidAt: string | null;
+}
+
+/** Admin: successful pack purchases in [from, to] (#15). */
+export function usePackSales(from?: string, to?: string) {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  return useQuery({
+    queryKey: ["admin", "pack-sales", from ?? null, to ?? null],
+    queryFn: () => api<{
+      rows: PackSaleRow[];
+      aggregates: { totalRevenue: number; totalBase: number; totalGst: number; totalCredits: number; packCount: number };
+    }>(`/admin/pack-sales${qs.toString() ? `?${qs}` : ""}`),
+  });
 }
 
 export interface CreditPackView {
@@ -1964,7 +2023,12 @@ export interface PackPurchase {
   id: string;
   packKey: string;
   credits: number;
+  /** Total paid (GST included for new orders). */
   amount: number;
+  baseAmount: number | null;
+  gstAmount: number | null;
+  /** Set for GST orders; older orders have no invoice. */
+  invoiceNo: string | null;
   status: string;
   gatewayOrderId: string;
   paidAt: string | null;

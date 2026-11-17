@@ -97,7 +97,7 @@ async function resolveFileUrl(file: Express.Multer.File): Promise<string> {
 import { listRides, listScheduledRidesForDriver } from '../services/ride.service';
 import { listPackCatalog } from '../lib/creditPacks';
 import { availableCredits, listPacks, getDriverStats } from '../services/creditPack.service';
-import { createOrder, confirmAndActivate } from '../services/packOrder.service';
+import { createOrder, confirmAndActivate, getPackInvoice } from '../services/packOrder.service';
 import { saveAndValidateVpa } from '../services/vpa.service';
 import {
   setRentalOptIn,
@@ -464,10 +464,20 @@ router.get('/purchases', async (req: AuthRequest, res: Response, next: NextFunct
       take: 100,
       select: {
         id: true, packKey: true, credits: true, amount: true, status: true,
+        baseAmount: true, gstAmount: true, invoiceNo: true,
         gatewayOrderId: true, paidAt: true, createdAt: true,
       },
     });
     res.json({ purchases: orders });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/driver/purchases/:id/invoice — GST tax invoice for own purchase (#5)
+router.get('/purchases/:id/invoice', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getPackInvoice(req.params.id, req.driver!.id));
   } catch (err) {
     next(err);
   }

@@ -8,7 +8,8 @@
 
 import { randomUUID } from 'crypto';
 import { prisma } from '../lib/prisma';
-import { PACK_CATALOG, PackKey, isPackKey } from '../lib/creditPacks';
+import { PACK_CATALOG, PackKey, isPackKey, gstBreakdown } from '../lib/creditPacks';
+import { nextInvoiceNo, buildInvoice } from '../lib/invoice';
 import { createPackOrder as cfCreateOrder, getOrderStatus } from '../lib/cashfree';
 import { activatePurchasedPack } from './creditPack.service';
 import { ValidationError, NotFoundError } from '../types';
@@ -41,9 +42,12 @@ export async function createOrder(driverId: string, packKey: string): Promise<Cr
     select: { phone: true },
   });
 
+  // #5: 18% GST is added on top of the base price.
+  const g = gstBreakdown(def.price);
+
   const order = await cfCreateOrder({
     orderId,
-    amountRupees: def.price,
+    amountRupees: g.total,
     customerId: driverId,
     customerPhone: driver?.phone ?? '9999999999',
   });
@@ -53,7 +57,9 @@ export async function createOrder(driverId: string, packKey: string): Promise<Cr
       driverId,
       packKey,
       credits: def.credits,
-      amount: def.price,
+      amount: g.total,
+      baseAmount: g.base,
+      gstAmount: g.gst,
       gatewayOrderId: order.orderId,
       status: 'created',
     },
@@ -118,9 +124,9 @@ export async function activateFromWebhook(orderId: string, paymentId?: string): 
 async function activateGuarded(orderId: string, paymentId?: string): Promise<ActivationResult> {
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<
-      Array<{ id: string; driver_id: string; pack_key: string; credits: number; activated_pack_id: string | null }>
+      Array<{ id: string; driver_id: string; pack_key: string; credits: number; activated_pack_id: string | null; base_amount: number | null }>
     >`
-      SELECT id, driver_id, pack_key, credits, activated_pack_id
+      SELECT id, driver_id, pack_key, credits, activated_pack_id, base_amount
       FROM pack_orders
       WHERE gateway_order_id = ${orderId}
       FOR UPDATE
@@ -140,15 +146,45 @@ async function activateGuarded(orderId: string, paymentId?: string): Promise<Act
       order.id,
     );
 
+    // #5: tax invoice number for GST orders (pre-GST test orders get none).
+    const now = new Date();
+    const invoiceNo = order.base_amount != null ? await nextInvoiceNo(tx, now) : null;
+
     await tx.$executeRaw`
       UPDATE pack_orders
       SET status = 'paid',
           activated_pack_id = ${pack.id},
           gateway_payment_id = ${paymentId ?? null},
-          paid_at = NOW()
+          paid_at = ${now},
+          invoice_no = ${invoiceNo},
+          invoice_date = ${invoiceNo ? now : null}
       WHERE id = ${order.id}
     `;
 
     return { activated: true, packId: pack.id, credits: order.credits };
+  });
+}
+
+/**
+ * Tax invoice for a paid GST order (#5). `driverId` scopes it to the buyer;
+ * omit it for admin. 404 for unknown orders, other drivers' orders, and
+ * pre-GST orders (no invoice number).
+ */
+export async function getPackInvoice(orderId: string, driverId?: string) {
+  const o = await prisma.packOrder.findUnique({
+    where: { id: orderId },
+    include: { driver: { select: { fullName: true, phone: true } } },
+  });
+  if (!o || (driverId && o.driverId !== driverId) || o.status !== 'paid' || !o.invoiceNo || !o.invoiceDate || o.baseAmount == null) {
+    throw new NotFoundError('Invoice not found');
+  }
+  return buildInvoice({
+    invoiceNo: o.invoiceNo,
+    invoiceDate: o.invoiceDate,
+    baseAmount: o.baseAmount,
+    credits: o.credits,
+    gatewayOrderId: o.gatewayOrderId,
+    gatewayPaymentId: o.gatewayPaymentId,
+    driver: o.driver,
   });
 }

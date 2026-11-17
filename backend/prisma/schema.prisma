@@ -193,7 +193,13 @@ model PackOrder {
   driverId          String    @map("driver_id")
   packKey           String    @map("pack_key")        // p5 | p10 | p20
   credits           Int
-  amount            Float                              // 100 / 159 / 249
+  amount            Float                              // total charged (GST incl. for new orders: 118 / 187.62 / 293.82)
+  /// #5: base price and GST (18%) — NULL on orders made before GST.
+  baseAmount        Float?    @map("base_amount")
+  gstAmount         Float?    @map("gst_amount")
+  /// Tax invoice number (consecutive per financial year), set when paid.
+  invoiceNo         String?   @unique @map("invoice_no")
+  invoiceDate       DateTime? @map("invoice_date")
   gatewayOrderId    String    @unique @map("gateway_order_id")   // Cashfree order_id
   gatewayPaymentId  String?   @map("gateway_payment_id")         // Cashfree cf_payment_id
   status            String    @default("created")     // created | paid | failed
@@ -226,6 +232,14 @@ model DriverDocument {
   @@index([driverId])
   @@index([driverId, status])
   @@map("driver_documents")
+}
+
+/// Consecutive tax-invoice numbers per financial year (#5), e.g. fy '2627'.
+model InvoiceCounter {
+  fy   String @id
+  last Int
+
+  @@map("invoice_counters")
 }
 
 /// Expiry reminder sent for a document (#13). threshold = days before expiry

@@ -257,3 +257,11 @@
   }
   .fleet-card:hover .fleet-sweep { transform: translateX(110%); }
 }
+
+/* Tax invoice (#5): when an invoice is open, print only the invoice. */
+@media print {
+  body:has(#invoice-print) * { visibility: hidden; }
+  body:has(#invoice-print) #invoice-print,
+  body:has(#invoice-print) #invoice-print * { visibility: visible; }
+  body:has(#invoice-print) #invoice-print { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
+}

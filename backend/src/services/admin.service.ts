@@ -257,28 +257,36 @@ export async function packSalesReport(from?: Date, to?: Date) {
   const orders = await prisma.packOrder.findMany({
     where,
     orderBy: { paidAt: 'desc' },
-    include: { driver: { select: { id: true, fullName: true, phone: true } } },
+    include: { driver: { select: { id: true, fullName: true, phone: true, vendor: { select: { name: true } } } } },
   });
 
+  // Pre-GST (test) orders have no base/GST split: the whole amount is base.
   const rows = orders.map((o) => ({
     id: o.id,
     driverId: o.driverId,
     driverName: o.driver?.fullName ?? null,
     driverPhone: o.driver?.phone ?? null,
+    vendorName: o.driver?.vendor?.name ?? null,
     packKey: o.packKey,
     credits: o.credits,
     amount: o.amount,
+    baseAmount: o.baseAmount ?? o.amount,
+    gstAmount: o.gstAmount ?? 0,
+    invoiceNo: o.invoiceNo,
     gatewayOrderId: o.gatewayOrderId,
     gatewayPaymentId: o.gatewayPaymentId,
     paidAt: o.paidAt,
   }));
 
-  const totalRevenue = rows.reduce((sum, r) => sum + r.amount, 0);
+  const sum = (f: (r: (typeof rows)[number]) => number) => Math.round(rows.reduce((s, r) => s + f(r), 0) * 100) / 100;
 
   return {
     rows,
     aggregates: {
-      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      totalRevenue: sum((r) => r.amount),
+      totalBase: sum((r) => r.baseAmount),
+      totalGst: sum((r) => r.gstAmount),
+      totalCredits: rows.reduce((s, r) => s + r.credits, 0),
       packCount: rows.length,
       from: from ?? null,
       to: to ?? null,

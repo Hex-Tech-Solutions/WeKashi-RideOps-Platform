@@ -22,6 +22,8 @@ import { Ticket, IndianRupee, Loader2, CheckCircle2, CalendarClock, Receipt } fr
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { useExternalCheckoutHost } from "./checkoutContext";
+import { InvoiceDialog } from "@/components/InvoiceDialog";
+import { Capacitor } from "@capacitor/core";
 
 export function DriverCredits() {
   const { data: creditsData } = useDriverCredits();
@@ -30,6 +32,7 @@ export function DriverCredits() {
   const verify = useVerifyPackPayment();
   const checkoutHost = useExternalCheckoutHost();
   const [buying, setBuying] = useState<string | null>(null);
+  const [invoiceFor, setInvoiceFor] = useState<string | null>(null);
 
   const { data: purchaseData } = useDriverPurchases();
   const purchases = purchaseData?.purchases ?? [];
@@ -138,8 +141,11 @@ export function DriverCredits() {
                 </div>
                 <div className="text-right">
                   <div className="font-bold flex items-center gap-0.5 justify-end">
-                    <IndianRupee className="h-3.5 w-3.5" />{pack.price}
+                    <IndianRupee className="h-3.5 w-3.5" />{rupees(pack.total ?? pack.price)}
                   </div>
+                  {pack.gst != null && (
+                    <div className="text-[10px] text-muted-foreground">₹{rupees(pack.price)} + {pack.gstRatePercent}% GST</div>
+                  )}
                 </div>
                 <Button
                   size="sm"
@@ -155,7 +161,8 @@ export function DriverCredits() {
             ))}
           </div>
           <p className="text-[11px] text-muted-foreground">
-            One credit is used each time you complete a ride. Credits closest to expiring are used first.
+            Prices include 18% GST. A tax invoice is issued for every purchase. One credit is used each
+            time you complete a ride. Credits closest to expiring are used first.
           </p>
         </div>
 
@@ -180,9 +187,19 @@ export function DriverCredits() {
                   </div>
                   <div className="text-right">
                     <div className="font-semibold flex items-center gap-0.5 justify-end">
-                      <IndianRupee className="h-3 w-3" />{p.amount}
+                      <IndianRupee className="h-3 w-3" />{rupees(p.amount)}
                     </div>
-                    <div className="text-success">Paid</div>
+                    {p.invoiceNo ? (
+                      <button
+                        type="button"
+                        className="text-gold-dark font-medium underline-offset-2 hover:underline"
+                        onClick={() => setInvoiceFor(p.id)}
+                      >
+                        Invoice
+                      </button>
+                    ) : (
+                      <div className="text-success">Paid</div>
+                    )}
                   </div>
                 </li>
               ))}
@@ -190,8 +207,19 @@ export function DriverCredits() {
           )}
         </div>
       </CardContent>
+      {/* Printing doesn't work inside the Android WebView, so no Print button there. */}
+      <InvoiceDialog
+        path={invoiceFor ? `/driver/purchases/${invoiceFor}/invoice` : null}
+        onClose={() => setInvoiceFor(null)}
+        canPrint={!Capacitor.isNativePlatform()}
+      />
     </Card>
   );
+}
+
+/** ₹ amount without trailing ".00" (118, 187.62). */
+function rupees(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
 export default DriverCredits;
