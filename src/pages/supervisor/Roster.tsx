@@ -24,6 +24,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { EmployeeRow } from "@/lib/queries";
 
 export default function Roster() {
@@ -154,7 +155,19 @@ export default function Roster() {
                       <Badge variant="outline" className={isFemale(e.gender) ? "border-gold/40 text-gold-dark bg-gold-soft" : ""}>{isFemale(e.gender) ? "Female" : "Male"}</Badge>
                     </td>
                     <td className="px-6 py-3 text-muted-foreground">{e.phone ?? "—"}</td>
-                    <td className="px-6 py-3">{e.pickupAddress}</td>
+                    {/* One line, cut with "…"; hover shows the full address. */}
+                    <td className="px-6 py-3 max-w-[22rem]">
+                      <Tooltip delayDuration={150}>
+                        <TooltipTrigger asChild>
+                          <div className="truncate cursor-default" tabIndex={0} aria-label={e.pickupAddress}>
+                            {e.pickupAddress}
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-sm whitespace-normal">
+                          {e.pickupAddress}
+                        </TooltipContent>
+                      </Tooltip>
+                    </td>
                     <td className="px-6 py-3 font-mono text-xs">{e.shiftStart}</td>
                     <td className="px-6 py-3 font-mono text-xs">{e.shiftEnd}</td>
                     <td className="px-6 py-3">
