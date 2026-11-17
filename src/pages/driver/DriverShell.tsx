@@ -24,6 +24,8 @@ const TABS: { key: Tab | "account"; label: string; Icon: typeof Car }[] = [
 export default function DriverShell() {
   const [tab, setTab]       = useState<Tab>("rides");
   const [accountOpen, setAccountOpen] = useState(false);
+  // Section to show when the Documents tab sends the driver to fill in details.
+  const [accountSection, setAccountSection] = useState<"profile" | "vehicle" | undefined>(undefined);
   const { data: me }        = useDriverMe();
   const { data: ridesData } = useDriverRides();
   const { data: sosData }   = useDriverSosIssues();
@@ -124,7 +126,9 @@ export default function DriverShell() {
         <div className="flex-1 overflow-y-auto pb-20">
           {tab === "rides"     && <DriverHome />}
           {tab === "scheduled" && <DriverScheduled />}
-          {tab === "documents" && <DriverDocuments />}
+          {tab === "documents" && (
+            <DriverDocuments onOpenAccount={(s) => { setAccountSection(s); setAccountOpen(true); }} />
+          )}
         </div>
 
         {/* Bottom nav */}
@@ -154,7 +158,11 @@ export default function DriverShell() {
       </div>
 
       {/* Account side panel — Profile / Vehicle / Wallet / Recent trips */}
-      <DriverAccountPanel open={accountOpen} onOpenChange={setAccountOpen} />
+      <DriverAccountPanel
+        open={accountOpen}
+        onOpenChange={(o) => { setAccountOpen(o); if (!o) setAccountSection(undefined); }}
+        openSection={accountSection}
+      />
 
       {/* SOS modal — issue type selector */}
       <SosModal

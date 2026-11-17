@@ -11,7 +11,10 @@ import { PhoneInput, toE164, isValidMobile, mobileDigits } from "@/components/Ph
 import {
   useDriverMe, useSetDriverVehicle, useSetRentalOptIn,
   useUpdateDriverProfile, type DriverProfile,
+  FUEL_TYPES, FUEL_LABELS, type FuelType,
 } from "@/lib/queries";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { normalizeRegNo, isValidRegNo } from "@/lib/vehicleNo";
 import { VEHICLE_LABELS, type VehicleType } from "@/lib/pricing";
 import { useDriverAuth } from "./useDriverAuth";
 import { DriverCredits } from "./DriverCredits";
@@ -186,7 +189,7 @@ export default function DriverAccount() {
       <KycExpiredBanner kycExpired={kycExpired} />
       <ProfileSummaryCard me={me} fullName={session?.fullName} />
       <ProfileDetailsCard me={me} />
-      <VehicleCard currentType={me?.vehicleType} currentSeats={me?.seats} rentalOptIn={me?.rentalOptIn} driverId={me?.id ?? session?.id} />
+      <VehicleCard me={me} driverId={me?.id ?? session?.id} />
       <CreditsSection />
       <SignOutButton />
     </div>
@@ -266,16 +269,16 @@ export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>[
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">DL Number</Label>
+            <Label className="text-xs">DL Number *</Label>
             <Input value={dlNumber} onChange={(e) => setDlNumber(e.target.value.toUpperCase())} className="h-9 font-mono" placeholder="KA1920240001234" maxLength={20} />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">DL Expiry Date</Label>
+            <Label className="text-xs">DL Expiry Date *</Label>
             <Input type="date" value={dlExpiry} onChange={(e) => setDlExpiry(e.target.value)} className="h-9" />
           </div>
         </div>
         <div className="space-y-1">
-          <Label htmlFor="aadhaar" className="text-xs">Aadhaar Number</Label>
+          <Label htmlFor="aadhaar" className="text-xs">Aadhaar Number *</Label>
           <Input
             id="aadhaar"
             value={govIdNumber}
@@ -301,7 +304,7 @@ export function ProfileDetailsCard({ me }: { me: ReturnType<typeof useDriverMe>[
             : <><Save className="h-3.5 w-3.5" /> Save details</>}
         </Button>
         <p className="text-[11px] text-muted-foreground">
-          These details are shared with your vendor for KYC verification. Keep them accurate.
+          * Required before you can upload documents. These details are shared with your vendor for KYC verification. Keep them accurate.
         </p>
       </CardContent>
     </Card>
@@ -333,7 +336,13 @@ function writeVehiclePref(driverId: string | null | undefined, type: VehicleType
   catch { /* ignore */ }
 }
 
-export function VehicleCard({ currentType, currentSeats, rentalOptIn, driverId }: { currentType?: string | null; currentSeats?: number | null; rentalOptIn?: boolean | null; driverId?: string | null }) {
+export function VehicleCard({ me, driverId }: { me?: DriverProfile; driverId?: string | null }) {
+  const currentType = me?.vehicleType;
+  const currentSeats = me?.seats ?? me?.vehicle?.capacity ?? null;
+  const rentalOptIn = me?.rentalOptIn;
+  const currentFuel = (me?.vehicle?.fuelType ?? "") as FuelType | "";
+  // A released number ("removed:..."), or none, means the driver must enter it.
+  const regOnFile = me?.vehicle?.regNo && !/^(removed|rejected):/.test(me.vehicle.regNo) ? me.vehicle.regNo : null;
   const save = useSetDriverVehicle();
   const setOptIn = useSetRentalOptIn();
   // Seed from the server value if present, else the remembered local pref, else
@@ -341,14 +350,23 @@ export function VehicleCard({ currentType, currentSeats, rentalOptIn, driverId }
   const pref = readVehiclePref(driverId);
   const [type, setType]   = useState<VehicleType>((currentType as VehicleType) || pref?.type || "sedan");
   const [seats, setSeats] = useState<string>(currentSeats ? String(currentSeats) : pref?.seats ?? "4");
+  const [fuel, setFuel]   = useState<FuelType | "">(currentFuel);
+  const [vehicleNo, setVehicleNo] = useState("");
 
   useEffect(() => { if (currentType) setType(currentType as VehicleType); }, [currentType]);
   useEffect(() => { if (currentSeats) setSeats(String(currentSeats)); }, [currentSeats]);
+  useEffect(() => { if (currentFuel) setFuel(currentFuel); }, [currentFuel]);
 
   const submit = () => {
     const s = Number(seats);
     if (!(s >= 1 && s <= 20)) { toast.error("Enter valid seats (incl. driver)"); return; }
-    save.mutate({ vehicleType: type, seats: s }, {
+    if (!fuel) { toast.error("Select the fuel type"); return; }
+    let reg: string | undefined;
+    if (!regOnFile) {
+      reg = normalizeRegNo(vehicleNo);
+      if (!isValidRegNo(reg)) { toast.error("Enter a valid vehicle number (e.g. KA05AB1234)"); return; }
+    }
+    save.mutate({ vehicleType: type, seats: s, fuelType: fuel, vehicleNo: reg }, {
       onSuccess: () => { writeVehiclePref(driverId, type, seats); toast.success("Vehicle saved"); },
       onError: (e: any) => toast.error(e?.message ?? "Failed"),
     });
@@ -371,8 +389,38 @@ export function VehicleCard({ currentType, currentSeats, rentalOptIn, driverId }
           ))}
         </div>
         <div>
-          <Label className="text-xs">Total seats (including driver)</Label>
-          <Input type="number" value={seats} onChange={(e) => setSeats(e.target.value)} className="mt-1 h-9" />
+          <Label htmlFor="vehicle-no" className="text-xs">Vehicle number</Label>
+          {regOnFile ? (
+            <>
+              <Input id="vehicle-no" value={regOnFile} disabled className="mt-1 h-9 font-mono tracking-widest bg-muted/50" />
+              <p className="text-[11px] text-muted-foreground mt-1">To change your vehicle number, ask your vendor.</p>
+            </>
+          ) : (
+            <Input
+              id="vehicle-no"
+              value={normalizeRegNo(vehicleNo)}
+              onChange={(e) => setVehicleNo(e.target.value)}
+              className="mt-1 h-9 font-mono tracking-widest uppercase"
+              placeholder="KA05AB1234"
+              maxLength={12}
+              autoComplete="off"
+            />
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs">Total seats (including driver)</Label>
+            <Input type="number" value={seats} onChange={(e) => setSeats(e.target.value)} className="mt-1 h-9" />
+          </div>
+          <div>
+            <Label className="text-xs">Fuel type</Label>
+            <Select value={fuel} onValueChange={(v) => setFuel(v as FuelType)}>
+              <SelectTrigger className="mt-1 h-9" aria-label="Fuel type"><SelectValue placeholder="Select" /></SelectTrigger>
+              <SelectContent>
+                {FUEL_TYPES.map((f) => <SelectItem key={f} value={f}>{FUEL_LABELS[f]}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <Button className="w-full bg-foreground text-background hover:bg-foreground/90" onClick={submit} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save vehicle"}

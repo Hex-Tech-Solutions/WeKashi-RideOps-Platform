@@ -17,8 +17,10 @@ import { validateDocDetails, DOC_TYPE_RULES } from '../lib/documentTypes';
 import {
   requireIndianMobile, normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar,
   isMaskedAadhaar, hashAadhaar, assertNoIdentityConflict, flagPossibleDuplicate,
-  IDENTITY_CONFLICT_MESSAGE,
+  IDENTITY_CONFLICT_MESSAGE, normalizeRegNo,
 } from '../lib/identity';
+import { assertProfileComplete, FUEL_TYPES } from '../lib/driverProfile';
+import { setDriverVehicle } from '../services/driver.service';
 import { ValidationError, ConflictError } from '../types';
 import { logger } from '../lib/logger';
 
@@ -57,6 +59,12 @@ async function checkDocumentIdentity(driverId: string, type: string, number?: st
 
   if (type === 'rc') {
     const reg = normalizeDl(number); // same rule: uppercase letters + digits
+    // The RC must be for the vehicle on the driver's profile.
+    const mine = await prisma.driver.findUnique({ where: { id: driverId }, select: { vehicle: { select: { regNo: true } } } });
+    const myReg = mine?.vehicle?.regNo && !/^(removed|rejected):/.test(mine.vehicle.regNo) ? normalizeRegNo(mine.vehicle.regNo) : null;
+    if (myReg && myReg !== reg) {
+      throw new ValidationError(`This RC number does not match your vehicle number (${myReg}). Ask your vendor to correct the vehicle number if it is wrong.`);
+    }
     const taken = await prisma.$queryRaw<Array<{ id: string }>>`
       SELECT d.id FROM driver_documents doc
       JOIN drivers d ON d.id = doc.driver_id
@@ -258,12 +266,17 @@ router.post('/offline', async (req: AuthRequest, res: Response, next: NextFuncti
 // POST /api/driver/vehicle — set vehicle type + seats (used for radius matching)
 router.post('/vehicle', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { vehicleType, seats } = z
-      .object({ vehicleType: z.enum(['hatchback', 'sedan', 'suv']), seats: z.number().int().min(1).max(20) })
+    const body = z
+      .object({
+        vehicleType: z.enum(['hatchback', 'sedan', 'suv']),
+        seats: z.number().int().min(1).max(20),
+        fuelType: z.enum(FUEL_TYPES),
+        // Only used when the driver has no vehicle on file yet; once set, the
+        // vehicle number can only be changed by the vendor.
+        vehicleNo: z.string().min(4).max(20).optional(),
+      })
       .parse(req.body);
-    const { prisma } = await import('../lib/prisma');
-    const d = await prisma.driver.update({ where: { id: req.driver!.id }, data: { vehicleType, seats } });
-    res.json({ vehicleType: d.vehicleType, seats: d.seats });
+    res.json(await setDriverVehicle(req.driver!.id, body, { role: 'driver' }));
   } catch (err) {
     next(err);
   }
@@ -374,6 +387,8 @@ router.post('/documents', upload.single('file'), async (req: AuthRequest, res: R
     //    belong to anyone else (zero-tolerance duplicates).
     let storedNumber = number?.trim() || undefined;
     try {
+      // #9: personal, licence and vehicle details must be filled in first.
+      await assertProfileComplete(req.driver!.id);
       await assertCanUploadDocument(req.driver!.id, type);
       storedNumber = await checkDocumentIdentity(req.driver!.id, type, storedNumber);
     } catch (e) {

@@ -9,6 +9,8 @@ import {
   useUploadDriverDocument,
   useDeleteDriverDocument,
   type DocumentRow,
+  type ProfileItem,
+  PROFILE_ITEM_LABELS,
 } from "@/lib/queries";
 import { DocumentViewer } from "@/components/DocumentViewer";
 import { JoiningBonusBanner, KycBlockedBanner } from "./DriverAccount";
@@ -68,8 +70,9 @@ const statusBadge = (doc: DocumentRow) => {
   return                                 { cls: "border-warning/40 text-warning",               Icon: Clock,        label: "pending"   };
 };
 
-export default function DriverDocuments() {
+export default function DriverDocuments({ onOpenAccount }: { onOpenAccount?: (section: "profile" | "vehicle") => void } = {}) {
   const { data: meData }  = useDriverMe();
+  const profileMissing = meData?.profileMissing ?? [];
   const { data, isLoading } = useDriverDocuments();
   const docs    = data?.documents ?? [];
   const byType  = (t: string) => docs.find((d) => d.type === t);
@@ -104,6 +107,10 @@ export default function DriverDocuments() {
         </div>
       )}
 
+      {profileMissing.length > 0 ? (
+        <ProfileGate missing={profileMissing} onOpenAccount={onOpenAccount} />
+      ) : (
+      <>
       <div className="text-sm text-muted-foreground">
         Upload your KYC &amp; vehicle documents. Your vendor verifies them before you go active.
       </div>
@@ -122,7 +129,54 @@ export default function DriverDocuments() {
           />
         ))
       )}
+      </>
+      )}
     </div>
+  );
+}
+
+const VEHICLE_ITEMS: ProfileItem[] = ["vehicleNo", "vehicleType", "seats", "fuelType"];
+
+/** #9: documents unlock once personal, licence and vehicle details are saved. */
+function ProfileGate({ missing, onOpenAccount }: { missing: ProfileItem[]; onOpenAccount?: (s: "profile" | "vehicle") => void }) {
+  const profileItems = missing.filter((m) => !VEHICLE_ITEMS.includes(m));
+  const vehicleItems = missing.filter((m) => VEHICLE_ITEMS.includes(m));
+  return (
+    <Card className="border-warning/40 bg-warning/5">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <Lock className="h-5 w-5 text-warning mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <div className="font-semibold text-sm">Complete your profile to upload documents</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Fill in these details first. Your documents are checked against them.
+            </div>
+          </div>
+        </div>
+        {profileItems.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium">Account → Profile</div>
+            <ul className="text-xs text-muted-foreground list-disc pl-5">
+              {profileItems.map((m) => <li key={m}>{PROFILE_ITEM_LABELS[m]}</li>)}
+            </ul>
+            {onOpenAccount && (
+              <Button size="sm" variant="outline" className="w-full" onClick={() => onOpenAccount("profile")}>Open Profile</Button>
+            )}
+          </div>
+        )}
+        {vehicleItems.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium">Account → Vehicle info</div>
+            <ul className="text-xs text-muted-foreground list-disc pl-5">
+              {vehicleItems.map((m) => <li key={m}>{PROFILE_ITEM_LABELS[m]}</li>)}
+            </ul>
+            {onOpenAccount && (
+              <Button size="sm" variant="outline" className="w-full" onClick={() => onOpenAccount("vehicle")}>Open Vehicle info</Button>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

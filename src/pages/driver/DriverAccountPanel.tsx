@@ -11,7 +11,7 @@
  * personal/licence details, VehicleCard, CreditsSection) and the extracted
  * DriverRecentTrips list — nothing is duplicated, just relocated.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ExternalCheckoutContext, type ExternalCheckoutHost } from "./checkoutContext";
 import { cn } from "@/lib/utils";
@@ -37,11 +37,17 @@ const SECTIONS: { key: Section; label: string; Icon: typeof User }[] = [
 export function DriverAccountPanel({
   open,
   onOpenChange,
+  openSection,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /** Jump to this section when the panel opens (e.g. from the Documents gate). */
+  openSection?: Section;
 }) {
   const [section, setSection] = useState<Section>("profile");
+  useEffect(() => {
+    if (open && openSection) setSection(openSection);
+  }, [open, openSection]);
   // Default to the icon rail so the content pane gets the width — matters on a
   // phone where the drawer is only ~max-w-md wide. Driver can expand for labels.
   const [collapsed, setCollapsed] = useState(true);
@@ -147,12 +153,7 @@ export function DriverAccountPanel({
             )}
 
             {section === "vehicle" && (
-              <VehicleCard
-                currentType={me?.vehicleType}
-                currentSeats={me?.seats}
-                rentalOptIn={me?.rentalOptIn}
-                driverId={me?.id ?? session?.id}
-              />
+              <VehicleCard me={me} driverId={me?.id ?? session?.id} />
             )}
 
             {section === "credits" && <CreditsSection />}

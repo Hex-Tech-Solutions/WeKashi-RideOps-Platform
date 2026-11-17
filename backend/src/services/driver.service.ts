@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { NotFoundError, ForbiddenError, ValidationError, NearbyDriver } from '../types';
+import { NotFoundError, ForbiddenError, ValidationError, ConflictError, NearbyDriver } from '../types';
+import { requireIndianRegNo, assertRegNoAvailable, normalizeRegNo, IDENTITY_CONFLICT_MESSAGE } from '../lib/identity';
+import { profileMissing, type FuelType } from '../lib/driverProfile';
 import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
 import { getDriverActiveRide } from '../lib/activeRideCache';
@@ -43,6 +45,90 @@ export async function createDriver(input: CreateDriverInput) {
   });
   // No credits yet: the joining bonus is granted when KYC is first approved.
   return driver;
+}
+
+export interface SetVehicleInput {
+  vehicleType?: 'hatchback' | 'sedan' | 'suv';
+  seats?: number;
+  fuelType?: FuelType;
+  vehicleNo?: string;
+}
+
+const isReleasedRegNo = (reg: string | null | undefined) => !reg || /^(removed|rejected):/.test(reg);
+
+/**
+ * Save vehicle details (#4). Writes type + seats on the driver (used for ride
+ * matching) and seats + fuel on the linked Vehicle row, so vendor views and
+ * the RC check use one record.
+ *  - Driver: may set the vehicle number only when none is on file. After that
+ *    only the vendor can change it.
+ *  - Vendor (own drivers) / admin: may change everything, e.g. to correct the
+ *    number after checking the RC.
+ * A new or changed number must be valid and not used by anyone else.
+ */
+export async function setDriverVehicle(
+  driverId: string,
+  input: SetVehicleInput,
+  actor: { role: 'driver' } | { role: 'vendor'; vendorId: string } | { role: 'admin' },
+) {
+  const driver = await prisma.driver.findUnique({
+    where: { id: driverId },
+    select: { id: true, vendorId: true, status: true, vehicleId: true, vehicle: { select: { id: true, regNo: true } } },
+  });
+  if (!driver || driver.status === 'removed' || driver.status === 'rejected') throw new NotFoundError('Driver not found');
+  if (actor.role === 'vendor' && driver.vendorId !== actor.vendorId) {
+    throw new ForbiddenError('You can only edit drivers belonging to your vendor');
+  }
+
+  const currentReg = isReleasedRegNo(driver.vehicle?.regNo) ? null : normalizeRegNo(driver.vehicle!.regNo);
+  const newReg = input.vehicleNo ? requireIndianRegNo(input.vehicleNo) : null;
+  if (!currentReg && !newReg && actor.role === 'driver') {
+    throw new ValidationError('Enter your vehicle number');
+  }
+  if (newReg && currentReg && newReg !== currentReg && actor.role === 'driver') {
+    throw new ValidationError('Your vehicle number is locked. Ask your vendor to change it.');
+  }
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      let vehicleId = currentReg ? driver.vehicleId : null;
+
+      if (newReg && newReg !== currentReg) {
+        await assertRegNoAvailable(newReg, driverId, tx);
+        const sharedWith = vehicleId
+          ? await tx.driver.count({ where: { vehicleId, id: { not: driverId }, status: { notIn: ['removed', 'rejected'] } } })
+          : 0;
+        if (vehicleId && sharedWith === 0) {
+          await tx.vehicle.update({ where: { id: vehicleId }, data: { regNo: newReg } });
+        } else {
+          const v = await tx.vehicle.create({ data: { vendorId: driver.vendorId, regNo: newReg } });
+          vehicleId = v.id;
+        }
+      }
+
+      const vehicleData: { capacity?: number; fuelType?: string } = {};
+      if (input.seats !== undefined) vehicleData.capacity = input.seats;
+      if (input.fuelType !== undefined) vehicleData.fuelType = input.fuelType;
+      if (vehicleId && Object.keys(vehicleData).length > 0) {
+        await tx.vehicle.update({ where: { id: vehicleId }, data: vehicleData });
+      }
+
+      const updated = await tx.driver.update({
+        where: { id: driverId },
+        data: {
+          ...(input.vehicleType !== undefined ? { vehicleType: input.vehicleType } : {}),
+          ...(input.seats !== undefined ? { seats: input.seats } : {}),
+          ...(vehicleId !== driver.vehicleId ? { vehicleId } : {}),
+        },
+        select: { vehicleType: true, seats: true, vehicle: { select: { regNo: true, capacity: true, fuelType: true } } },
+      });
+      logger.info({ driverId, by: actor.role, regChanged: !!newReg && newReg !== currentReg }, 'Driver vehicle saved');
+      return updated;
+    });
+  } catch (e: any) {
+    if (e?.code === 'P2002') throw new ConflictError(IDENTITY_CONFLICT_MESSAGE);
+    throw e;
+  }
 }
 
 export async function listDrivers(filters: {
@@ -111,6 +197,8 @@ export async function getDriver(id: string) {
     expiredDocTypes: expiredDocs.map((d) => d.type),
     joiningBonus,
     joiningBonusCredits: JOINING_BONUS_CREDITS,
+    // #9: what must be filled in before documents can be uploaded.
+    profileMissing: profileMissing(driver),
   };
 }
 

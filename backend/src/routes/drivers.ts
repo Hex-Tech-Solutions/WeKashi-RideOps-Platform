@@ -9,7 +9,9 @@ import {
   updateDriverLocation,
   listLiveDriverLocations,
   removeDriver,
+  setDriverVehicle,
 } from '../services/driver.service';
+import { FUEL_TYPES } from '../lib/driverProfile';
 import { listDocumentsForVendor, setDocumentStatus, countPendingDocsForVendor } from '../services/document.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -206,6 +208,28 @@ export function createDriversRouter(io: IoServer): Router {
         const vendorId = await vendorIdFor(req);
         await rejectSignup(req.params.id, { role, vendorId });
         res.status(204).send();
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  // PATCH /drivers/:id/vehicle — vendor (own driver) or admin edits the
+  // vehicle details, e.g. to correct them after checking the RC (#4).
+  router.patch(
+    '/:id/vehicle',
+    requireRole('vendor', 'admin'),
+    async (req: AuthRequest, res: Response, next: NextFunction) => {
+      try {
+        const body = z.object({
+          vehicleNo: z.string().min(4).max(20).optional(),
+          vehicleType: z.enum(['hatchback', 'sedan', 'suv']).optional(),
+          seats: z.number().int().min(1).max(20).optional(),
+          fuelType: z.enum(FUEL_TYPES).optional(),
+        }).parse(req.body);
+        const vendorId = await vendorIdFor(req);
+        const actor = vendorId ? { role: 'vendor' as const, vendorId } : { role: 'admin' as const };
+        res.json(await setDriverVehicle(req.params.id, body, actor));
       } catch (err) {
         next(err);
       }

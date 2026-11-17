@@ -602,6 +602,8 @@ export interface DriverProfile {
   /** Joining bonus: granted, waiting for KYC approval, or withheld (repeat account). */
   joiningBonus?: "granted" | "awaiting_kyc" | "not_eligible";
   joiningBonusCredits?: number;
+  /** #9: details still to fill in before documents can be uploaded. */
+  profileMissing?: ProfileItem[];
 }
 
 export function useDriverMe() {
@@ -611,9 +613,39 @@ export function useDriverMe() {
 export function useSetDriverVehicle() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (p: { vehicleType: string; seats: number }) =>
+    mutationFn: (p: { vehicleType: string; seats: number; fuelType: FuelType; vehicleNo?: string }) =>
       api("/driver/vehicle", { method: "POST", body: JSON.stringify(p) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
+  });
+}
+
+/** Must match FUEL_TYPES in backend/src/lib/driverProfile.ts. */
+export const FUEL_TYPES = ["petrol", "diesel", "cng", "electric"] as const;
+export type FuelType = (typeof FUEL_TYPES)[number];
+export const FUEL_LABELS: Record<FuelType, string> = { petrol: "Petrol", diesel: "Diesel", cng: "CNG", electric: "Electric" };
+
+/** Profile items the server reports as missing (#9), with display labels. */
+export type ProfileItem = "dlNumber" | "dlExpiry" | "aadhaar" | "vehicleNo" | "vehicleType" | "seats" | "fuelType";
+export const PROFILE_ITEM_LABELS: Record<ProfileItem, string> = {
+  dlNumber: "Driving licence number",
+  dlExpiry: "Driving licence expiry date",
+  aadhaar: "Aadhaar number",
+  vehicleNo: "Vehicle number",
+  vehicleType: "Vehicle type",
+  seats: "Seats",
+  fuelType: "Fuel type",
+};
+
+/** Vendor (own driver) / admin edits a driver's vehicle details (#4). */
+export function useSetVendorDriverVehicle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ driverId, ...p }: { driverId: string; vehicleNo?: string; vehicleType?: string; seats?: number; fuelType?: FuelType }) =>
+      api(`/drivers/${driverId}/vehicle`, { method: "PATCH", body: JSON.stringify(p) }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: ["drivers"] });
+      void qc.invalidateQueries({ queryKey: ["driver", v.driverId] });
+    },
   });
 }
 

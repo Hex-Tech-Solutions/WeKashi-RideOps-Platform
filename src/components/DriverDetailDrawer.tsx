@@ -25,8 +25,13 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   useDriver, useDriverDocsForVendor, useSetDocumentStatus, useRemoveDriver,
-  type DocumentRow,
+  useSetVendorDriverVehicle, FUEL_TYPES, FUEL_LABELS,
+  type DocumentRow, type DriverRow, type FuelType,
 } from "@/lib/queries";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { normalizeRegNo, isValidRegNo } from "@/lib/vehicleNo";
 import { DocumentViewer } from "@/components/DocumentViewer";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -35,7 +40,7 @@ import {
 import {
   Loader2, Phone, Car, Building2, CreditCard, FileText,
   CheckCircle2, XCircle, Clock, AlertTriangle, Eye,
-  User, BadgeCheck, Trash2,
+  User, BadgeCheck, Trash2, Pencil,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -176,16 +181,7 @@ export function DriverDetailDrawer({
                 <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3">
                   Vehicle
                 </div>
-                {driver.vehicle ? (
-                  <div className="space-y-2 text-sm">
-                    <InfoRow icon={Car} label="Reg No"      value={driver.vehicle.regNo} mono />
-                    <InfoRow icon={Car} label="Type"        value={driver.vehicleType ?? "—"} />
-                    <InfoRow icon={Car} label="Fuel Type"   value={driver.vehicle.fuelType ?? "—"} />
-                    <InfoRow icon={Car} label="Capacity"    value={(driver.vehicle.capacity ?? driver.seats) ? `${driver.vehicle.capacity ?? driver.seats} seats` : "—"} />
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No vehicle assigned.</p>
-                )}
+                <VehicleSection driver={driver} rcDoc={latestByType.get("rc")} canEdit={canApprove} />
               </section>
 
               <Separator />
@@ -303,6 +299,113 @@ function InfoRow({
       <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
       <span className="text-muted-foreground w-32 shrink-0">{label}</span>
       <span className={`font-medium ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+// ─── Vehicle (view + vendor edit, #4) ────────────────────────────────────────
+
+const VEHICLE_TYPES = ["hatchback", "sedan", "suv"] as const;
+
+function VehicleSection({ driver, rcDoc, canEdit }: { driver: DriverRow; rcDoc?: DocumentRow; canEdit: boolean }) {
+  const save = useSetVendorDriverVehicle();
+  const [editing, setEditing] = useState(false);
+  const regRaw = driver.vehicle?.regNo ?? "";
+  const reg = /^(removed|rejected):/.test(regRaw) ? "" : regRaw;
+  const seats = driver.vehicle?.capacity ?? driver.seats ?? null;
+  const [form, setForm] = useState({ vehicleNo: "", vehicleType: "", seats: "", fuelType: "" });
+
+  // RC check: the number on the latest RC upload should match the vehicle number.
+  const rcNo = rcDoc?.number ? normalizeRegNo(rcDoc.number) : null;
+  const rcMismatch = !!rcNo && !!reg && rcNo !== normalizeRegNo(reg);
+
+  const startEdit = () => {
+    setForm({
+      vehicleNo: reg,
+      vehicleType: driver.vehicleType ?? "",
+      seats: seats ? String(seats) : "",
+      fuelType: driver.vehicle?.fuelType ?? "",
+    });
+    setEditing(true);
+  };
+
+  const submit = () => {
+    const vehicleNo = normalizeRegNo(form.vehicleNo);
+    if (!isValidRegNo(vehicleNo)) { toast.error("Enter a valid vehicle number (e.g. KA05AB1234)"); return; }
+    const s = form.seats ? Number(form.seats) : undefined;
+    if (s !== undefined && !(s >= 1 && s <= 20)) { toast.error("Seats must be 1–20"); return; }
+    save.mutate(
+      {
+        driverId: driver.id,
+        vehicleNo,
+        vehicleType: form.vehicleType || undefined,
+        seats: s,
+        fuelType: (form.fuelType || undefined) as FuelType | undefined,
+      },
+      {
+        onSuccess: () => { toast.success("Vehicle details saved"); setEditing(false); },
+        onError: (e: any) => toast.error(e?.message ?? "Could not save vehicle"),
+      },
+    );
+  };
+
+  if (editing) {
+    return (
+      <div className="space-y-3 text-sm">
+        <div>
+          <Label htmlFor="drawer-vehicle-no" className="text-xs">Vehicle number</Label>
+          <Input id="drawer-vehicle-no" className="mt-1 font-mono tracking-widest uppercase" maxLength={12}
+            value={normalizeRegNo(form.vehicleNo)} onChange={(e) => setForm({ ...form, vehicleNo: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <Label className="text-xs">Type</Label>
+            <Select value={form.vehicleType} onValueChange={(v) => setForm({ ...form, vehicleType: v })}>
+              <SelectTrigger className="mt-1" aria-label="Vehicle type"><SelectValue placeholder="Select" /></SelectTrigger>
+              <SelectContent>{VEHICLE_TYPES.map((t) => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="drawer-seats" className="text-xs">Seats</Label>
+            <Input id="drawer-seats" type="number" className="mt-1" value={form.seats} onChange={(e) => setForm({ ...form, seats: e.target.value })} />
+          </div>
+          <div>
+            <Label className="text-xs">Fuel</Label>
+            <Select value={form.fuelType} onValueChange={(v) => setForm({ ...form, fuelType: v })}>
+              <SelectTrigger className="mt-1" aria-label="Fuel type"><SelectValue placeholder="Select" /></SelectTrigger>
+              <SelectContent>{FUEL_TYPES.map((f) => <SelectItem key={f} value={f}>{FUEL_LABELS[f]}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+        {rcNo && <p className="text-[11px] text-muted-foreground">Number on the RC upload: <span className="font-mono">{rcNo}</span></p>}
+        <div className="flex gap-2 justify-end">
+          <Button variant="outline" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+          <Button size="sm" onClick={submit} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 text-sm">
+      <InfoRow icon={Car} label="Reg No"    value={reg || "—"} mono />
+      <InfoRow icon={Car} label="Type"      value={driver.vehicleType ?? "—"} />
+      <InfoRow icon={Car} label="Fuel Type" value={driver.vehicle?.fuelType ? (FUEL_LABELS[driver.vehicle.fuelType as FuelType] ?? driver.vehicle.fuelType) : "—"} />
+      <InfoRow icon={Car} label="Capacity"  value={seats ? `${seats} seats` : "—"} />
+      {rcNo && (
+        <InfoRow icon={FileText} label="RC number" value={rcNo} mono />
+      )}
+      {rcMismatch && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          The RC number doesn't match the vehicle number. Correct the vehicle number, or reject the RC.
+        </div>
+      )}
+      {canEdit && (
+        <Button variant="outline" size="sm" className="mt-1" onClick={startEdit}>
+          <Pencil className="h-3.5 w-3.5" /> Edit vehicle
+        </Button>
+      )}
     </div>
   );
 }
