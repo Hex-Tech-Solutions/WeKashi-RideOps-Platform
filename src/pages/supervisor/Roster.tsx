@@ -40,6 +40,8 @@ export default function Roster() {
   const [csvOpen, setCsvOpen] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [editEmployee, setEditEmployee] = useState<EmployeeRow | null>(null);
+  // Phones have no hover: tapping an address expands it in place.
+  const [openAddress, setOpenAddress] = useState<string | null>(null);
 
   // Unique company labels across all employees
   const companies = Array.from(
@@ -155,17 +157,26 @@ export default function Roster() {
                       <Badge variant="outline" className={isFemale(e.gender) ? "border-gold/40 text-gold-dark bg-gold-soft" : ""}>{isFemale(e.gender) ? "Female" : "Male"}</Badge>
                     </td>
                     <td className="px-6 py-3 text-muted-foreground">{e.phone ?? "—"}</td>
-                    {/* One line, cut with "…"; hover shows the full address. */}
-                    <td className="px-6 py-3 max-w-[22rem]">
+                    {/* One line, cut with "…". Mouse: hover shows the full
+                        address. Touch: tap expands it in place (tap again to
+                        collapse). */}
+                    <td className="px-6 py-3 max-w-[22rem] min-w-[12rem]">
                       <Tooltip delayDuration={150}>
                         <TooltipTrigger asChild>
-                          <div className="truncate cursor-default" tabIndex={0} aria-label={e.pickupAddress}>
+                          <button
+                            type="button"
+                            onClick={() => setOpenAddress(openAddress === e.id ? null : e.id)}
+                            aria-expanded={openAddress === e.id}
+                            className={`block w-full text-left cursor-pointer ${openAddress === e.id ? "whitespace-normal break-words" : "truncate"}`}
+                          >
                             {e.pickupAddress}
-                          </div>
+                          </button>
                         </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-sm whitespace-normal">
-                          {e.pickupAddress}
-                        </TooltipContent>
+                        {openAddress !== e.id && (
+                          <TooltipContent side="top" className="max-w-sm whitespace-normal hidden md:block">
+                            {e.pickupAddress}
+                          </TooltipContent>
+                        )}
                       </Tooltip>
                     </td>
                     <td className="px-6 py-3 font-mono text-xs">{e.shiftStart}</td>
