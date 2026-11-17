@@ -1253,7 +1253,26 @@ export function useVendorByCode(code: string) {
 export function useVendorProfile() {
   return useQuery({
     queryKey: ["vendorProfile"],
-    queryFn: () => api<{ id: string; name: string; vendorCode: string }>("/vendor/profile"),
+    queryFn: () => api<VendorProfile>("/vendor/profile"),
+  });
+}
+
+export interface VendorProfile {
+  id: string;
+  name: string;
+  vendorCode: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+}
+
+/** Vendor edits their own company name + contact details (Settings). */
+export function useUpdateVendorProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: Partial<Pick<VendorProfile, "name" | "contactName" | "contactPhone" | "contactEmail">>) =>
+      api<VendorProfile>("/vendor/profile", { method: "PATCH", body: JSON.stringify(p) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["vendorProfile"] }),
   });
 }
 
