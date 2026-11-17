@@ -21,9 +21,9 @@ describe('pack catalog (Req 5)', () => {
     expect(Object.keys(PACK_CATALOG)).toHaveLength(3);
   });
 
-  it('gives every pack a 365-day validity and one joining-bonus credit', () => {
+  it('gives every pack a 365-day validity and a 5-credit joining bonus (#8)', () => {
     expect(PACK_VALIDITY_DAYS).toBe(365);
-    expect(JOINING_BONUS_CREDITS).toBe(1);
+    expect(JOINING_BONUS_CREDITS).toBe(5);
     for (const p of listPackCatalog()) {
       expect(p.validityDays).toBe(365);
     }

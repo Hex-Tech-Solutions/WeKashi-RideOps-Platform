@@ -7,7 +7,7 @@ import {
   consumeOneCredit,
   listPacks,
 } from '../src/services/creditPack.service';
-import { PACK_VALIDITY_DAYS } from '../src/lib/creditPacks';
+import { PACK_VALIDITY_DAYS, JOINING_BONUS_CREDITS } from '../src/lib/creditPacks';
 
 // DB-backed tests for the Credit_Ledger. Require a migrated Postgres (the same
 // database the rest of the integration suite uses).
@@ -146,7 +146,7 @@ describe('grantJoiningBonus (Req 7.3)', () => {
     await grantJoiningBonus(driverId);
     const bonuses = await prisma.creditPack.findMany({ where: { driverId, source: 'joining_bonus' } });
     expect(bonuses).toHaveLength(1);
-    expect(await availableCredits(driverId)).toBe(1);
+    expect(await availableCredits(driverId)).toBe(JOINING_BONUS_CREDITS);
   });
 
   it('grants nothing until KYC is approved', async () => {
@@ -155,7 +155,7 @@ describe('grantJoiningBonus (Req 7.3)', () => {
     expect(await availableCredits(driverId)).toBe(0);
     await prisma.driver.update({ where: { id: driverId }, data: { kycStatus: 'approved' } });
     await grantJoiningBonus(driverId);
-    expect(await availableCredits(driverId)).toBe(1);
+    expect(await availableCredits(driverId)).toBe(JOINING_BONUS_CREDITS);
   });
 
   it('withholds the bonus when the same person re-joins after their account was deleted', async () => {

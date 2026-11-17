@@ -10,7 +10,7 @@
 export const PACK_VALIDITY_DAYS = 365;
 
 /** Free credits granted once to every newly onboarded driver. */
-export const JOINING_BONUS_CREDITS = 1;
+export const JOINING_BONUS_CREDITS = 5;
 
 /** The three purchasable packs. Keys are stored on PackOrder.packKey. */
 export const PACK_CATALOG = {
