@@ -23,10 +23,12 @@ interface RoleLayoutProps {
   role: "Supervisor" | "Vendor" | "Admin";
   user: { name: string; sub: string };
   nav: NavItem[];
+  /** Quick links shown in the top bar on every page (right of the user name). */
+  topNav?: NavItem[];
   children: ReactNode;
 }
 
-export function RoleLayout({ role, user, nav, children }: RoleLayoutProps) {
+export function RoleLayout({ role, user, nav, topNav, children }: RoleLayoutProps) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const auth = useAuth();
@@ -176,6 +178,33 @@ export function RoleLayout({ role, user, nav, children }: RoleLayoutProps) {
               <AvatarFallback className="bg-foreground text-background text-xs font-semibold">{initials}</AvatarFallback>
             </Avatar>
           </div>
+          {topNav && topNav.length > 0 && (
+            <nav aria-label="Quick links" className="flex items-center gap-1.5 pl-4 border-l border-border overflow-x-auto min-w-0">
+              {topNav.map((item) => {
+                const Icon = item.icon;
+                const active = pathname === item.to;
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm whitespace-nowrap border transition-colors",
+                      active
+                        ? "bg-foreground text-background border-foreground font-medium"
+                        : "border-border text-foreground/80 hover:border-gold hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{item.label}</span>
+                    {item.badge !== undefined && (
+                      <span className="text-[10px] font-semibold bg-gold text-gold-foreground rounded-full px-1.5 py-0.5 leading-none">{item.badge}</span>
+                    )}
+                  </NavLink>
+                );
+              })}
+            </nav>
+          )}
         </header>
 
         <main className="flex-1 overflow-auto p-6">{children}</main>

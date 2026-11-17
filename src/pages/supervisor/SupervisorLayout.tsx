@@ -21,18 +21,21 @@ export default function SupervisorLayout() {
   const nav: NavItem[] = [
     { to: "/supervisor", label: "Dashboard", icon: LayoutDashboard },
     { to: "/supervisor/roster", label: "Roster", icon: Users },
-    { to: "/supervisor/routes", label: "Book a ride", icon: Route },
-    { to: "/supervisor/saved-groups", label: "Saved Groups", icon: BookOpen },
     { to: "/supervisor/rentals", label: "Rentals", icon: CarFront },
     { to: "/supervisor/airport", label: "Airport", icon: Plane },
-    { to: "/supervisor/live", label: "Live rides", icon: Radio, badge: liveCount || undefined },
-    { to: "/supervisor/payments", label: "Payments", icon: IndianRupee, badge: pendingPayCount || undefined },
     { to: "/supervisor/reports", label: "Reports", icon: BarChart3 },
     { to: "/supervisor/issues", label: "Issues", icon: AlertTriangle },
     { to: "/supervisor/settings", label: "Settings", icon: Settings },
   ];
+  // Frequent actions live in the top bar so they're one click away on every page.
+  const topNav: NavItem[] = [
+    { to: "/supervisor/routes", label: "Book a ride", icon: Route },
+    { to: "/supervisor/saved-groups", label: "Saved Groups", icon: BookOpen },
+    { to: "/supervisor/live", label: "Live rides", icon: Radio, badge: liveCount || undefined },
+    { to: "/supervisor/payments", label: "Payments", icon: IndianRupee, badge: pendingPayCount || undefined },
+  ];
   return (
-    <RoleLayout role="Supervisor" nav={nav} user={{ name: profile?.full_name ?? "Supervisor", sub: profile?.org ?? "" }}>
+    <RoleLayout role="Supervisor" nav={nav} topNav={topNav} user={{ name: profile?.full_name ?? "Supervisor", sub: profile?.org ?? "" }}>
       <Outlet />
     </RoleLayout>
   );
