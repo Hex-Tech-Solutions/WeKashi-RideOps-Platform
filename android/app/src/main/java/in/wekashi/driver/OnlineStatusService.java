@@ -33,10 +33,29 @@ public class OnlineStatusService extends Service {
     private static final String CHANNEL = "driver_online_status";
     private static final int NOTIF_ID = 7201;
 
+    /** Floating quick-assist bubble, shown while online and the app is in the background. */
+    private QuickAssistBubble bubble;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        bubble = new QuickAssistBubble(this);
+        WekashiApp.setForegroundListener(fg -> { if (bubble != null) bubble.update(fg); });
+    }
+
+    @Override
+    public void onDestroy() {
+        WekashiApp.setForegroundListener(null);
+        if (bubble != null) bubble.hide();
+        bubble = null;
+        super.onDestroy();
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : ACTION_START;
         if (ACTION_STOP.equals(action)) {
+            if (bubble != null) bubble.hide();
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -49,6 +68,7 @@ public class OnlineStatusService extends Service {
         } else {
             startForeground(NOTIF_ID, buildNotification());
         }
+        if (bubble != null) bubble.update(WekashiApp.isForeground());
         // STICKY so Android restarts it (and the "online" notification) if the
         // process is killed while the driver is still on-duty.
         return START_STICKY;

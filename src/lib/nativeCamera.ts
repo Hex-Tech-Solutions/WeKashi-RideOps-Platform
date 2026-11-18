@@ -79,9 +79,17 @@ async function toUploadJpeg(blob: Blob): Promise<Blob> {
 // @capacitor/app "appRestoredResult" event instead. To finish the upload we
 // keep what the driver was doing in localStorage before opening the camera.
 
+/** docType used for a face-check selfie (not a document). */
+export const FACE_CHECK_CAPTURE = "face_check";
+
 /** What the driver was uploading when the camera opened. */
 export interface PendingCapture {
+  /** Document type, or FACE_CHECK_CAPTURE for a face-check selfie. */
   docType: string;
+  /** Face check taken while going online: go online once it passes. */
+  goOnline?: boolean;
+  /** Face check: the driver ticked the consent box before the camera opened. */
+  consent?: boolean;
   number?: string;
   /** ISO date string as entered (yyyy-mm-dd). */
   expiry?: string;
@@ -159,16 +167,27 @@ export function initCameraRestore(): void {
   ).catch(() => { restoreHooked = false; });
 }
 
+type CaptureMatch = (p: PendingCapture) => boolean;
+const any: CaptureMatch = () => true;
+
 /** True when a restored photo is waiting to be uploaded. */
-export function hasRestoredPhoto(): boolean {
-  return restored !== null;
+export function hasRestoredPhoto(match: CaptureMatch = any): boolean {
+  return restored !== null && match(restored.pending);
 }
 
-/** Take the restored photo (once). */
-export function takeRestoredPhoto(): RestoredPhoto | null {
+/** Take the restored photo (once), if it is one this caller handles. */
+export function takeRestoredPhoto(match: CaptureMatch = any): RestoredPhoto | null {
+  if (!restored || !match(restored.pending)) return null;
   const r = restored;
   restored = null;
   return r;
+}
+
+/** Shrink a picked image file the same way as a camera photo (JPEG under 5 MB). */
+export async function prepareUploadPhoto(file: File, name: string): Promise<File> {
+  const jpeg = await toUploadJpeg(file);
+  const safe = name.replace(/[^a-z0-9_-]+/gi, "-").toLowerCase() || "photo";
+  return new File([jpeg], `${safe}.jpg`, { type: "image/jpeg" });
 }
 
 /** Be told when a restored photo arrives. Returns an unsubscribe function. */

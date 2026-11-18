@@ -1,22 +1,17 @@
 /**
- * DriverTerms — rules & regulations the driver must accept on every login.
+ * DriverTerms — rules & regulations the driver must accept EVERY time they tap
+ * Online (Phase 2 user decision), and nowhere else. Several rules (pre-duty
+ * vehicle checks, uniform, punctuality) are per-shift obligations.
  *
- * Shown by DriverApp's Gate after a session exists but before DriverShell
- * mounts, so there is no route into the app that bypasses it. Acceptance is
- * held in sessionStorage rather than localStorage: sessionStorage is cleared
- * when the tab/app closes, so the driver re-accepts on each fresh login rather
- * than once, forever, on that device. Several rules (pre-duty vehicle checks,
- * uniform, punctuality) are per-shift obligations, so a one-time tick would
- * defeat the point.
+ * Shown by DriverHome's go-online flow. The server refuses to put a driver
+ * online without `acceptedRules: true` (POST /driver/online) and stores the
+ * time (drivers.rules_accepted_at).
  */
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ShieldCheck, Check } from "lucide-react";
-
-/** Cleared automatically when the session ends — re-accepted on next login. */
-export const TERMS_ACCEPTED_KEY = "rideops_driver_terms_accepted";
 
 const RULES: { title: string; detail: string }[] = [
   { title: "Valid documents", detail: "Carry a valid driving licence, vehicle documents, insurance, and all required permits." },
@@ -42,14 +37,17 @@ const RULES: { title: string; detail: string }[] = [
 export default function DriverTerms({
   driverName,
   onAccept,
+  onCancel,
 }: {
   driverName?: string;
   onAccept: () => void;
+  /** Close without going online. */
+  onCancel?: () => void;
 }) {
   const [agreed, setAgreed] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-full min-h-screen bg-background flex flex-col">
       {/* Header */}
       <div className="px-5 pt-6 pb-4 border-b">
         <div className="flex items-center gap-2.5">
@@ -65,8 +63,8 @@ export default function DriverTerms({
         </div>
         {driverName && (
           <p className="text-xs text-muted-foreground mt-3">
-            Welcome back, <span className="font-medium text-foreground">{driverName}</span>. Please
-            review and accept before starting duty.
+            Hi <span className="font-medium text-foreground">{driverName}</span>. Please review and
+            accept these rules to go online.
           </p>
         )}
       </div>
@@ -116,8 +114,13 @@ export default function DriverTerms({
           disabled={!agreed}
           onClick={onAccept}
         >
-          <Check className="h-4 w-4" /> Agree &amp; continue
+          <Check className="h-4 w-4" /> Agree &amp; go online
         </Button>
+        {onCancel && (
+          <Button variant="ghost" className="w-full" onClick={onCancel}>
+            Not now, stay offline
+          </Button>
+        )}
       </div>
     </div>
   );

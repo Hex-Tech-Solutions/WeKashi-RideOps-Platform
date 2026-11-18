@@ -17,6 +17,7 @@ import {
   notifyAccountSuspended, notifyAccountReactivated, notifyAccountRemoved, notifyCreditsLow,
   notifyPackExpiring, notifyRideAssigned, notifyRideCancelled, notifyRideReminder,
   notifyPaymentMarked, notifySosReply, notifyPurchaseConfirmed, notifyRentalCancelled,
+  notifyFaceCheckDue,
 } from '../services/driverNotice.service';
 
 process.env.NOTICE_TEST_PREFIX = '[TEST] ';
@@ -53,6 +54,7 @@ const CASES: Case[] = [
   { key: 'sos_reply', opens: 'SOS chat (if one is open)', run: (id) => notifySosReply(id, 'We have seen your alert. Are you safe? Reply here.') },
   { key: 'purchase_confirmed', opens: 'Ride Credits', run: (id) => notifyPurchaseConfirmed(id, 5) },
   { key: 'rental_cancelled', opens: 'Home', run: (id) => notifyRentalCancelled(id, { pickupAddress: SAMPLE_PICKUP, customerName: 'Test Customer' }) },
+  { key: 'face_check_due', opens: 'Face check screen', run: (id) => notifyFaceCheckDue(id) },
 ];
 
 function arg(name: string): string | undefined {

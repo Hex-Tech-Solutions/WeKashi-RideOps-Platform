@@ -16,6 +16,7 @@ import {
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import { spareCredits, consumeOneCredit } from './creditPack.service';
 import { assertDriverCanTakeRides, noExpiredDocSql } from '../lib/rideEligibility';
+import { assertFaceCheckValid } from './faceCheck.service';
 import { notifyRideAssigned, notifyRideCancelled } from './driverNotice.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
 import { emitDriverBroadcast } from '../lib/driverBroadcast';
@@ -473,6 +474,8 @@ export async function advanceRideStatus(
 
   const updateData: Record<string, unknown> = { status: newStatus };
   if (newStatus === 'in_progress') {
+    // Phase 2: the driver can't start a ride without a valid face check.
+    if (requestorRole === 'driver') await assertFaceCheckValid(requestorId);
     updateData.startedAt = new Date();
   }
   if (newStatus === 'completed') {

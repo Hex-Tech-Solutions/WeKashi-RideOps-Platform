@@ -4,6 +4,7 @@ import { NotFoundError, ForbiddenError, ValidationError, ConflictError, NearbyDr
 import { requireIndianRegNo, assertRegNoAvailable, normalizeRegNo, IDENTITY_CONFLICT_MESSAGE } from '../lib/identity';
 import { profileMissing, type FuelType } from '../lib/driverProfile';
 import { noExpiredDocSql } from '../lib/rideEligibility';
+import { faceCheckOkSql, hasValidFaceCheck, getFaceCheckState } from './faceCheck.service';
 import { listExpiringDocs } from './docExpiry.service';
 import { logger } from '../lib/logger';
 import { bufferDriverLocation } from '../lib/locationBuffer';
@@ -209,6 +210,8 @@ export async function getDriver(id: string) {
     joiningBonusCredits: JOINING_BONUS_CREDITS,
     // #9: what must be filled in before documents can be uploaded.
     profileMissing: profileMissing(driver),
+    // Phase 2: face check state (the app opens the selfie screen when due).
+    faceCheck: await getFaceCheckState(id, driver),
     // #13: verified documents expiring within 30 days (or expired).
     // Best-effort: a failure here must never break the driver's profile load.
     expiringDocs: (await listExpiringDocs({ driverId: id }).catch((err) => {
@@ -423,6 +426,8 @@ export async function findNearbyDrivers(
       AND status = 'active'
       AND kyc_status = 'approved'
       AND ${noExpiredDocSql('drivers.id')}
+      -- Phase 2: no broadcasts without a valid face check.
+      AND ${faceCheckOkSql('drivers')}
       AND current_location IS NOT NULL
       AND (${vt}::text IS NULL OR vehicle_type = ${vt})
       AND ST_DWithin(
@@ -497,6 +502,7 @@ export async function vehicleAvailability(
       AND status = 'active'
       AND kyc_status = 'approved'
       AND ${noExpiredDocSql('drivers.id')}
+      AND ${faceCheckOkSql('drivers')}
       AND current_location IS NOT NULL
       AND vehicle_type IS NOT NULL
       AND ST_DWithin(current_location, ST_Point(${lng}, ${lat})::geography, ${radiusKm * 1000})
@@ -550,6 +556,8 @@ export async function listDriverOffers(driverId: string) {
     where: { driverId, status: { in: ['assigned', 'in_progress'] } },
   });
   if (onRental > 0) return [];
+  // Phase 2: offers made before the face check ran out are hidden too.
+  if (!(await hasValidFaceCheck(driverId))) return [];
 
   const offers = await prisma.rideOffer.findMany({
     where: { driverId, response: 'pending', ride: { status: 'broadcasting' } },
@@ -623,6 +631,7 @@ export async function countDriverOffers(driverId: string): Promise<number> {
     where: { driverId, status: { in: ['assigned', 'in_progress'] } },
   });
   if (onRental > 0) return 0;
+  if (!(await hasValidFaceCheck(driverId))) return 0;
   return prisma.rideOffer.count({
     where: { driverId, response: 'pending', ride: { status: 'broadcasting' } },
   });

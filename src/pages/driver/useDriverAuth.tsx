@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { driverVerifyOtp, getStoredDriver, logoutRequest, clearPushToken, tokenStore, type DriverSession } from "@/lib/api";
 import { initPushNotifications, teardownPushNotifications } from "@/lib/pushNotifications";
 import { syncNativeAuth, clearNativeAuth } from "@/lib/nativeAuth";
-import { TERMS_ACCEPTED_KEY } from "./DriverTerms";
 import { clearPendingCapture } from "@/lib/nativeCamera";
 
 interface DriverAuthState {
@@ -32,9 +31,7 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
   }, [session]);
 
   const startSession = (s: DriverSession) => {
-    // Clear any prior acceptance so a fresh login always re-presents the rules,
-    // even if the previous driver accepted them in this same browser session.
-    sessionStorage.removeItem(TERMS_ACCEPTED_KEY);
+    // A half-finished camera capture belongs to the previous session.
     clearPendingCapture();
     setSession(s);
     return s;
@@ -49,7 +46,6 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
     await teardownPushNotifications();
     await clearNativeAuth();
     await logoutRequest();
-    sessionStorage.removeItem(TERMS_ACCEPTED_KEY);
     clearPendingCapture();
     setSession(null);
   };

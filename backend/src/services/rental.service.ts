@@ -11,6 +11,7 @@ import { NotFoundError, ValidationError, ConflictError } from '../types';
 import { logger } from '../lib/logger';
 import { spareCredits } from './creditPack.service';
 import { assertDriverCanTakeRides } from '../lib/rideEligibility';
+import { assertFaceCheckValid } from './faceCheck.service';
 import { notifyRentalCancelled } from './driverNotice.service';
 import { randomInt } from 'crypto';
 
@@ -114,6 +115,8 @@ export async function startRental(rentalId: string, driverId: string, otp: strin
   if (!rental || rental.driverId !== driverId) throw new NotFoundError('Rental not found');
   if (rental.status !== 'assigned') throw new ValidationError('This rental is not ready to start');
   if (!rental.arrivedAt) throw new ValidationError('Confirm arrival before entering the pickup OTP');
+  // Phase 2: no start without a valid face check.
+  await assertFaceCheckValid(driverId);
   if (rental.pickupOtp !== otp) throw new ValidationError('Incorrect pickup OTP');
 
   const updated = await prisma.rental.update({

@@ -3,9 +3,8 @@ import { DriverAuthProvider, useDriverAuth } from "./useDriverAuth";
 import DriverOnboarding from "./DriverOnboarding";
 import DriverLogin from "./DriverLogin";
 import DriverShell from "./DriverShell";
-import DriverTerms, { TERMS_ACCEPTED_KEY } from "./DriverTerms";
 import { DriverPermissions } from "./DriverPermissions";
-import { getPendingCapture, initCameraRestore } from "@/lib/nativeCamera";
+import { initCameraRestore } from "@/lib/nativeCamera";
 
 // Pick up a photo taken while Android had the app closed (see nativeCamera.ts).
 initCameraRestore();
@@ -18,20 +17,6 @@ const PERMISSIONS_DONE_KEY = "wekashi_driver_permissions_done";
 function Gate() {
   const { session } = useDriverAuth();
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem(ONBOARDED_KEY) === "1");
-  // sessionStorage, not localStorage — acceptance lasts for this session only,
-  // so the driver re-accepts the rules on every fresh login.
-  const [termsAccepted, setTermsAccepted] = useState(() => {
-    if (sessionStorage.getItem(TERMS_ACCEPTED_KEY) === "1") return true;
-    // Android killed the app while the camera was open (the camera can only be
-    // opened from inside the app, i.e. after the rules were accepted). Don't
-    // make the driver accept again just to finish that upload.
-    if (getPendingCapture()) {
-      sessionStorage.setItem(TERMS_ACCEPTED_KEY, "1");
-      return true;
-    }
-    return false;
-  });
-
   const [permsDone, setPermsDone] = useState(() => localStorage.getItem(PERMISSIONS_DONE_KEY) === "1");
 
   if (!onboarded) {
@@ -39,20 +24,8 @@ function Gate() {
   }
   if (!session) return <DriverLogin />;
 
-  // Rules gate — sits between login and the app, so there is no way in without
-  // accepting. Placed here rather than inside DriverShell so no tab, deep link,
-  // or restored session can skip it.
-  if (!termsAccepted) {
-    return (
-      <DriverTerms
-        driverName={session.fullName}
-        onAccept={() => {
-          sessionStorage.setItem(TERMS_ACCEPTED_KEY, "1");
-          setTermsAccepted(true);
-        }}
-      />
-    );
-  }
+  // The Rules & Regulations are NOT a gate here any more (Phase 2): the driver
+  // accepts them every time they tap Online (DriverHome), and nowhere else.
 
   // Permissions checklist — the last gate before the app. Shown once per install
   // until the critical permissions (notifications, location, overlay, battery)

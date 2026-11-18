@@ -203,6 +203,27 @@ export function createDriversRouter(io: IoServer): Router {
     }
   });
 
+  // GET /drivers/:id/face-checks — vendor (own drivers) or admin: the latest
+  // face-check attempts (Phase 2) and any open repeated-mismatch flag.
+  router.get(
+    '/:id/face-checks',
+    requireRole('vendor', 'admin'),
+    async (req: AuthRequest, res: Response, next: NextFunction) => {
+      try {
+        const vendorId = await vendorIdFor(req);
+        const { prisma } = await import('../lib/prisma');
+        const d = await prisma.driver.findUnique({ where: { id: req.params.id }, select: { vendorId: true } });
+        if (!d || (vendorId && d.vendorId !== vendorId)) {
+          res.status(404).json({ error: 'Driver not found', code: 'NOT_FOUND' }); return;
+        }
+        const { listFaceChecks } = await import('../services/faceCheck.service');
+        res.json(await listFaceChecks(req.params.id));
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
   // PATCH /drivers/:id/status — vendor or admin
   router.patch(
     '/:id/status',

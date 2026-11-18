@@ -16,4 +16,8 @@
     <!-- Notification channels -->
     <string name="channel_incoming_rides">Incoming ride requests</string>
     <string name="channel_incoming_rides_desc">Full-screen alerts when a new ride is available</string>
+    <string name="channel_account_updates">Account updates</string>
+    <string name="channel_account_updates_desc">Documents, KYC, credits, payments and other app updates</string>
+    <!-- Quick-assist bubble -->
+    <string name="bubble_open_app">Open Wekashi Cabs</string>
 </resources>

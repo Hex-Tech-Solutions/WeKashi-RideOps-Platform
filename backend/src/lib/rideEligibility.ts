@@ -7,10 +7,13 @@
  *   - no CURRENT copy of a document (newest reviewed upload of its type) is
  *     verified-but-expired. Checked directly, so the gap until the KYC sweeper
  *     marks the driver 'expired' can't be used to take rides.
+ *   - (Phase 2) for the driver's own accept/claim: a valid face check
+ *     (services/faceCheck.service.ts).
  */
 import { Prisma } from '@prisma/client';
 import { ForbiddenError } from '../types';
 import { DOC_TYPE_RULES } from './documentTypes';
+import { assertFaceCheckValid } from '../services/faceCheck.service';
 
 /**
  * SQL condition "this driver has no expired current document". `driverIdCol`
@@ -69,4 +72,7 @@ export async function assertDriverCanTakeRides(
         : "This driver's KYC is not approved, so they can't take rides.",
     );
   }
+  // Phase 2 face check: the driver's own accept/claim needs a valid check. A
+  // supervisor may still assign ('other'); the driver can't START it without one.
+  if (you) await assertFaceCheckValid(driverId, db);
 }

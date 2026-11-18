@@ -69,14 +69,14 @@ router.get('/identity-flags', async (req: AuthRequest, res: Response, next: Next
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    const ids = [...new Set(flags.flatMap((f) => [f.driverId, f.otherDriverId]))];
+    const ids = [...new Set(flags.flatMap((f) => (f.otherDriverId ? [f.driverId, f.otherDriverId] : [f.driverId])))];
     const drivers = await prisma.driver.findMany({
       where: { id: { in: ids } },
       select: { id: true, fullName: true, phone: true, status: true, vendor: { select: { name: true } } },
     });
     const byId = new Map(drivers.map((d) => [d.id, d]));
     res.json({
-      flags: flags.map((f) => ({ ...f, driver: byId.get(f.driverId) ?? null, otherDriver: byId.get(f.otherDriverId) ?? null })),
+      flags: flags.map((f) => ({ ...f, driver: byId.get(f.driverId) ?? null, otherDriver: f.otherDriverId ? byId.get(f.otherDriverId) ?? null : null })),
     });
   } catch (err) {
     next(err);

@@ -8,6 +8,7 @@ import { initSignupSweeper, stopSignupSweeper } from './services/signup.service'
 import { initDocExpirySweeper, stopDocExpirySweeper } from './services/docExpiry.service';
 import { initPackExpirySweeper, stopPackExpirySweeper } from './services/creditNotices.service';
 import { initRideReminderSweeper, stopRideReminderSweeper } from './services/rideReminders.service';
+import { initFaceCheckSweeper, stopFaceCheckSweeper } from './services/faceCheck.service';
 import { startLocationFlusher, stopLocationFlusher, flushLocationBuffer } from './lib/locationBuffer';
 import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
@@ -72,6 +73,9 @@ async function bootstrap(): Promise<void> {
   // Pickup reminders for scheduled rides / rentals a driver holds (24h, 2h, 45min)
   initRideReminderSweeper();
 
+  // Phase 2 face check: "face check due" pushes + 30-day selfie deletion (5 min)
+  initFaceCheckSweeper();
+
   // Start location buffer flusher (bulk-writes GPS positions to DB every 60s)
   startLocationFlusher();
 
@@ -89,6 +93,7 @@ async function bootstrap(): Promise<void> {
     stopDocExpirySweeper();
     stopPackExpirySweeper();
     stopRideReminderSweeper();
+    stopFaceCheckSweeper();
     stopLocationFlusher();
 
     httpServer.close(async () => {

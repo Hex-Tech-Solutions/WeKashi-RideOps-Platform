@@ -18,6 +18,7 @@ import {
   terminalPoint, terminalLabel, type AirportTerminal, type AirportDirection,
 } from '../lib/airport';
 import { findNearbyDrivers } from './driver.service';
+import { assertFaceCheckValid } from './faceCheck.service';
 import { startRideBroadcast } from '../lib/broadcastSweeper';
 import { emitDriverBroadcast } from '../lib/driverBroadcast';
 import { getRidePublicPayload } from './ride.service';
@@ -192,6 +193,8 @@ export async function verifyAirportPickup(rideId: string, otp: string, driverId:
   const ride = await assertAirportDriverRide(rideId, driverId);
   if (ride.status !== 'assigned') throw new ValidationError('This ride is not ready to start');
   if (ride.airportPickupAt) throw new ValidationError('Pickup already verified');
+  // Phase 2: no start without a valid face check.
+  await assertFaceCheckValid(driverId);
   await checkOtpRateLimit(rideId, 'pickup');
   if (ride.airportPickupOtp !== otp) throw new ValidationError('Incorrect pickup OTP');
   await redis.del(`airport:otp:pickup:${rideId}`);

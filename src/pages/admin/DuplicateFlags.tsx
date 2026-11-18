@@ -10,6 +10,7 @@ import { toast } from "sonner";
 const KIND_LABELS: Record<string, string> = {
   shared_device: "Same device",
   repeat_joining_bonus: "Repeat joining bonus",
+  face_mismatch: "Face check mismatch",
 };
 
 /**
@@ -41,7 +42,9 @@ export default function DuplicateFlags() {
                   <div className="text-xs text-muted-foreground mt-1">{format(new Date(f.createdAt), "dd MMM yyyy, h:mm a")}</div>
                 </div>
                 <DriverCell d={f.driver} />
-                <DriverCell d={f.otherDriver} />
+                {f.kind === "face_mismatch"
+                  ? <div className="text-xs text-muted-foreground">{f.detail ?? "Selfies did not match the Profile Photo"}. Open the driver to compare.</div>
+                  : <DriverCell d={f.otherDriver} />}
                 <Button
                   size="sm"
                   variant="outline"

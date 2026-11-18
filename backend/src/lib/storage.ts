@@ -78,6 +78,18 @@ export async function deleteFromAzureBlob(filename: string): Promise<void> {
   await container.deleteBlob(filename, { deleteSnapshots: 'include' });
 }
 
+// ─── Read a stored file into memory ──────────────────────────────────────────
+
+/** Bytes of a file saved by this module, given its `/api/files/<name>` URL. */
+export async function readStoredFile(fileUrl: string): Promise<Buffer> {
+  const filename = path.basename(fileUrl);
+  if (!USE_AZURE_STORAGE) {
+    return fs.promises.readFile(path.join(UPLOAD_DIR, filename));
+  }
+  const container = await getBlobContainerClient();
+  return container.getBlockBlobClient(filename).downloadToBuffer();
+}
+
 // ─── Stream a blob to the HTTP response ──────────────────────────────────────
 
 export async function streamBlobToResponse(

@@ -12,7 +12,9 @@ import {
 } from '../services/driver.service';
 import { addDriverDocument, listDriverDocuments, deleteDriverDocument, assertCanUploadDocument } from '../services/document.service';
 import fs from 'fs';
-import { upload, USE_AZURE_STORAGE, uploadToAzureBlob } from '../lib/storage';
+import path from 'path';
+import { upload, USE_AZURE_STORAGE, uploadToAzureBlob, deleteFromAzureBlob } from '../lib/storage';
+import { assertCanGoOnline, runFaceCheck } from '../services/faceCheck.service';
 import { validateDocDetails, DOC_TYPE_RULES } from '../lib/documentTypes';
 import {
   requireIndianMobile, normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar,
@@ -239,16 +241,61 @@ router.get('/scheduled', async (req: AuthRequest, res: Response, next: NextFunct
   }
 });
 
-// POST /api/driver/online — sets location + marks online (eligible for broadcasts)
+// POST /api/driver/online — sets location + marks online (eligible for broadcasts).
+// Phase 2: the driver must accept the Rules & Regulations every time they go
+// online (acceptedRules: true), and pass the face check when it is due.
 router.post('/online', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { lat, lng } = LocationSchema.parse(req.body);
+    const { lat, lng, acceptedRules } = LocationSchema.extend({ acceptedRules: z.boolean().optional() }).parse(req.body);
+    if (acceptedRules !== true) {
+      res.status(400).json({ error: 'Accept the Rules & Regulations to go online', code: 'RULES_NOT_ACCEPTED' });
+      return;
+    }
+    await assertCanGoOnline(req.driver!.id);
+    const { prisma } = await import('../lib/prisma');
+    await prisma.driver.update({ where: { id: req.driver!.id }, data: { rulesAcceptedAt: new Date() } });
     // Flip the DB flag + seed the heartbeat immediately — don't wait up to 60s
     // for the location flush, otherwise the driver appears offline to matching
     // right after going online.
     await setDriverOnlineStatus(req.driver!.id, true);
     await updateDriverLocation(req.driver!.id, lat, lng, io);
     res.json({ isOnline: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/driver/face-check — multipart: "selfie" (JPG/PNG) + consent=1 the
+// first time. Compares it with the verified Profile Photo (faceCheck.service).
+router.post('/face-check', upload.single('selfie'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const file = req.file;
+  const removeLocal = () => {
+    if (!USE_AZURE_STORAGE && file?.path) fs.promises.unlink(file.path).catch(() => undefined);
+  };
+  try {
+    if (!file) throw new ValidationError('Take a selfie first');
+    if (!['image/jpeg', 'image/png'].includes(file.mimetype)) {
+      removeLocal();
+      throw new ValidationError('The selfie must be a JPG or PNG photo');
+    }
+    const bytes = USE_AZURE_STORAGE ? file.buffer : await fs.promises.readFile(file.path);
+    const consent = ['1', 'true'].includes(String((req.body as { consent?: string }).consent ?? ''));
+    let selfieUrl: string;
+    try {
+      selfieUrl = await resolveFileUrl(file);
+    } catch (e) {
+      removeLocal();
+      throw e;
+    }
+    let result;
+    try {
+      result = await runFaceCheck(req.driver!.id, bytes, selfieUrl, consent);
+    } catch (e) {
+      // Nothing was recorded (consent missing / too many tries): don't keep the file.
+      await deleteFromAzureBlob(path.basename(selfieUrl)).catch(() => undefined);
+      throw e;
+    }
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -411,6 +458,11 @@ router.post('/documents', upload.single('file'), async (req: AuthRequest, res: R
     //    belong to anyone else (zero-tolerance duplicates).
     let storedNumber = number?.trim() || undefined;
     try {
+      // Phase 2: the Profile Photo is what the face check compares with, and
+      // the face service reads only JPG/PNG.
+      if (type === 'photo' && !['image/jpeg', 'image/png'].includes(req.file.mimetype)) {
+        throw new ValidationError('Profile Photo must be a JPG or PNG photo of your face');
+      }
       // #9: personal, licence and vehicle details must be filled in first.
       await assertProfileComplete(req.driver!.id);
       await assertCanUploadDocument(req.driver!.id, type);

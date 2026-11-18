@@ -608,6 +608,68 @@ export interface DriverProfile {
   profileMissing?: ProfileItem[];
   /** #13: verified documents expiring within 30 days (daysLeft <= 0 = expired). */
   expiringDocs?: { type: string; expiry: string; daysLeft: number; renewalPending: boolean }[];
+  /** Phase 2 face check (backend/src/services/faceCheck.service.ts). */
+  faceCheck?: FaceCheckState;
+}
+
+export interface FaceCheckState {
+  enabled: boolean;
+  /** False until the Profile Photo is verified. */
+  required: boolean;
+  validUntil: string | null;
+  due: boolean;
+  consentGiven: boolean;
+}
+
+/** True when the driver needs a face check right now (re-checked against the clock). */
+export function faceCheckDue(fc: FaceCheckState | undefined, now = Date.now()): boolean {
+  if (!fc?.enabled || !fc.required) return false;
+  return !fc.validUntil || new Date(fc.validUntil).getTime() <= now;
+}
+
+export interface FaceCheckResult {
+  passed: boolean;
+  reason: string | null;
+  message: string | null;
+  validUntil: string | null;
+}
+
+/** Send a selfie for the face check. */
+export function useSubmitFaceCheck() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, consent }: { file: File; consent: boolean }) => {
+      const form = new FormData();
+      form.append("selfie", file);
+      if (consent) form.append("consent", "1");
+      return api<FaceCheckResult>("/driver/face-check", { method: "POST", body: form });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["driver", "me"] });
+      void qc.invalidateQueries({ queryKey: ["driver", "offers"] });
+    },
+  });
+}
+
+export interface FaceCheckRow {
+  id: string;
+  passed: boolean;
+  reason: string | null;
+  message: string | null;
+  similarity: number | null;
+  selfieUrl: string | null;
+  createdAt: string;
+}
+
+/** Vendor / admin: a driver's latest face checks. */
+export function useDriverFaceChecks(driverId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["drivers", driverId, "face-checks"],
+    queryFn: () => api<{ enabled: boolean; mismatchFlag: { createdAt: string; detail: string | null } | null; checks: FaceCheckRow[] }>(
+      `/drivers/${driverId}/face-checks`,
+    ),
+    enabled: !!driverId,
+  });
 }
 
 export interface ExpiringDocRow {
@@ -694,7 +756,9 @@ export function useDriverRides() {
 export function useGoOnline() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (loc: { lat: number; lng: number }) => api("/driver/online", { method: "POST", body: JSON.stringify(loc) }),
+    // acceptedRules: the driver accepted the Rules & Regulations just now (required by the server).
+    mutationFn: (body: { lat: number; lng: number; acceptedRules: true }) =>
+      api("/driver/online", { method: "POST", body: JSON.stringify(body) }),
     // Flip the online toggle instantly in the cached `me` so it turns green
     // right away instead of only after the refetch settles (which was why it
     // took several hard refreshes to show green).

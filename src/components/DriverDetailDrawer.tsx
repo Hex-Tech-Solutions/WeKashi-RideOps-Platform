@@ -25,7 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   useDriver, useDriverDocsForVendor, useSetDocumentStatus, useRemoveDriver,
-  useSetVendorDriverVehicle, FUEL_TYPES, FUEL_LABELS,
+  useSetVendorDriverVehicle, useDriverFaceChecks, FUEL_TYPES, FUEL_LABELS,
   type DocumentRow, type DriverRow, type FuelType,
 } from "@/lib/queries";
 import { Input } from "@/components/ui/input";
@@ -205,6 +205,8 @@ export function DriverDetailDrawer({
                   ))}
                 </div>
               </section>
+
+              <FaceChecksSection driverId={driver.id} profilePhotoUrl={driver.photoUrl} name={driver.fullName} />
 
               {deleteAs && (
                 <>
@@ -565,5 +567,68 @@ function DocReviewCard({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Face checks (Phase 2) ────────────────────────────────────────────────────
+
+/**
+ * Latest automatic face checks: selfie, result and match score. After 3
+ * "doesn't match" results in a row a warning shows here (and in admin
+ * Duplicate flags). Selfies are deleted after 30 days.
+ */
+function FaceChecksSection({ driverId, profilePhotoUrl, name }: { driverId: string; profilePhotoUrl?: string | null; name: string }) {
+  const { data, isLoading } = useDriverFaceChecks(driverId);
+  if (!data?.enabled && !(data?.checks.length)) return null;
+  const checks = data?.checks ?? [];
+  return (
+    <>
+      <Separator />
+      <section>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3 flex items-center gap-2">
+          Face checks
+          {isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        {data?.mismatchFlag && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>
+              {data.mismatchFlag.detail ?? "Selfies did not match the Profile Photo"} (since{" "}
+              {format(new Date(data.mismatchFlag.createdAt), "dd MMM, HH:mm")}). Compare the selfies below
+              with the Profile Photo.
+            </span>
+          </div>
+        )}
+        {checks.length > 0 && (
+          <div className="flex items-center gap-2 mb-3 text-xs text-muted-foreground">
+            <AuthAvatar fileUrl={profilePhotoUrl} name={name} className="h-10 w-10 text-xs" />
+            Profile Photo
+          </div>
+        )}
+        {checks.length === 0 && !isLoading && (
+          <p className="text-sm text-muted-foreground">No face checks yet.</p>
+        )}
+        <div className="space-y-2">
+          {checks.map((c) => (
+            <div key={c.id} className="flex items-center gap-3 rounded-lg border p-2">
+              {c.selfieUrl
+                ? <AuthAvatar fileUrl={c.selfieUrl} name="?" className="h-10 w-10 text-xs" />
+                : <div className="h-10 w-10 rounded-full bg-secondary text-[9px] text-muted-foreground flex items-center justify-center text-center leading-tight">deleted</div>}
+              <div className="flex-1 min-w-0">
+                <div className={`text-sm font-medium flex items-center gap-1 ${c.passed ? "text-success" : "text-destructive"}`}>
+                  {c.passed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                  {c.passed ? "Matched" : c.reason === "no_match" ? "Did not match" : "Not checked"}
+                  {c.similarity != null && <span className="text-xs text-muted-foreground font-normal">· {c.similarity}%</span>}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {format(new Date(c.createdAt), "dd MMM yyyy, HH:mm")}
+                  {!c.passed && c.reason !== "no_match" && c.message ? ` · ${c.message}` : ""}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }

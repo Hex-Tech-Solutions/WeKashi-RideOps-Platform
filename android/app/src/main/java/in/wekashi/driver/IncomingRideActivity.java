@@ -111,8 +111,8 @@ public class IncomingRideActivity extends AppCompatActivity {
 
     private void startAlertSound() {
         try {
-            Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-            ringtone = RingtoneManager.getRingtone(getApplicationContext(), sound);
+            // Retro landline ringer (res/raw/retro_ring.wav), looped.
+            ringtone = NotificationChannels.rideRingtone(this);
             if (ringtone != null) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) ringtone.setLooping(true);
                 ringtone.play();

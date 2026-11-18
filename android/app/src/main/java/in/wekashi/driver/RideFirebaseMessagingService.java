@@ -36,7 +36,7 @@ import java.util.Map;
  */
 public class RideFirebaseMessagingService extends FirebaseMessagingService {
 
-    public static final String CHANNEL_ID = "ride_broadcasts";
+    public static final String CHANNEL_ID = NotificationChannels.RIDE_CHANNEL;
     private static final int NOTIFICATION_ID = 7001;
 
     @Override
@@ -171,29 +171,8 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
     }
 
     private void createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null) return;
-        if (nm.getNotificationChannel(CHANNEL_ID) != null) return;
-
-        NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.channel_incoming_rides),
-                NotificationManager.IMPORTANCE_HIGH);
-        channel.setDescription(getString(R.string.channel_incoming_rides_desc));
-        channel.enableVibration(true);
-        channel.setVibrationPattern(new long[]{0, 400, 200, 400, 200, 400});
-        channel.setBypassDnd(true);
-        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-
-        Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-        AudioAttributes attrs = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build();
-        channel.setSound(sound, attrs);
-
-        nm.createNotificationChannel(channel);
+        // Ride channel with the retro landline ringer (and the quiet account channel).
+        NotificationChannels.ensure(this);
     }
 
     private void showFullScreenNotification(String rideId, String title, String body,

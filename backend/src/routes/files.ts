@@ -41,6 +41,17 @@ async function canAccess(payload: JwtAccessPayload, filename: string): Promise<b
     return false;
   }
 
+  // Face-check selfie (Phase 2)? Vendor of that driver or admin only.
+  const selfie = await prisma.driverFaceCheck.findFirst({ where: { selfieUrl: fileUrl }, select: { driverId: true } });
+  if (selfie) {
+    if (payload.role !== 'vendor') return false;
+    const [vendor, driver] = await Promise.all([
+      prisma.vendor.findUnique({ where: { userId: payload.sub }, select: { id: true } }),
+      prisma.driver.findUnique({ where: { id: selfie.driverId }, select: { vendorId: true } }),
+    ]);
+    return !!vendor && driver?.vendorId === vendor.id;
+  }
+
   // Payout invoice/proof?
   const payout = await prisma.payout.findFirst({ where: { fileUrl }, select: { vendorId: true } });
   if (payout) {

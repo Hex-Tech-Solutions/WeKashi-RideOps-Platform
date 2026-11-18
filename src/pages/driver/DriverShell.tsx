@@ -9,7 +9,8 @@ import DriverDocuments from "./DriverDocuments";
 import { DriverAccountPanel } from "./DriverAccountPanel";
 import { SosModal } from "@/components/SosModal";
 import { OPEN_SCREEN_EVENT, takePendingScreen, type NoticeScreen } from "@/lib/notificationNav";
-import { getPendingCapture, hasRestoredPhoto } from "@/lib/nativeCamera";
+import { getPendingCapture, hasRestoredPhoto, FACE_CHECK_CAPTURE } from "@/lib/nativeCamera";
+import { OnlineFlowProvider, useOnlineFlow } from "./DriverOnlineFlow";
 import { DriverChat } from "@/components/DriverChat";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Car, CalendarClock, FileText, User, AlertTriangle } from "lucide-react";
@@ -24,6 +25,15 @@ const TABS: { key: Tab | "account"; label: string; Icon: typeof Car }[] = [
 ];
 
 export default function DriverShell() {
+  return (
+    <OnlineFlowProvider>
+      <ShellInner />
+    </OnlineFlowProvider>
+  );
+}
+
+function ShellInner() {
+  const { openFaceCheck } = useOnlineFlow();
   const [tab, setTab]       = useState<Tab>("rides");
   const [accountOpen, setAccountOpen] = useState(false);
   // Section to show when the Documents tab sends the driver to fill in details.
@@ -66,6 +76,7 @@ export default function DriverShell() {
       if (screen === "documents") { setAccountOpen(false); setTab("documents"); }
       else if (screen === "home") { setAccountOpen(false); setTab("rides"); }
       else if (screen === "scheduled") { setAccountOpen(false); setTab("scheduled"); }
+      else if (screen === "facecheck") { setAccountOpen(false); setTab("rides"); openFaceCheck(); }
       else if (screen === "sos") {
         // The driver's open SOS chat, if it is already loaded.
         setAccountOpen(false);
@@ -77,15 +88,20 @@ export default function DriverShell() {
     const waiting = takePendingScreen();
     if (waiting) open(waiting);
     // App restarted by Android while the camera was open: go back to Documents,
-    // where the photo is uploaded once it arrives.
-    else if (getPendingCapture() || hasRestoredPhoto()) open("documents");
+    // where the photo is uploaded once it arrives. (A face-check selfie is
+    // picked up by OnlineFlowProvider on the Rides tab.)
+    else {
+      const isDoc = (p: { docType: string }) => p.docType !== FACE_CHECK_CAPTURE;
+      const pending = getPendingCapture();
+      if ((pending && isDoc(pending)) || hasRestoredPhoto(isDoc)) open("documents");
+    }
     const onEvent = (e: Event) => {
       takePendingScreen();
       open((e as CustomEvent<NoticeScreen>).detail);
     };
     window.addEventListener(OPEN_SCREEN_EVENT, onEvent);
     return () => window.removeEventListener(OPEN_SCREEN_EVENT, onEvent);
-  }, []);
+  }, [openFaceCheck]);
 
   // Active ride — needed to attach the SOS to the right ride
   const rides  = ridesData?.rides ?? [];

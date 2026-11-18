@@ -5,9 +5,9 @@
  * The tap can arrive before the driver shell has mounted (app opened from a
  * closed state), so the request is also kept until the shell asks for it.
  */
-export type NoticeScreen = "home" | "documents" | "credits" | "profile" | "scheduled" | "trips" | "sos";
+export type NoticeScreen = "home" | "documents" | "credits" | "profile" | "scheduled" | "trips" | "sos" | "facecheck";
 
-const SCREENS: readonly NoticeScreen[] = ["home", "documents", "credits", "profile", "scheduled", "trips", "sos"];
+const SCREENS: readonly NoticeScreen[] = ["home", "documents", "credits", "profile", "scheduled", "trips", "sos", "facecheck"];
 export const OPEN_SCREEN_EVENT = "wekashi:openScreen";
 
 let pending: NoticeScreen | null = null;

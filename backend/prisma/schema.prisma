@@ -81,6 +81,13 @@ model Driver {
   /// FCM reports the token is stale/unregistered. Nullable — push is a
   /// best-effort layer on top of the Socket.IO broadcast.
   fcmToken        String?      @map("fcm_token")
+  // ── Phase 2: rules on go-online + face check ──────────────────────────────
+  /// Last time the driver accepted the Rules & Regulations (every go-online).
+  rulesAcceptedAt     DateTime? @map("rules_accepted_at")
+  /// One-time consent to the face check (selfie compared with the profile photo).
+  faceConsentAt       DateTime? @map("face_consent_at")
+  /// Last passed face check is good until this time (services/faceCheck.service.ts).
+  faceCheckValidUntil DateTime? @map("face_check_valid_until")
   createdAt       DateTime     @default(now()) @map("created_at")
 
   vendor        Vendor         @relation(fields: [vendorId], references: [id])
@@ -247,6 +254,23 @@ model DriverNoticeLog {
   @@map("driver_notice_log")
 }
 
+/// One face-check attempt (selfie vs the verified Profile Photo). reason is a
+/// code from services/faceCheck.service.ts (no_match, too_dark, ...); NULL when
+/// passed. The selfie file is deleted after 30 days (selfieUrl -> NULL).
+model DriverFaceCheck {
+  id         String   @id @default(uuid())
+  driverId   String   @map("driver_id")
+  passed     Boolean
+  reason     String?
+  similarity Float?
+  selfieUrl  String?  @map("selfie_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([driverId, createdAt])
+  @@index([createdAt])
+  @@map("driver_face_checks")
+}
+
 /// Consecutive tax-invoice numbers per financial year (#5), e.g. fy '2627'.
 model InvoiceCounter {
   fy   String @id
@@ -314,7 +338,8 @@ model IdentityFlag {
   id            String    @id @default(uuid())
   kind          String
   driverId      String    @map("driver_id")
-  otherDriverId String    @map("other_driver_id")
+  /// NULL for single-account flags (kind 'face_mismatch').
+  otherDriverId String?   @map("other_driver_id")
   detail        String?
   createdAt     DateTime  @default(now()) @map("created_at")
   resolvedAt    DateTime? @map("resolved_at")

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
   useDriverMe, useDriverOffers, useDriverRides,
-  useGoOnline, useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
+  useGoOffline, useUpdateDriverLocation, useAcceptOffer, useRejectOffer, useAdvanceRideStatus,
   useRide, useMarkDriverArrived, useRouteMatrix, useDriverCancelRide, useReleaseQueuedRide,
   useDriverRentalsMine,
   type RideRow,
@@ -38,6 +38,7 @@ import { getDevicePosition, watchDevicePosition, openAppSettings } from "@/lib/d
 import { setOnlineNotification, onNativeWentOffline } from "@/lib/nativeAuth";
 import { missingCriticalPermissions } from "@/lib/permissions";
 import { DriverPermissions } from "./DriverPermissions";
+import { useOnlineFlow, FaceCheckDueBanner } from "./DriverOnlineFlow";
 import { useQueryClient } from "@tanstack/react-query";
 import { mapsUrl, mapsUrlForAddress } from "@/lib/queries";
 
@@ -49,7 +50,7 @@ export default function DriverHome() {
   const { data: me } = useDriverMe();
   const { data: offersData } = useDriverOffers();
   const { data: ridesData } = useDriverRides();
-  const goOnline = useGoOnline();
+  const onlineFlow = useOnlineFlow();
   const goOffline = useGoOffline();
   const updateLocation = useUpdateDriverLocation();
   const accept = useAcceptOffer();
@@ -290,20 +291,9 @@ export default function DriverHome() {
         });
         return;
       }
-      try {
-        const loc = await getDevicePosition();
-        goOnline.mutate(loc, {
-          onSuccess: () => {
-            toast.success("You're online — live location shared");
-            // Show the persistent "You're online" notification so the driver
-            // can go offline in one tap even with the app killed (Model 2).
-            void setOnlineNotification(true);
-          },
-          onError: (e: any) => toast.error(e?.message ?? "Failed"),
-        });
-      } catch (e: any) {
-        toast.error(e?.message ?? "Could not get your location");
-      }
+      // Phase 2: Rules & Regulations (every time), then the face check if it
+      // is due, then online — see DriverOnlineFlow.tsx.
+      onlineFlow.startGoOnline();
     } else {
       goOffline.mutate(undefined, {
         onSuccess: () => { toast.success("You're offline"); void setOnlineNotification(false); },
@@ -358,9 +348,12 @@ export default function DriverHome() {
                 <div className="font-medium text-sm">{online ? "You're online" : "You're offline"}</div>
                 <div className="text-xs text-muted-foreground">{online ? "Receiving ride broadcasts" : "Go online to receive rides"}</div>
               </div>
-              <Switch checked={online} onCheckedChange={toggleOnline} disabled={goOnline.isPending || goOffline.isPending} />
+              <Switch checked={online} onCheckedChange={toggleOnline} disabled={onlineFlow.busy || goOffline.isPending} />
             </CardContent>
           </Card>
+          {online && onlineFlow.faceDue && (
+            <div className="mt-3"><FaceCheckDueBanner /></div>
+          )}
           {!online ? (
             <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
               <LocateFixed className="h-3.5 w-3.5" /> Flip the switch — we'll use your device GPS to go online.

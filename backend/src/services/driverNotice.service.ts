@@ -273,6 +273,16 @@ export async function notifyRentalCancelled(
   }));
 }
 
+/** Phase 2: the 2-hour face check ran out while the driver is online. */
+export async function notifyFaceCheckDue(driverId: string): Promise<void> {
+  await safely(driverId, 'face_check_due', () => pushNotice(driverId, {
+    kind: 'face_check_due',
+    screen: 'facecheck',
+    title: 'Face check due — rides paused',
+    body: "Take a quick selfie to confirm it's you. You won't get or start rides until you do.",
+  }));
+}
+
 // ─── Low-credit alert after a ride ───────────────────────────────────────────
 
 /** Credits left at which we warn the driver (and 0 = none left). */
