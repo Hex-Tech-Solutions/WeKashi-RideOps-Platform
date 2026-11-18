@@ -6,6 +6,7 @@ import { initBroadcastSweeper, stopBroadcastSweeper } from './lib/broadcastSweep
 import { initKycSweeper, stopKycSweeper } from './lib/kycSweeper';
 import { initSignupSweeper, stopSignupSweeper } from './services/signup.service';
 import { initDocExpirySweeper, stopDocExpirySweeper } from './services/docExpiry.service';
+import { initPackExpirySweeper, stopPackExpirySweeper } from './services/creditNotices.service';
 import { startLocationFlusher, stopLocationFlusher, flushLocationBuffer } from './lib/locationBuffer';
 import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
@@ -64,6 +65,9 @@ async function bootstrap(): Promise<void> {
   // Document expiry reminders (30/15/7/1 days + expired) — hourly (#13)
   initDocExpirySweeper();
 
+  // Pack-expiry reminders (30/7/1 days before unused credits expire)
+  initPackExpirySweeper();
+
   // Start location buffer flusher (bulk-writes GPS positions to DB every 60s)
   startLocationFlusher();
 
@@ -79,6 +83,7 @@ async function bootstrap(): Promise<void> {
     stopKycSweeper();
     stopSignupSweeper();
     stopDocExpirySweeper();
+    stopPackExpirySweeper();
     stopLocationFlusher();
 
     httpServer.close(async () => {

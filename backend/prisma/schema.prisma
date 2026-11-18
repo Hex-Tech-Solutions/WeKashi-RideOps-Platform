@@ -234,6 +234,19 @@ model DriverDocument {
   @@map("driver_documents")
 }
 
+/// One-time driver notices (pack-expiry reminders): unique per kind + ref.
+model DriverNoticeLog {
+  id       String   @id @default(uuid())
+  driverId String   @map("driver_id")
+  kind     String
+  ref      String
+  sentAt   DateTime @default(now()) @map("sent_at")
+
+  @@unique([kind, ref])
+  @@index([driverId])
+  @@map("driver_notice_log")
+}
+
 /// Consecutive tax-invoice numbers per financial year (#5), e.g. fy '2627'.
 model InvoiceCounter {
   fy   String @id

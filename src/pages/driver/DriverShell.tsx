@@ -8,6 +8,7 @@ import DriverScheduled from "./DriverScheduled";
 import DriverDocuments from "./DriverDocuments";
 import { DriverAccountPanel } from "./DriverAccountPanel";
 import { SosModal } from "@/components/SosModal";
+import { OPEN_SCREEN_EVENT, takePendingScreen, type NoticeScreen } from "@/lib/notificationNav";
 import { DriverChat } from "@/components/DriverChat";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Car, CalendarClock, FileText, User, AlertTriangle } from "lucide-react";
@@ -53,6 +54,25 @@ export default function DriverShell() {
     window.addEventListener("wekashi:openRide", onOpenRide as EventListener);
     return () => window.removeEventListener("wekashi:openRide", onOpenRide as EventListener);
   }, [queryClient]);
+
+  // A tapped push notice opens the screen it is about (Documents tab, Ride
+  // Credits, Profile or home). Also picks up a tap that arrived before this
+  // screen had mounted (app opened from closed).
+  useEffect(() => {
+    const open = (screen: NoticeScreen) => {
+      if (screen === "documents") { setAccountOpen(false); setTab("documents"); }
+      else if (screen === "home") { setAccountOpen(false); setTab("rides"); }
+      else { setAccountSection(screen); setAccountOpen(true); } // credits | profile
+    };
+    const waiting = takePendingScreen();
+    if (waiting) open(waiting);
+    const onEvent = (e: Event) => {
+      takePendingScreen();
+      open((e as CustomEvent<NoticeScreen>).detail);
+    };
+    window.addEventListener(OPEN_SCREEN_EVENT, onEvent);
+    return () => window.removeEventListener(OPEN_SCREEN_EVENT, onEvent);
+  }, []);
 
   // Active ride — needed to attach the SOS to the right ride
   const rides  = ridesData?.rides ?? [];

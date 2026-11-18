@@ -86,8 +86,11 @@ export async function recomputeKycStatus(
  * grantJoiningBonus is once per account AND once per person, so later
  * approvals (renewals, re-verification) never add credits again.
  */
-export async function grantBonusIfKycApproved(driverId: string, result: { to: KycStatus }): Promise<void> {
-  if (result.to !== 'approved') return;
+export async function grantBonusIfKycApproved(
+  driverId: string,
+  result: { to: KycStatus },
+): Promise<'granted' | 'withheld' | 'skipped'> {
+  if (result.to !== 'approved') return 'skipped';
   const { grantJoiningBonus } = await import('./creditPack.service');
-  await grantJoiningBonus(driverId);
+  return grantJoiningBonus(driverId);
 }

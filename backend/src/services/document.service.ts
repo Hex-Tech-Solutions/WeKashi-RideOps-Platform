@@ -6,7 +6,8 @@ import { NotFoundError, ForbiddenError, ValidationError } from '../types';
 import { DOC_TYPE_RULES, replaceBlockedReason } from '../lib/documentTypes';
 import { recomputeKycStatus, grantBonusIfKycApproved } from './kyc.service';
 import { logger } from '../lib/logger';
-import { notifyDocumentRejected } from './driverNotice.service';
+import { notifyDocumentRejected, notifyKycApproved } from './driverNotice.service';
+import { JOINING_BONUS_CREDITS } from '../lib/creditPacks';
 
 /**
  * Check, before the file is stored, that the driver may upload a new version
@@ -113,9 +114,15 @@ export async function setDocumentStatus(
   });
   // Joining bonus is granted only once KYC is approved (once per person).
   // A failure here must not undo the review that was just saved.
-  await grantBonusIfKycApproved(doc.driverId, kyc).catch((err) =>
-    logger.error({ err, driverId: doc.driverId }, 'Joining bonus grant after KYC approval failed'),
-  );
+  const bonus = await grantBonusIfKycApproved(doc.driverId, kyc).catch((err) => {
+    logger.error({ err, driverId: doc.driverId }, 'Joining bonus grant after KYC approval failed');
+    return 'skipped' as const;
+  });
+  // KYC just became approved (first time, or again after a rejection/expiry):
+  // tell the driver, and mention the credits when the bonus was added.
+  if (kyc.from !== 'approved' && kyc.to === 'approved') {
+    void notifyKycApproved(doc.driverId, bonus === 'granted' ? JOINING_BONUS_CREDITS : 0);
+  }
   // Rejected (incl. a renewal upload): KYC is now rejected; tell the driver to
   // upload a new copy. Best-effort, never blocks the review.
   if (status === 'rejected') {

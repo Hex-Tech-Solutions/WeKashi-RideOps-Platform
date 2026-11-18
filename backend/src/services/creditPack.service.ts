@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { PACK_CATALOG, PackKey, JOINING_BONUS_CREDITS, packExpiry } from '../lib/creditPacks';
 import { logger } from '../lib/logger';
+import { scheduleLowCreditNotice } from './driverNotice.service';
 
 export interface PackView {
   id: string;
@@ -184,8 +185,10 @@ async function findPriorBonusAccount(
  *    logged and flagged to admins (/admin/duplicates); nothing is granted.
  * (Req 7.1, 7.3)
  */
-export async function grantJoiningBonus(driverId: string): Promise<void> {
-  const check: { repeatOf: { id: string; field: string } | null } = { repeatOf: null };
+export type BonusOutcome = 'granted' | 'withheld' | 'skipped';
+
+export async function grantJoiningBonus(driverId: string): Promise<BonusOutcome> {
+  const check: { repeatOf: { id: string; field: string } | null; granted: boolean } = { repeatOf: null, granted: false };
   await prisma.$transaction(async (tx) => {
     const now = new Date();
     // Serialise grants for this driver, then check for an earlier bonus.
@@ -232,6 +235,7 @@ export async function grantJoiningBonus(driverId: string): Promise<void> {
       },
     });
     logger.info({ driverId, credits: JOINING_BONUS_CREDITS }, 'Joining bonus granted');
+    check.granted = true;
   });
 
   if (check.repeatOf) {
@@ -247,7 +251,9 @@ export async function grantJoiningBonus(driverId: string): Promise<void> {
       otherDriverId: prior.id,
       detail: `Joining bonus not granted — matched on ${prior.field}`,
     });
+    return 'withheld';
   }
+  return check.granted ? 'granted' : 'skipped';
 }
 
 /**
@@ -327,6 +333,15 @@ export async function consumeOneCredit(
   await tx.$executeRaw`
     UPDATE rides SET credit_consumed = true WHERE id = ${rideId}
   `;
+
+  // Warn the driver when the balance drops to the low level or to zero. The
+  // push is deferred until the ride's transaction has committed.
+  const left = await tx.$queryRaw<Array<{ total: bigint | number | null }>>`
+    SELECT COALESCE(SUM(credits_remaining), 0) AS total
+    FROM credit_packs
+    WHERE driver_id = ${driverId} AND status = 'active' AND credits_remaining > 0 AND expires_at > NOW()
+  `;
+  scheduleLowCreditNotice(driverId, Number(left[0]?.total ?? 0));
 }
 
 /**

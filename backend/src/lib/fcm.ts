@@ -161,6 +161,9 @@ export async function sendRideBroadcastPush(
   }
 }
 
+/** Screens a notice can open. Must match src/lib/notificationNav.ts. */
+export type NoticeScreen = 'home' | 'documents' | 'credits' | 'profile';
+
 /** Android channel for account notices. Created by the web app on login
  *  (src/lib/pushNotifications.ts). Never use the ride-alert channel here. */
 export const ACCOUNT_CHANNEL_ID = 'account_updates';
@@ -174,7 +177,7 @@ export const ACCOUNT_CHANNEL_ID = 'account_updates';
  */
 export async function sendDriverNoticePush(
   token: string,
-  notice: { title: string; body: string; kind: string },
+  notice: { title: string; body: string; kind: string; screen?: NoticeScreen },
 ): Promise<{ stale: boolean }> {
   const client = getMessaging();
   if (!client || !token) return { stale: false };
@@ -182,7 +185,8 @@ export async function sendDriverNoticePush(
     await client.send({
       token,
       notification: { title: notice.title, body: notice.body },
-      data: { kind: notice.kind },
+      // `screen` tells the app where to go when the driver taps the notice.
+      data: { kind: notice.kind, ...(notice.screen ? { screen: notice.screen } : {}) },
       android: {
         priority: 'normal',
         notification: { channelId: ACCOUNT_CHANNEL_ID },

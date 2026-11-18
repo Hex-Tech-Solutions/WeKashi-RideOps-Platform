@@ -13,6 +13,7 @@
 
 import { Capacitor } from "@capacitor/core";
 import { registerPushToken } from "@/lib/api";
+import { isNoticeScreen, requestScreen } from "@/lib/notificationNav";
 
 let initialized = false;
 let registrationCleanup: (() => void) | null = null;
@@ -78,10 +79,14 @@ export async function initPushNotifications(
   const onTap = await PushNotifications.addListener(
     "pushNotificationActionPerformed",
     (action) => {
-      const data = action.notification?.data as { kind?: string; rideId?: string } | undefined;
+      const data = action.notification?.data as { kind?: string; rideId?: string; screen?: string } | undefined;
       if (data?.kind === "ride_broadcast" && data.rideId && onOpenRide) {
         onOpenRide(data.rideId);
+        return;
       }
+      // Account notices (document / KYC / credits / account): open the screen
+      // the notice is about.
+      if (isNoticeScreen(data?.screen)) requestScreen(data.screen);
     },
   );
 

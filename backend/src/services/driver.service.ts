@@ -240,8 +240,12 @@ export async function updateDriverStatus(
   // key that authenticate() checks, so their CURRENT (<=15 min) access token is
   // rejected on the very next request. Re-activating clears the block.
   const { revokeDriverAccess, clearDriverBlock } = await import('./sessionRevocation');
+  const { notifyAccountSuspended, notifyAccountReactivated, notifyKycApproved } = await import('./driverNotice.service');
+  const wasSuspended = driver.status === 'blacklisted' || driver.status === 'expired';
   if (status === 'blacklisted' || status === 'expired') {
     await revokeDriverAccess(id);
+    // Tell them why rides stopped (push token is kept, so this reaches them).
+    if (driver.status !== status) void notifyAccountSuspended(id);
   } else if (status === 'active') {
     await clearDriverBlock(id);
     // KYC may already be approved (documents verified while the account was
@@ -249,9 +253,12 @@ export async function updateDriverStatus(
     // active AND KYC is approved, once per account and once per person, so a
     // plain activation without approved KYC still grants nothing.
     const { grantJoiningBonus } = await import('./creditPack.service');
-    await grantJoiningBonus(id).catch((err) =>
-      logger.error({ err, driverId: id }, 'Joining bonus grant on activation failed'),
-    );
+    const bonus = await grantJoiningBonus(id).catch((err) => {
+      logger.error({ err, driverId: id }, 'Joining bonus grant on activation failed');
+      return 'skipped' as const;
+    });
+    if (bonus === 'granted') void notifyKycApproved(id, JOINING_BONUS_CREDITS);
+    else if (wasSuspended) void notifyAccountReactivated(id);
   }
 
   return updated;
@@ -333,6 +340,10 @@ export async function removeDriver(
 
   const { revokeDriverAccess } = await import('./sessionRevocation');
   await revokeDriverAccess(driverId);
+  // The deletion cleared the stored push token, so notify using the one read
+  // before it was deleted.
+  const { notifyAccountRemoved } = await import('./driverNotice.service');
+  void notifyAccountRemoved(driverId, driver.fcmToken);
   logger.info({ driverId, by: actor.role }, 'Driver account removed');
 }
 
