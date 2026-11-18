@@ -225,10 +225,15 @@ export default function DriverHome() {
   // Keep the persistent "You're online" notification in sync with the server
   // state — e.g. when the app opens and the driver was already online (Model 2),
   // (re)show it so the one-tap Go Offline is always available.
+  // Only once the profile has loaded: on a cold start `me` is still undefined,
+  // and treating that as "offline" stopped the notification and the bubble for
+  // a moment every time the app was opened.
   const qc = useQueryClient();
+  const meLoaded = me !== undefined;
   useEffect(() => {
+    if (!meLoaded) return;
     void setOnlineNotification(online);
-  }, [online]);
+  }, [online, meLoaded]);
 
   // If the driver taps Go Offline on the native notification, the backend was
   // already told; just refresh `me` so the in-app toggle flips to offline.
