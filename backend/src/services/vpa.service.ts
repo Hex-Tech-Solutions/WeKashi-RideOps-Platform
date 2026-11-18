@@ -12,8 +12,8 @@
 // account, name lookup can be layered on top without changing this contract.
 
 import { prisma } from '../lib/prisma';
-import { ValidationError } from '../types';
-import { normalizeVpa, assertNoIdentityConflict } from '../lib/identity';
+import { ValidationError, ConflictError } from '../types';
+import { normalizeVpa, assertNoIdentityConflict, isUniqueViolation, IDENTITY_CONFLICT_MESSAGE } from '../lib/identity';
 
 export interface SavedVpa {
   upiVpa: string;
@@ -43,15 +43,23 @@ export async function saveAndValidateVpa(driverId: string, vpaRaw: string): Prom
   // label; the payer's UPI app will show the bank-registered name on scan.
   const name = existing?.fullName ?? '';
 
-  const driver = await prisma.driver.update({
-    where: { id: driverId },
-    data: {
-      upiVpa: vpa,
-      upiVpaName: name,
-      upiVerified: true, // "payable" — a well-formed, saved UPI id
-    },
-    select: { upiVpa: true, upiVpaName: true, upiVerified: true },
-  });
+  let driver;
+  try {
+    driver = await prisma.driver.update({
+      where: { id: driverId },
+      data: {
+        upiVpa: vpa,
+        upiVpaName: name,
+        upiVerified: true, // "payable" — a well-formed, saved UPI id
+      },
+      select: { upiVpa: true, upiVpaName: true, upiVerified: true },
+    });
+  } catch (e) {
+    // Lost a race with another account saving the same UPI ID: the database
+    // unique index is the final guard.
+    if (isUniqueViolation(e)) throw new ConflictError(IDENTITY_CONFLICT_MESSAGE);
+    throw e;
+  }
 
   return {
     upiVpa: driver.upiVpa ?? vpa,

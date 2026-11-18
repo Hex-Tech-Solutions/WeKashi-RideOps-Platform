@@ -17,7 +17,7 @@ import { validateDocDetails, DOC_TYPE_RULES } from '../lib/documentTypes';
 import {
   requireIndianMobile, normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar,
   isMaskedAadhaar, hashAadhaar, assertNoIdentityConflict, flagPossibleDuplicate,
-  IDENTITY_CONFLICT_MESSAGE, normalizeRegNo,
+  IDENTITY_CONFLICT_MESSAGE, normalizeRegNo, isUniqueViolation,
 } from '../lib/identity';
 import { assertProfileComplete, FUEL_TYPES } from '../lib/driverProfile';
 import { setDriverVehicle } from '../services/driver.service';
@@ -353,11 +353,23 @@ router.patch('/profile', async (req: AuthRequest, res: Response, next: NextFunct
 
     await assertNoIdentityConflict(keys, driverId, 'profile');
 
-    const d = await prisma.driver.update({
-      where: { id: driverId },
-      data,
-      select: { id: true, fullName: true, phone: true, altPhone: true, dlNumber: true, dlExpiry: true, govIdNumber: true },
-    });
+    // The check above can lose a race against another sign-up saving the same
+    // number at the same moment; the database unique indexes are the final
+    // guard. Give that case the same neutral message.
+    let d;
+    try {
+      d = await prisma.driver.update({
+        where: { id: driverId },
+        data,
+        select: { id: true, fullName: true, phone: true, altPhone: true, dlNumber: true, dlExpiry: true, govIdNumber: true },
+      });
+    } catch (e) {
+      if (isUniqueViolation(e)) {
+        logger.warn({ context: 'profile', editingDriverId: driverId }, 'Duplicate identity blocked by database index');
+        throw new ConflictError(IDENTITY_CONFLICT_MESSAGE);
+      }
+      throw e;
+    }
     res.json(d);
   } catch (err) {
     next(err);

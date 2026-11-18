@@ -20,6 +20,16 @@ import { prisma } from './prisma';
 import { logger } from './logger';
 import { ValidationError, ConflictError } from '../types';
 
+/**
+ * True for a database unique-constraint violation. The identity unique indexes
+ * are created by raw SQL (they are partial / expression indexes Prisma doesn't
+ * model), so match on the Postgres code as well as Prisma's P2002.
+ */
+export function isUniqueViolation(e: unknown): boolean {
+  const err = e as { code?: string; meta?: { code?: string }; message?: string } | null;
+  return err?.code === 'P2002' || err?.meta?.code === '23505' || /unique constraint/i.test(err?.message ?? '');
+}
+
 /** Shown to the user. Deliberately reveals nothing about the other account. */
 export const IDENTITY_CONFLICT_MESSAGE =
   'These details are already linked to an existing Wekashi account. Contact your vendor or support.';

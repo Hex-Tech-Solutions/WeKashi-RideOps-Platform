@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar, isMaskedAadhaar,
-  hashAadhaar, normalizeVpa, normalizeRegNo, isValidIndianRegNo, zIndianMobile,
+  hashAadhaar, normalizeVpa, normalizeRegNo, isValidIndianRegNo, zIndianMobile, isUniqueViolation,
 } from '../src/lib/identity';
 
 describe('identity normalisation', () => {
@@ -16,6 +16,15 @@ describe('identity normalisation', () => {
     for (const input of ['', '12345', '5741194444', '97411944441', '+14155552671']) {
       expect(normalizeIndianMobile(input)).toBeNull();
     }
+  });
+
+  it('recognises a database unique-index violation (Prisma P2002 or Postgres 23505)', () => {
+    expect(isUniqueViolation({ code: 'P2002' })).toBe(true);
+    expect(isUniqueViolation({ code: 'P2010', meta: { code: '23505' } })).toBe(true);
+    expect(isUniqueViolation(new Error('Unique constraint failed on the fields: (`gov_id_hash`)'))).toBe(true);
+    expect(isUniqueViolation({ code: 'P2025' })).toBe(false);
+    expect(isUniqueViolation(new Error('connection reset'))).toBe(false);
+    expect(isUniqueViolation(null)).toBe(false);
   });
 
   it('zIndianMobile stores contact numbers as +91XXXXXXXXXX and rejects others', () => {
