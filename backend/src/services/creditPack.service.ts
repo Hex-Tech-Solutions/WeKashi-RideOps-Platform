@@ -194,13 +194,19 @@ export async function grantJoiningBonus(driverId: string): Promise<void> {
       where: { id: driverId },
       select: { joiningBonusGrantedAt: true, status: true, kycStatus: true },
     });
-    if (!fresh || fresh.joiningBonusGrantedAt) return;
+    // Every "no bonus" outcome is logged with its reason so a missing bonus
+    // can be explained from the API log ("Joining bonus not granted").
+    const skip = (reason: string, extra: Record<string, unknown> = {}) =>
+      logger.info({ driverId, reason, ...extra }, 'Joining bonus not granted');
+    if (!fresh) return skip('driver not found');
+    if (fresh.joiningBonusGrantedAt) return skip('already granted on this account', { grantedAt: fresh.joiningBonusGrantedAt });
     // Only an active account with approved KYC earns the bonus.
-    if (fresh.status !== 'active' || fresh.kycStatus !== 'approved') return;
+    if (fresh.status !== 'active') return skip('account not active', { status: fresh.status });
+    if (fresh.kycStatus !== 'approved') return skip('KYC not approved', { kycStatus: fresh.kycStatus });
     // Already withheld once (flag recorded) — don't re-check or re-flag on
     // every later KYC review.
     const withheld = await tx.identityFlag.count({ where: { kind: 'repeat_joining_bonus', driverId } });
-    if (withheld > 0) return;
+    if (withheld > 0) return skip('withheld earlier (repeat person)');
     check.repeatOf = await findPriorBonusAccount(driverId, tx);
     if (check.repeatOf) return; // same person already had a bonus — grant nothing
 
@@ -225,6 +231,7 @@ export async function grantJoiningBonus(driverId: string): Promise<void> {
         status: 'active',
       },
     });
+    logger.info({ driverId, credits: JOINING_BONUS_CREDITS }, 'Joining bonus granted');
   });
 
   if (check.repeatOf) {

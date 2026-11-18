@@ -244,8 +244,14 @@ export async function updateDriverStatus(
     await revokeDriverAccess(id);
   } else if (status === 'active') {
     await clearDriverBlock(id);
-    // No credits here: the joining bonus is granted only when KYC is first
-    // approved (kyc.service / setDocumentStatus).
+    // KYC may already be approved (documents verified while the account was
+    // pending or suspended). grantJoiningBonus only grants when the account is
+    // active AND KYC is approved, once per account and once per person, so a
+    // plain activation without approved KYC still grants nothing.
+    const { grantJoiningBonus } = await import('./creditPack.service');
+    await grantJoiningBonus(id).catch((err) =>
+      logger.error({ err, driverId: id }, 'Joining bonus grant on activation failed'),
+    );
   }
 
   return updated;
