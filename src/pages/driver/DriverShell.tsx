@@ -9,6 +9,7 @@ import DriverDocuments from "./DriverDocuments";
 import { DriverAccountPanel } from "./DriverAccountPanel";
 import { SosModal } from "@/components/SosModal";
 import { OPEN_SCREEN_EVENT, takePendingScreen, type NoticeScreen } from "@/lib/notificationNav";
+import { getPendingCapture, hasRestoredPhoto } from "@/lib/nativeCamera";
 import { DriverChat } from "@/components/DriverChat";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Car, CalendarClock, FileText, User, AlertTriangle } from "lucide-react";
@@ -75,6 +76,9 @@ export default function DriverShell() {
     };
     const waiting = takePendingScreen();
     if (waiting) open(waiting);
+    // App restarted by Android while the camera was open: go back to Documents,
+    // where the photo is uploaded once it arrives.
+    else if (getPendingCapture() || hasRestoredPhoto()) open("documents");
     const onEvent = (e: Event) => {
       takePendingScreen();
       open((e as CustomEvent<NoticeScreen>).detail);

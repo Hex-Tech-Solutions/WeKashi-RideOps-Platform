@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,10 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { isCameraAvailable, takePhoto, CameraError } from "@/lib/nativeCamera";
+import {
+  isCameraAvailable, takePhoto, CameraError,
+  takeRestoredPhoto, onRestoredPhoto, clearPendingCapture,
+} from "@/lib/nativeCamera";
 import { openAppSettings } from "@/lib/deviceLocation";
 
 // Must match RENEWAL_WINDOW_DAYS in backend/src/lib/documentTypes.ts.
@@ -85,6 +88,8 @@ export default function DriverDocuments({ onOpenAccount }: { onOpenAccount?: (se
 
   // KYC-suspended banner: show when kycStatus is 'expired'
   const kycExpired = meData?.kycStatus === "expired";
+
+  useRestoredPhotoUpload();
 
   return (
     <div className="px-4 py-4 space-y-3">
@@ -198,6 +203,36 @@ function ProfileGate({ missing, onOpenAccount }: { missing: ProfileItem[]; onOpe
   );
 }
 
+/**
+ * Finish an upload whose photo arrived after Android restarted the app while
+ * the camera was open (see src/lib/nativeCamera.ts).
+ */
+function useRestoredPhotoUpload() {
+  const upload = useUploadDriverDocument();
+  const mutate = upload.mutate;
+  useEffect(() => {
+    const run = () => {
+      const r = takeRestoredPhoto();
+      if (!r) return;
+      clearPendingCapture();
+      const { pending, file } = r;
+      const label = DOC_LABELS[pending.docType] ?? "Document";
+      const form = new FormData();
+      form.append("file", file);
+      form.append("type", pending.docType);
+      if (pending.number) form.append("number", pending.number);
+      if (pending.expiry) form.append("expiry", new Date(pending.expiry).toISOString());
+      const t = toast.loading(`Uploading ${label}…`);
+      mutate(form, {
+        onSuccess: () => toast.success(`${label} uploaded`, { id: t }),
+        onError: (e: any) => toast.error(e?.message ?? "Upload failed", { id: t }),
+      });
+    };
+    run();
+    return onRestoredPhoto(run);
+  }, [mutate]);
+}
+
 function DocCard({
   req,
   existing,
@@ -242,7 +277,15 @@ function DocCard({
     if (err) { toast.error(err); return; }
     setShooting(true);
     try {
-      const file = await takePhoto({ name: req.type, front: req.type === "photo" });
+      const file = await takePhoto({
+        name: req.type,
+        front: req.type === "photo",
+        pending: {
+          docType: req.type,
+          number: req.wantsNumber ? number.trim() : undefined,
+          expiry: req.wantsExpiry ? expiry : undefined,
+        },
+      });
       if (file) onFile(file);
     } catch (e) {
       if (e instanceof CameraError && e.kind === "denied") {

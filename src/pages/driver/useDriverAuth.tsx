@@ -3,6 +3,7 @@ import { driverVerifyOtp, getStoredDriver, logoutRequest, clearPushToken, tokenS
 import { initPushNotifications, teardownPushNotifications } from "@/lib/pushNotifications";
 import { syncNativeAuth, clearNativeAuth } from "@/lib/nativeAuth";
 import { TERMS_ACCEPTED_KEY } from "./DriverTerms";
+import { clearPendingCapture } from "@/lib/nativeCamera";
 
 interface DriverAuthState {
   session: DriverSession | null;
@@ -34,6 +35,7 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
     // Clear any prior acceptance so a fresh login always re-presents the rules,
     // even if the previous driver accepted them in this same browser session.
     sessionStorage.removeItem(TERMS_ACCEPTED_KEY);
+    clearPendingCapture();
     setSession(s);
     return s;
   };
@@ -48,6 +50,7 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
     await clearNativeAuth();
     await logoutRequest();
     sessionStorage.removeItem(TERMS_ACCEPTED_KEY);
+    clearPendingCapture();
     setSession(null);
   };
 

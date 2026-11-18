@@ -5,6 +5,10 @@ import DriverLogin from "./DriverLogin";
 import DriverShell from "./DriverShell";
 import DriverTerms, { TERMS_ACCEPTED_KEY } from "./DriverTerms";
 import { DriverPermissions } from "./DriverPermissions";
+import { getPendingCapture, initCameraRestore } from "@/lib/nativeCamera";
+
+// Pick up a photo taken while Android had the app closed (see nativeCamera.ts).
+initCameraRestore();
 
 const ONBOARDED_KEY = "rideops_driver_onboarded";
 // Permissions checklist is shown until the driver has cleared it once per
@@ -16,9 +20,17 @@ function Gate() {
   const [onboarded, setOnboarded] = useState(() => localStorage.getItem(ONBOARDED_KEY) === "1");
   // sessionStorage, not localStorage — acceptance lasts for this session only,
   // so the driver re-accepts the rules on every fresh login.
-  const [termsAccepted, setTermsAccepted] = useState(
-    () => sessionStorage.getItem(TERMS_ACCEPTED_KEY) === "1",
-  );
+  const [termsAccepted, setTermsAccepted] = useState(() => {
+    if (sessionStorage.getItem(TERMS_ACCEPTED_KEY) === "1") return true;
+    // Android killed the app while the camera was open (the camera can only be
+    // opened from inside the app, i.e. after the rules were accepted). Don't
+    // make the driver accept again just to finish that upload.
+    if (getPendingCapture()) {
+      sessionStorage.setItem(TERMS_ACCEPTED_KEY, "1");
+      return true;
+    }
+    return false;
+  });
 
   const [permsDone, setPermsDone] = useState(() => localStorage.getItem(PERMISSIONS_DONE_KEY) === "1");
 
