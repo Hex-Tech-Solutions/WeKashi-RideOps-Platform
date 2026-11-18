@@ -26,7 +26,10 @@ async function pushNotice(driverId: string, notice: Notice, token?: string | nul
     target = d?.fcmToken ?? null;
   }
   if (!target) return;
-  const { stale } = await sendDriverNoticePush(target, notice);
+  // NOTICE_TEST_PREFIX (e.g. "[TEST] ") is set only by scripts/sendTestNotices
+  // so test pushes are clearly labelled. Empty in normal operation.
+  const prefix = process.env.NOTICE_TEST_PREFIX ?? '';
+  const { stale } = await sendDriverNoticePush(target, prefix ? { ...notice, title: `${prefix}${notice.title}` } : notice);
   if (stale) {
     // App uninstalled / data cleared — same handling as ride pushes.
     await prisma.driver.updateMany({ where: { id: driverId, fcmToken: target }, data: { fcmToken: null, isOnline: false } });
