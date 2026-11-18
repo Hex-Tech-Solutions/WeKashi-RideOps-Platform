@@ -11,6 +11,7 @@ import { NotFoundError, ValidationError, ConflictError } from '../types';
 import { logger } from '../lib/logger';
 import { spareCredits } from './creditPack.service';
 import { assertDriverCanTakeRides } from '../lib/rideEligibility';
+import { notifyRentalCancelled } from './driverNotice.service';
 import { randomInt } from 'crypto';
 
 // A driver's dismissed rentals persist across refreshes (so a declined card
@@ -674,11 +675,18 @@ export async function releaseRental(rentalId: string, driverId: string): Promise
 
 // Supervisor cancels a rental entirely.
 export async function cancelRental(rentalId: string, supervisorId: string): Promise<void> {
-  const rental = await prisma.rental.findUnique({ where: { id: rentalId }, select: { supervisorId: true, status: true } });
+  const rental = await prisma.rental.findUnique({
+    where: { id: rentalId },
+    select: { supervisorId: true, status: true, driverId: true, pickupAddress: true, customerName: true },
+  });
   if (!rental) throw new NotFoundError('Rental not found');
   if (rental.supervisorId !== supervisorId) throw new ValidationError('Access denied');
   if (rental.status === 'completed') throw new ValidationError('Completed rentals cannot be cancelled');
   await prisma.rental.update({ where: { id: rentalId }, data: { status: 'cancelled' } });
+  // The driver who accepted or started it must be told it is off.
+  if (rental.driverId && (rental.status === 'assigned' || rental.status === 'in_progress')) {
+    void notifyRentalCancelled(rental.driverId, { pickupAddress: rental.pickupAddress, customerName: rental.customerName });
+  }
 }
 
 /**

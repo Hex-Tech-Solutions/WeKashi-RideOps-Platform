@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { notifyPaymentMarked } from '../services/driverNotice.service';
 import { zIndianMobile } from '../lib/identity';
 import { parsePagination } from '../lib/pagination';
 import {
@@ -630,7 +631,10 @@ export function createRidesRouter(io: IoServer): Router {
 
       const ride = await prisma.ride.findUnique({
         where: { id: req.params.id },
-        select: { id: true, status: true, supervisorId: true, paymentStatus: true },
+        select: {
+          id: true, status: true, supervisorId: true, paymentStatus: true,
+          driverId: true, totalAmount: true, price: true, escortCharge: true, tollCharge: true,
+        },
       });
       if (!ride) throw new NotFoundError('Ride not found');
       if (req.user!.role === 'supervisor' && ride.supervisorId !== req.user!.id) {
@@ -648,6 +652,11 @@ export function createRidesRouter(io: IoServer): Router {
         where: { id: ride.id },
         data: { paymentStatus: 'paid', paymentRef: txnRef, paidAt: new Date() },
       });
+      // Prompt the driver to check the UTR and confirm receipt.
+      if (ride.driverId) {
+        const amount = ride.totalAmount ?? ((ride.price ?? 0) + (ride.escortCharge ?? 0) + (ride.tollCharge ?? 0));
+        void notifyPaymentMarked(ride.driverId, amount > 0 ? Math.round(amount * 100) / 100 : null, txnRef);
+      }
       res.json({ ok: true });
     } catch (err) {
       next(err);

@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { prisma } from '../lib/prisma';
 import { PACK_CATALOG, PackKey, isPackKey, gstBreakdown } from '../lib/creditPacks';
 import { nextInvoiceNo, buildInvoice } from '../lib/invoice';
+import { notifyPurchaseConfirmed } from './driverNotice.service';
 import { createPackOrder as cfCreateOrder, getOrderStatus } from '../lib/cashfree';
 import { activatePurchasedPack } from './creditPack.service';
 import { ValidationError, NotFoundError } from '../types';
@@ -113,7 +114,11 @@ export async function activateFromWebhook(orderId: string, paymentId?: string): 
     logger.warn({ orderId }, 'Webhook for unknown pack order — ignoring');
     return { activated: false, credits: 0 };
   }
-  return activateGuarded(orderId, paymentId);
+  const result = await activateGuarded(orderId, paymentId);
+  // Only when THIS call activated it: if the app's own confirm got there first,
+  // the driver already saw the credits arrive and a push would be a duplicate.
+  if (result.activated) void notifyPurchaseConfirmed(order.driverId, result.credits);
+  return result;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, type IssueRow } from "@/lib/queries";
 import { useDriverBroadcastSocket, type DriverBroadcastPayload } from "@/lib/driverRideAlerts";
@@ -26,7 +26,9 @@ export default function DriverShell() {
   const [tab, setTab]       = useState<Tab>("rides");
   const [accountOpen, setAccountOpen] = useState(false);
   // Section to show when the Documents tab sends the driver to fill in details.
-  const [accountSection, setAccountSection] = useState<"profile" | "vehicle" | "credits" | undefined>(undefined);
+  const [accountSection, setAccountSection] = useState<"profile" | "vehicle" | "credits" | "trips" | undefined>(undefined);
+  // Latest open SOS, for the "reply to your SOS" notification tap.
+  const openSosRef = useRef<IssueRow | undefined>(undefined);
   const { data: me }        = useDriverMe();
   const { data: ridesData } = useDriverRides();
   const { data: sosData }   = useDriverSosIssues();
@@ -62,7 +64,14 @@ export default function DriverShell() {
     const open = (screen: NoticeScreen) => {
       if (screen === "documents") { setAccountOpen(false); setTab("documents"); }
       else if (screen === "home") { setAccountOpen(false); setTab("rides"); }
-      else { setAccountSection(screen); setAccountOpen(true); } // credits | profile
+      else if (screen === "scheduled") { setAccountOpen(false); setTab("scheduled"); }
+      else if (screen === "sos") {
+        // The driver's open SOS chat, if it is already loaded.
+        setAccountOpen(false);
+        setTab("rides");
+        if (openSosRef.current) setChatIssue(openSosRef.current);
+      }
+      else { setAccountSection(screen); setAccountOpen(true); } // credits | profile | trips
     };
     const waiting = takePendingScreen();
     if (waiting) open(waiting);
@@ -84,6 +93,7 @@ export default function DriverShell() {
 
   // Latest open SOS for quick-return to chat
   const openSos = (sosData?.issues ?? []).find((i) => i.isSos && i.status === "open");
+  openSosRef.current = openSos;
 
   const handleSosCreated = (issueId: string) => {
     // Find the newly created SOS in the refetched list and open chat

@@ -153,6 +153,123 @@ export async function notifyPackExpiring(driverId: string, credits: number, days
   }));
 }
 
+// ─── Ride, rental, payment and chat notices ──────────────────────────────────
+
+/** "Fri 20 Nov, 10:30 am" in IST. */
+export function formatIst(d: Date): string {
+  return d.toLocaleString('en-IN', {
+    weekday: 'short', day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit',
+    hour12: true, timeZone: 'Asia/Kolkata',
+  });
+}
+
+const short = (s: string | null | undefined, n = 60) => {
+  const t = (s ?? '').trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
+
+/** A scheduled ride becomes the driver's ACTIVE ride this long before pickup. */
+const ACTIVE_WINDOW_MS = 45 * 60 * 1000;
+
+/** A supervisor or admin assigned a ride to this driver directly. */
+export async function notifyRideAssigned(
+  driverId: string,
+  ride: { pickupAddress: string; dropAddress: string; scheduledFor: Date | null },
+  queued: boolean,
+): Promise<void> {
+  const later = !!ride.scheduledFor && ride.scheduledFor.getTime() - Date.now() > ACTIVE_WINDOW_MS;
+  await safely(driverId, 'ride_assigned', () => pushNotice(driverId, {
+    kind: 'ride_assigned',
+    screen: later ? 'scheduled' : 'home',
+    title: queued ? 'A ride was queued as your next ride' : 'A ride was assigned to you',
+    body: `${short(ride.pickupAddress)} → ${short(ride.dropAddress)}.`
+      + (ride.scheduledFor ? ` Pickup ${formatIst(ride.scheduledFor)}.` : '')
+      + (queued ? ' It starts after your current ride.' : ''),
+  }));
+}
+
+/** The supervisor/admin cancelled a ride this driver had accepted or been given. */
+export async function notifyRideCancelled(
+  driverId: string,
+  ride: { pickupAddress: string; scheduledFor: Date | null },
+): Promise<void> {
+  await safely(driverId, 'ride_cancelled', () => pushNotice(driverId, {
+    kind: 'ride_cancelled',
+    screen: 'home',
+    title: 'Your ride was cancelled',
+    body: `The ride from ${short(ride.pickupAddress)}`
+      + (ride.scheduledFor ? ` (${formatIst(ride.scheduledFor)})` : '')
+      + ' was cancelled by the supervisor. You do not need to go.',
+  }));
+}
+
+/** Reminder for a ride the driver claimed or was assigned. */
+export async function notifyRideReminder(
+  driverId: string,
+  ride: { pickupAddress: string; scheduledFor: Date },
+  minutesLeft: number,
+  isRental = false,
+): Promise<void> {
+  const mins = Math.max(1, Math.round(minutesLeft));
+  const inText = mins >= 120 ? `in about ${Math.round(mins / 60)} hours` : mins >= 60 ? 'in about an hour' : `in ${mins} minutes`;
+  await safely(driverId, 'ride_reminder', () => pushNotice(driverId, {
+    kind: 'ride_reminder',
+    screen: ride.scheduledFor.getTime() - Date.now() > ACTIVE_WINDOW_MS ? 'scheduled' : 'home',
+    title: `${isRental ? 'Rental' : 'Ride'} pickup ${inText}`,
+    body: `${formatIst(ride.scheduledFor)} · ${short(ride.pickupAddress, 80)}. `
+      + (mins <= 45 ? 'You can start the trip now.' : 'Be ready on time.'),
+  }));
+}
+
+/** The supervisor recorded a UPI payment: the driver should check the UTR and confirm. */
+export async function notifyPaymentMarked(
+  driverId: string,
+  amount: number | null,
+  utrLast4: string,
+  isRental = false,
+): Promise<void> {
+  await safely(driverId, 'payment_marked', () => pushNotice(driverId, {
+    kind: 'payment_marked',
+    screen: 'trips',
+    title: amount != null ? `Payment of ₹${amount.toLocaleString('en-IN')} sent` : 'Payment sent',
+    body: `The supervisor paid you for the ${isRental ? 'rental' : 'ride'} (UTR ending ${utrLast4}). `
+      + 'Check your bank, then confirm receipt in Recent trips.',
+  }));
+}
+
+/** The supervisor/admin replied in the driver's SOS chat. */
+export async function notifySosReply(driverId: string, message: string): Promise<void> {
+  await safely(driverId, 'sos_reply', () => pushNotice(driverId, {
+    kind: 'sos_reply',
+    screen: 'sos',
+    title: 'Reply to your SOS',
+    body: short(message, 110) || 'Open the chat to read it.',
+  }));
+}
+
+/** A credit-pack payment completed (confirmed by the payment gateway). */
+export async function notifyPurchaseConfirmed(driverId: string, credits: number): Promise<void> {
+  await safely(driverId, 'purchase_confirmed', () => pushNotice(driverId, {
+    kind: 'purchase_confirmed',
+    screen: 'credits',
+    title: 'Payment received',
+    body: `${credits} ride credits have been added to your account.`,
+  }));
+}
+
+/** The supervisor cancelled a rental this driver had accepted or started. */
+export async function notifyRentalCancelled(
+  driverId: string,
+  rental: { pickupAddress: string; customerName: string },
+): Promise<void> {
+  await safely(driverId, 'rental_cancelled', () => pushNotice(driverId, {
+    kind: 'rental_cancelled',
+    screen: 'home',
+    title: 'Your rental was cancelled',
+    body: `The rental for ${short(rental.customerName, 30)} at ${short(rental.pickupAddress)} was cancelled by the supervisor.`,
+  }));
+}
+
 // ─── Low-credit alert after a ride ───────────────────────────────────────────
 
 /** Credits left at which we warn the driver (and 0 = none left). */

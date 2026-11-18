@@ -17,6 +17,7 @@
 import { Router, Response, NextFunction, Request } from 'express';
 import express from 'express';
 import { z } from 'zod';
+import { notifyPaymentMarked } from '../services/driverNotice.service';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -219,7 +220,10 @@ router.post(
         .parse(req.body);
       const rental = await prisma.rental.findUnique({
         where: { id: req.params.id },
-        select: { id: true, status: true, supervisorId: true, paymentStatus: true },
+        select: {
+          id: true, status: true, supervisorId: true, paymentStatus: true,
+          driverId: true, totalAmount: true, basePrice: true, overageAmount: true,
+        },
       });
       if (!rental) { res.status(404).json({ error: 'Rental not found', code: 'NOT_FOUND' }); return; }
       if (req.user!.role === 'supervisor' && rental.supervisorId !== req.user!.id) {
@@ -230,6 +234,10 @@ router.post(
       }
       if (rental.paymentStatus === 'paid') { res.json({ ok: true, alreadyPaid: true }); return; }
       await prisma.rental.update({ where: { id: rental.id }, data: { paymentStatus: 'paid', paymentRef: txnRef, paidAt: new Date() } });
+      if (rental.driverId) {
+        const amount = rental.totalAmount ?? (rental.basePrice + rental.overageAmount);
+        void notifyPaymentMarked(rental.driverId, amount > 0 ? Math.round(amount * 100) / 100 : null, txnRef, true);
+      }
       res.json({ ok: true });
     } catch (err) { next(err); }
   },

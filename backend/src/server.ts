@@ -7,6 +7,7 @@ import { initKycSweeper, stopKycSweeper } from './lib/kycSweeper';
 import { initSignupSweeper, stopSignupSweeper } from './services/signup.service';
 import { initDocExpirySweeper, stopDocExpirySweeper } from './services/docExpiry.service';
 import { initPackExpirySweeper, stopPackExpirySweeper } from './services/creditNotices.service';
+import { initRideReminderSweeper, stopRideReminderSweeper } from './services/rideReminders.service';
 import { startLocationFlusher, stopLocationFlusher, flushLocationBuffer } from './lib/locationBuffer';
 import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
@@ -68,6 +69,9 @@ async function bootstrap(): Promise<void> {
   // Pack-expiry reminders (30/7/1 days before unused credits expire)
   initPackExpirySweeper();
 
+  // Pickup reminders for scheduled rides / rentals a driver holds (24h, 2h, 45min)
+  initRideReminderSweeper();
+
   // Start location buffer flusher (bulk-writes GPS positions to DB every 60s)
   startLocationFlusher();
 
@@ -84,6 +88,7 @@ async function bootstrap(): Promise<void> {
     stopSignupSweeper();
     stopDocExpirySweeper();
     stopPackExpirySweeper();
+    stopRideReminderSweeper();
     stopLocationFlusher();
 
     httpServer.close(async () => {

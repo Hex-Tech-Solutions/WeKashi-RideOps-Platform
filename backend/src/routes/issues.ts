@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { notifySosReply } from '../services/driverNotice.service';
 import {
   createIssue,
   createDriverSos,
@@ -241,6 +242,9 @@ export function createIssuesRouter(io: IoServer): Router {
           io.of('/driver')
             .to(`driver:${issue.driverId}`)
             .emit('issue:message', { issueId: req.params.id, message: msg });
+          // The socket only reaches an open app; also push for a closed one.
+          // Only SOS chats — a driver has no chat screen for ordinary issues.
+          if (issue.isSos) void notifySosReply(issue.driverId, sanitizeText(body));
         }
 
         res.status(201).json(msg);

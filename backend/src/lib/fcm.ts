@@ -162,7 +162,7 @@ export async function sendRideBroadcastPush(
 }
 
 /** Screens a notice can open. Must match src/lib/notificationNav.ts. */
-export type NoticeScreen = 'home' | 'documents' | 'credits' | 'profile';
+export type NoticeScreen = 'home' | 'documents' | 'credits' | 'profile' | 'scheduled' | 'trips' | 'sos';
 
 /** Android channel for account notices. Created by the web app on login
  *  (src/lib/pushNotifications.ts). Never use the ride-alert channel here. */

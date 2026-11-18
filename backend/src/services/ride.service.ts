@@ -16,6 +16,7 @@ import {
 import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import { spareCredits, consumeOneCredit } from './creditPack.service';
 import { assertDriverCanTakeRides, noExpiredDocSql } from '../lib/rideEligibility';
+import { notifyRideAssigned, notifyRideCancelled } from './driverNotice.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
 import { emitDriverBroadcast } from '../lib/driverBroadcast';
 import { randomInt } from 'crypto';
@@ -417,6 +418,11 @@ export async function cancelRide(
   await redis.del(`ride:broadcast:${rideId}`);
   await invalidateDriverActiveRide(ride.driverId);
   await afterQueuedPromotion(promotedRideId);
+
+  // A driver who had accepted / been given this ride must be told it is off.
+  if (ride.driverId && (ride.status === 'assigned' || ride.status === 'in_progress')) {
+    void notifyRideCancelled(ride.driverId, { pickupAddress: ride.pickupAddress, scheduledFor: ride.scheduledFor });
+  }
 }
 
 export async function advanceRideStatus(
@@ -966,6 +972,13 @@ export async function manualAssignRide(
   if (!queued) {
     await sendPaxOtpSms(rideId);
   }
+
+  // Tell the driver — a manual assignment used to reach them with no alert.
+  void notifyRideAssigned(
+    driverId,
+    { pickupAddress: ride.pickupAddress, dropAddress: ride.dropAddress, scheduledFor: ride.scheduledFor },
+    queued,
+  );
 }
 
 export async function listScheduledRidesForDriver(vehicleType?: string | null) {
