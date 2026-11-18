@@ -202,7 +202,11 @@ export async function getDriver(id: string) {
     // #9: what must be filled in before documents can be uploaded.
     profileMissing: profileMissing(driver),
     // #13: verified documents expiring within 30 days (or expired).
-    expiringDocs: (await listExpiringDocs({ driverId: id })).map((d) => ({
+    // Best-effort: a failure here must never break the driver's profile load.
+    expiringDocs: (await listExpiringDocs({ driverId: id }).catch((err) => {
+      logger.error({ err, driverId: id }, 'Expiring-docs lookup failed');
+      return [];
+    })).map((d) => ({
       type: d.type, expiry: d.expiry, daysLeft: d.daysLeft, renewalPending: d.renewalPending,
     })),
   };

@@ -78,7 +78,8 @@ export async function listExpiringDocs(filter: { driverId?: string; vendorId?: s
     ) cur
     WHERE cur.status = 'verified'
       AND cur.expiry IS NOT NULL
-      AND cur.expiry < NOW() + make_interval(days => ${EXPIRY_WINDOW_DAYS})
+      -- Prisma sends JS numbers as bigint; make_interval needs int, so cast.
+      AND cur.expiry < NOW() + make_interval(days => ${EXPIRY_WINDOW_DAYS}::int)
     ORDER BY cur.expiry ASC
   `;
   const now = new Date();
