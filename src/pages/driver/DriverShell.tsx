@@ -25,7 +25,7 @@ export default function DriverShell() {
   const [tab, setTab]       = useState<Tab>("rides");
   const [accountOpen, setAccountOpen] = useState(false);
   // Section to show when the Documents tab sends the driver to fill in details.
-  const [accountSection, setAccountSection] = useState<"profile" | "vehicle" | undefined>(undefined);
+  const [accountSection, setAccountSection] = useState<"profile" | "vehicle" | "credits" | undefined>(undefined);
   const { data: me }        = useDriverMe();
   const { data: ridesData } = useDriverRides();
   const { data: sosData }   = useDriverSosIssues();

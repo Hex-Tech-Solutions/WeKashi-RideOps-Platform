@@ -70,7 +70,7 @@ const statusBadge = (doc: DocumentRow) => {
   return                                 { cls: "border-warning/40 text-warning",               Icon: Clock,        label: "pending"   };
 };
 
-export default function DriverDocuments({ onOpenAccount }: { onOpenAccount?: (section: "profile" | "vehicle") => void } = {}) {
+export default function DriverDocuments({ onOpenAccount }: { onOpenAccount?: (section: "profile" | "vehicle" | "credits") => void } = {}) {
   const { data: meData }  = useDriverMe();
   const profileMissing = meData?.profileMissing ?? [];
   const { data, isLoading } = useDriverDocuments();
@@ -137,11 +137,14 @@ export default function DriverDocuments({ onOpenAccount }: { onOpenAccount?: (se
 }
 
 const VEHICLE_ITEMS: ProfileItem[] = ["vehicleNo", "vehicleType", "seats", "fuelType"];
+// The payout UPI card lives under Account → Ride Credits.
+const UPI_ITEMS: ProfileItem[] = ["upiId"];
 
-/** #9: documents unlock once personal, licence and vehicle details are saved. */
-function ProfileGate({ missing, onOpenAccount }: { missing: ProfileItem[]; onOpenAccount?: (s: "profile" | "vehicle") => void }) {
-  const profileItems = missing.filter((m) => !VEHICLE_ITEMS.includes(m));
+/** #9: documents unlock once personal, licence, UPI and vehicle details are saved. */
+function ProfileGate({ missing, onOpenAccount }: { missing: ProfileItem[]; onOpenAccount?: (s: "profile" | "vehicle" | "credits") => void }) {
+  const profileItems = missing.filter((m) => !VEHICLE_ITEMS.includes(m) && !UPI_ITEMS.includes(m));
   const vehicleItems = missing.filter((m) => VEHICLE_ITEMS.includes(m));
+  const upiItems = missing.filter((m) => UPI_ITEMS.includes(m));
   return (
     <Card className="border-warning/40 bg-warning/5">
       <CardContent className="p-4 space-y-3">
@@ -162,6 +165,17 @@ function ProfileGate({ missing, onOpenAccount }: { missing: ProfileItem[]; onOpe
             </ul>
             {onOpenAccount && (
               <Button size="sm" variant="outline" className="w-full" onClick={() => onOpenAccount("profile")}>Open Profile</Button>
+            )}
+          </div>
+        )}
+        {upiItems.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium">Account → Ride Credits → Payout UPI</div>
+            <ul className="text-xs text-muted-foreground list-disc pl-5">
+              {upiItems.map((m) => <li key={m}>{PROFILE_ITEM_LABELS[m]}</li>)}
+            </ul>
+            {onOpenAccount && (
+              <Button size="sm" variant="outline" className="w-full" onClick={() => onOpenAccount("credits")}>Add UPI ID</Button>
             )}
           </div>
         )}

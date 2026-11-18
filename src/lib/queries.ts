@@ -646,11 +646,12 @@ export type FuelType = (typeof FUEL_TYPES)[number];
 export const FUEL_LABELS: Record<FuelType, string> = { petrol: "Petrol", diesel: "Diesel", cng: "CNG", electric: "Electric" };
 
 /** Profile items the server reports as missing (#9), with display labels. */
-export type ProfileItem = "dlNumber" | "dlExpiry" | "aadhaar" | "vehicleNo" | "vehicleType" | "seats" | "fuelType";
+export type ProfileItem = "dlNumber" | "dlExpiry" | "aadhaar" | "upiId" | "vehicleNo" | "vehicleType" | "seats" | "fuelType";
 export const PROFILE_ITEM_LABELS: Record<ProfileItem, string> = {
   dlNumber: "Driving licence number",
   dlExpiry: "Driving licence expiry date",
   aadhaar: "Aadhaar number",
+  upiId: "UPI ID",
   vehicleNo: "Vehicle number",
   vehicleType: "Vehicle type",
   seats: "Seats",

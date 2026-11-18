@@ -6,6 +6,7 @@ const complete: ProfileFields = {
   dlExpiry: new Date('2030-01-01'),
   govIdNumber: 'XXXX XXXX 1234',
   govIdHash: 'abc',
+  upiVpa: 'driver@okaxis',
   vehicleType: 'sedan',
   seats: 5,
   vehicle: { regNo: 'KA05AB1234', capacity: 5, fuelType: 'petrol' },
@@ -18,10 +19,10 @@ describe('profileMissing (#9)', () => {
 
   it('lists everything for a fresh sign-up with only a vehicle number', () => {
     expect(profileMissing({
-      dlNumber: null, dlExpiry: null, govIdNumber: null, govIdHash: null,
+      dlNumber: null, dlExpiry: null, govIdNumber: null, govIdHash: null, upiVpa: null,
       vehicleType: null, seats: null,
       vehicle: { regNo: 'KA05AB1234', capacity: null, fuelType: null },
-    })).toEqual(['dlNumber', 'dlExpiry', 'aadhaar', 'vehicleType', 'seats', 'fuelType']);
+    })).toEqual(['dlNumber', 'dlExpiry', 'aadhaar', 'upiId', 'vehicleType', 'seats', 'fuelType']);
   });
 
   it('treats a released (removed/rejected) vehicle number as missing', () => {
@@ -33,6 +34,11 @@ describe('profileMissing (#9)', () => {
   it('accepts a legacy 12-digit Aadhaar without a hash', () => {
     expect(profileMissing({ ...complete, govIdHash: null, govIdNumber: '1234 5678 9012' })).toEqual([]);
     expect(profileMissing({ ...complete, govIdHash: null, govIdNumber: 'XXXX XXXX 9012' })).toEqual(['aadhaar']);
+  });
+
+  it('requires a UPI ID (blank counts as missing)', () => {
+    expect(profileMissing({ ...complete, upiVpa: null })).toEqual(['upiId']);
+    expect(profileMissing({ ...complete, upiVpa: '   ' })).toEqual(['upiId']);
   });
 
   it('takes seats from the vehicle row when the driver field is empty', () => {

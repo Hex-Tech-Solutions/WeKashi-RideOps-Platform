@@ -4,6 +4,7 @@
  * Documents can only be uploaded once the driver has filled in:
  *   - Licence details: DL number + DL expiry
  *   - Personal: Aadhaar number (held as a hash + masked copy)
+ *   - Payout UPI ID (supervisors pay the driver directly by UPI)
  *   - Vehicle info: vehicle number, vehicle type, seats, fuel type
  * The document upload route checks this server-side; the app shows the same
  * list on the Documents tab. Alternate phone is optional.
@@ -15,13 +16,14 @@ export const FUEL_TYPES = ['petrol', 'diesel', 'cng', 'electric'] as const;
 export type FuelType = (typeof FUEL_TYPES)[number];
 
 export type ProfileItem =
-  | 'dlNumber' | 'dlExpiry' | 'aadhaar'
+  | 'dlNumber' | 'dlExpiry' | 'aadhaar' | 'upiId'
   | 'vehicleNo' | 'vehicleType' | 'seats' | 'fuelType';
 
 export const PROFILE_ITEM_LABELS: Record<ProfileItem, string> = {
   dlNumber: 'Driving licence number',
   dlExpiry: 'Driving licence expiry date',
   aadhaar: 'Aadhaar number',
+  upiId: 'UPI ID',
   vehicleNo: 'Vehicle number',
   vehicleType: 'Vehicle type',
   seats: 'Seats',
@@ -33,6 +35,7 @@ export interface ProfileFields {
   dlExpiry: Date | null;
   govIdNumber: string | null;
   govIdHash: string | null;
+  upiVpa: string | null;
   vehicleType: string | null;
   seats: number | null;
   vehicle: { regNo: string; capacity: number | null; fuelType: string | null } | null;
@@ -46,6 +49,7 @@ export function profileMissing(d: ProfileFields): ProfileItem[] {
   // New entries carry a hash; older test rows may hold the 12 digits.
   const legacyAadhaar = (d.govIdNumber ?? '').replace(/\D/g, '').length === 12;
   if (!d.govIdHash && !legacyAadhaar) missing.push('aadhaar');
+  if (!d.upiVpa?.trim()) missing.push('upiId');
   const reg = d.vehicle?.regNo ?? '';
   if (!reg || /^(removed|rejected):/.test(reg)) missing.push('vehicleNo');
   if (!d.vehicleType) missing.push('vehicleType');
@@ -55,7 +59,7 @@ export function profileMissing(d: ProfileFields): ProfileItem[] {
 }
 
 export const PROFILE_SELECT = {
-  dlNumber: true, dlExpiry: true, govIdNumber: true, govIdHash: true,
+  dlNumber: true, dlExpiry: true, govIdNumber: true, govIdHash: true, upiVpa: true,
   vehicleType: true, seats: true,
   vehicle: { select: { regNo: true, capacity: true, fuelType: true } },
 } as const;
