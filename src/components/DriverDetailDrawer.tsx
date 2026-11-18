@@ -33,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { normalizeRegNo, isValidRegNo } from "@/lib/vehicleNo";
 import { DocumentViewer } from "@/components/DocumentViewer";
+import { AuthAvatar } from "@/components/AuthAvatar";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -129,9 +130,7 @@ export function DriverDetailDrawer({
             </SheetTitle>
           ) : driver ? (
             <div className="flex items-start gap-3">
-              <div className="h-11 w-11 rounded-full bg-foreground text-background flex items-center justify-center text-sm font-bold shrink-0">
-                {driver.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-              </div>
+              <AuthAvatar fileUrl={driver.photoUrl} name={driver.fullName} className="h-11 w-11 text-sm" />
               <div className="flex-1 min-w-0">
                 <SheetTitle className="text-base leading-tight">{driver.fullName}</SheetTitle>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">

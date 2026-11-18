@@ -180,6 +180,13 @@ export async function getDriver(id: string) {
     select: { type: true },
   });
 
+  // Newest non-rejected Profile Photo document, shown as the avatar.
+  const photoDoc = await prisma.driverDocument.findFirst({
+    where: { driverId: id, type: 'photo', status: { not: 'rejected' } },
+    orderBy: { createdAt: 'desc' },
+    select: { fileUrl: true },
+  });
+
   // Joining bonus state for the driver app banner:
   //   granted      — already received
   //   awaiting_kyc — will be granted when KYC is first approved
@@ -197,6 +204,7 @@ export async function getDriver(id: string) {
   return {
     ...driverPublic,
     expiredDocTypes: expiredDocs.map((d) => d.type),
+    photoUrl: photoDoc?.fileUrl ?? null,
     joiningBonus,
     joiningBonusCredits: JOINING_BONUS_CREDITS,
     // #9: what must be filled in before documents can be uploaded.

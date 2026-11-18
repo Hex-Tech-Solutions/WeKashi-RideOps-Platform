@@ -18,6 +18,7 @@ import { format, subDays } from "date-fns";
 import {
   FileText,
   Upload,
+  Camera,
   Trash2,
   Eye,
   Lock,
@@ -28,6 +29,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { isCameraAvailable, takePhoto, CameraError } from "@/lib/nativeCamera";
+import { openAppSettings } from "@/lib/deviceLocation";
 
 // Must match RENEWAL_WINDOW_DAYS in backend/src/lib/documentTypes.ts.
 const RENEWAL_WINDOW_DAYS = 30;
@@ -232,6 +235,28 @@ function DocCard({
     fileRef.current?.click();
   };
 
+  const cameraOn = isCameraAvailable();
+  const [shooting, setShooting] = useState(false);
+  const snap = async () => {
+    const err = detailsError();
+    if (err) { toast.error(err); return; }
+    setShooting(true);
+    try {
+      const file = await takePhoto({ name: req.type, front: req.type === "photo" });
+      if (file) onFile(file);
+    } catch (e) {
+      if (e instanceof CameraError && e.kind === "denied") {
+        toast.error("Camera permission is off", {
+          action: { label: "Settings", onClick: () => { void openAppSettings(); } },
+        });
+      } else {
+        toast.error("Could not take the photo. Try again or upload a file.");
+      }
+    } finally {
+      setShooting(false);
+    }
+  };
+
   const onFile = (file?: File) => {
     if (!file) return;
     const form = new FormData();
@@ -365,6 +390,17 @@ function DocCard({
                   : "Replace"}
               </Button>
             )}
+            {canReplace && cameraOn && (replacing || !needsDetails) && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Take photo of ${req.label}`}
+                disabled={upload.isPending || shooting}
+                onClick={snap}
+              >
+                {shooting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+              </Button>
+            )}
             {canDelete && (
               <Button
                 variant="ghost"
@@ -404,17 +440,31 @@ function DocCard({
         ) : (
           <div className="space-y-2">
             {showDetailInputs && detailInputs}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={pickFile}
-              disabled={upload.isPending}
-            >
-              {upload.isPending
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : <><Upload className="h-3.5 w-3.5" /> Upload {req.label}</>}
-            </Button>
+            <div className={cameraOn ? "grid grid-cols-2 gap-2" : undefined}>
+              {cameraOn && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={snap}
+                  disabled={upload.isPending || shooting}
+                >
+                  {shooting
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <><Camera className="h-3.5 w-3.5" /> Take photo</>}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={pickFile}
+                disabled={upload.isPending}
+              >
+                {upload.isPending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <><Upload className="h-3.5 w-3.5" /> {cameraOn ? "Upload file" : `Upload ${req.label}`}</>}
+              </Button>
+            </div>
           </div>
         )}
 

@@ -599,6 +599,8 @@ export interface DriverProfile {
   vehicle?: { regNo: string; capacity: number | null; fuelType: string | null } | null;
   /** Document types that are verified but have expired. */
   expiredDocTypes?: string[];
+  /** File URL of the newest non-rejected Profile Photo document. */
+  photoUrl?: string | null;
   /** Joining bonus: granted, waiting for KYC approval, or withheld (repeat account). */
   joiningBonus?: "granted" | "awaiting_kyc" | "not_eligible";
   joiningBonusCredits?: number;
@@ -1162,7 +1164,11 @@ export function useUploadDriverDocument() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (form: FormData) => api<DocumentRow>("/driver/documents", { method: "POST", body: form }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "documents"] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["driver", "documents"] });
+      // The profile carries the profile photo and the KYC banners.
+      void qc.invalidateQueries({ queryKey: ["driver", "me"] });
+    },
   });
 }
 
@@ -1170,7 +1176,10 @@ export function useDeleteDriverDocument() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api(`/driver/documents/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["driver", "documents"] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["driver", "documents"] });
+      void qc.invalidateQueries({ queryKey: ["driver", "me"] });
+    },
   });
 }
 
@@ -1407,6 +1416,7 @@ export interface DriverRow {
   vehicleType?: string | null;
   seats?: number | null;
   expiredDocTypes?: string[];
+  photoUrl?: string | null;
 }
 
 /** One-line vehicle summary, e.g. "Sedan · Diesel · 4 seats". Never "null". */

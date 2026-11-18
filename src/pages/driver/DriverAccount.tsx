@@ -16,6 +16,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { normalizeRegNo, isValidRegNo } from "@/lib/vehicleNo";
 import { VEHICLE_LABELS, type VehicleType } from "@/lib/pricing";
+import { AuthAvatar } from "@/components/AuthAvatar";
 import { useDriverAuth } from "./useDriverAuth";
 import { DriverCredits } from "./DriverCredits";
 import { DriverUpiCard } from "./DriverUpiCard";
@@ -168,9 +169,7 @@ export function ProfileSummaryCard({
   return (
     <>
       <div className="flex flex-col items-center text-center py-4">
-        <div className="h-20 w-20 rounded-full bg-foreground text-background flex items-center justify-center text-2xl font-bold mb-3">
-          {(fullName ?? "D").split(" ").map((n) => n[0]).join("").slice(0, 2)}
-        </div>
+        <AuthAvatar fileUrl={me?.photoUrl} name={fullName ?? "Driver"} className="h-20 w-20 text-2xl mb-3" />
         <div className="font-semibold text-lg">{fullName ?? "Driver"}</div>
         <Badge variant="outline" className={`mt-1 capitalize ${me?.status === "active" ? "border-success/40 text-success" : "border-warning/40 text-warning"}`}>
           {me?.status ?? "—"}
