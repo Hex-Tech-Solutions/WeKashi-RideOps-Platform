@@ -1,5 +1,5 @@
 /**
- * Going online (Phase 2) and the 2-hourly face check.
+ * Going online (Phase 2) and the once-a-day (24 h) face check.
  *
  * Tapping Online:  Rules & Regulations (every time)  ->  face check if due  ->
  * online. Closing either screen leaves the driver offline.

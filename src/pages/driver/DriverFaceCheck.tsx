@@ -4,8 +4,8 @@
  * can't pass it. The server then matches the live face with the verified
  * Profile Photo (backend/src/services/faceCheck.service.ts).
  *
- * Full screen. Used when going online (if a check is due) and when the 2-hour
- * check runs out while online.
+ * Full screen. Used when going online and no check has passed in the last 24
+ * hours (or, rarely, when a driver stays online past 24 hours).
  */
 import { Suspense, lazy, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -138,8 +138,8 @@ export function DriverFaceCheck({
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
         <p className="text-sm text-muted-foreground">
           You'll do a short live video selfie: fit your face in the oval and keep still while the screen
-          flashes colours. We match it with your Profile Photo. You need this on your first go-online each
-          day and every 2 hours while online. Until then you won't get, accept or start rides.
+          flashes colours. We match it with your Profile Photo. You only need this once: when you go online
+          and haven't passed one in the last 24 hours. Until you pass, you won't get, accept or start rides.
         </p>
 
         <div className="grid grid-cols-3 gap-2 text-center">

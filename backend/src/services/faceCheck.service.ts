@@ -5,9 +5,10 @@
  * Mumbai region: face in an oval + colour flashes on the screen), which a photo,
  * a screen or a recorded video can't pass. The "reference image" Rekognition
  * takes from that live video is then checked for quality and compared with the
- * driver's VERIFIED Profile Photo document. A pass is good for 2 hours and never
- * past midnight IST, so the driver checks on the first go-online of the day and
- * then every 2 hours.
+ * driver's VERIFIED Profile Photo document. A pass is good for 24 hours from the
+ * moment it passed, so the driver does ONE live check when they go online and
+ * have not passed one in the last 24 hours (cost decision: one check a day, no
+ * re-checks in between).
  *
  * Flow:
  *   1. POST /driver/face-check/session  -> startLivenessSession(): creates the
@@ -49,8 +50,9 @@ export function isFaceCheckEnabled(): boolean {
   return process.env.FACE_CHECK_ENABLED === 'true';
 }
 
-/** How long a passed check lasts. */
-export const FACE_CHECK_VALID_MS = 2 * 60 * 60 * 1000;
+/** How long a passed check lasts (rolling, from the moment it passed). */
+export const FACE_CHECK_VALID_HOURS = 24;
+export const FACE_CHECK_VALID_MS = FACE_CHECK_VALID_HOURS * 60 * 60 * 1000;
 /** Selfies older than this are deleted. */
 export const SELFIE_RETENTION_DAYS = 30;
 /** Minimum Rekognition similarity (0–100) to count as the same person. */
@@ -80,20 +82,9 @@ export class FaceCheckRequiredError extends AppError {
 
 // ─── Validity window ─────────────────────────────────────────────────────────
 
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
-/** The next midnight in India after `t`. */
-export function nextIstMidnight(t: Date): Date {
-  const ist = new Date(t.getTime() + IST_OFFSET_MS);
-  const midnightIst = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + 1);
-  return new Date(midnightIst - IST_OFFSET_MS);
-}
-
-/** A check passed at `passedAt` is good until 2 hours later, or midnight IST if sooner. */
+/** A check passed at `passedAt` is good for the next 24 hours. */
 export function faceCheckValidUntil(passedAt: Date): Date {
-  const twoHours = new Date(passedAt.getTime() + FACE_CHECK_VALID_MS);
-  const midnight = nextIstMidnight(passedAt);
-  return twoHours < midnight ? twoHours : midnight;
+  return new Date(passedAt.getTime() + FACE_CHECK_VALID_MS);
 }
 
 // ─── Gates ───────────────────────────────────────────────────────────────────
@@ -399,7 +390,7 @@ export interface FaceCheckResult {
   validUntil: Date | null;
 }
 
-/** Store an attempt, and on a pass start the 2-hour window. */
+/** Store an attempt, and on a pass start the 24-hour window. */
 async function recordResult(
   driverId: string,
   result: { passed: boolean; reason: FaceCheckReason | null; similarity: number | null },

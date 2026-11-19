@@ -273,13 +273,13 @@ export async function notifyRentalCancelled(
   }));
 }
 
-/** Phase 2: the 2-hour face check ran out while the driver is online. */
+/** Phase 2: the 24-hour face check ran out while the driver is still online. */
 export async function notifyFaceCheckDue(driverId: string): Promise<void> {
   await safely(driverId, 'face_check_due', () => pushNotice(driverId, {
     kind: 'face_check_due',
     screen: 'facecheck',
     title: 'Face check due — rides paused',
-    body: "Take a quick selfie to confirm it's you. You won't get or start rides until you do.",
+    body: "Do a quick live face check to confirm it's you. You won't get or start rides until you do.",
   }));
 }
 
