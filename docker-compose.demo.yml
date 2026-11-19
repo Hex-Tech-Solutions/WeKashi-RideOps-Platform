@@ -2,7 +2,7 @@
 # RideOps — SELF-CONTAINED stack (Postgres + Redis as containers)
 #
 # Use when NOT using Azure managed services. Needs no external keys.
-# This is what the dev/test box (dev.wekashi.in) actually runs, and what
+# This is what the live server (wekashi.in, AWS) runs, and what
 # .github/workflows/deploy.yml deploys.
 #
 # DATABASE_URL and REDIS_URL are built here from the POSTGRES_* values in
@@ -56,20 +56,16 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
-      # 'development', not 'production'. Driver login always needs a real OTP
-      # (the dev OTP bypass has been removed from the code); without MSG91
-      # configured, OTPs are only written to this container's log.
-      #
-      # Consequences of 'development' here, all acceptable for a test box but
-      # NOT for real production:
-      #   - CORS_ORIGIN and JWT secret-strength guards are not enforced
-      #   - the Cashfree webhook-secret guard is relaxed (pack activation falls back to the client-confirm path)
-      #   - error responses include real messages instead of a generic string
-      #   - every Prisma query is logged
-      #
-      # The eventual production stack (docker-compose.prod.yml) keeps
-      # NODE_ENV=production.
-      NODE_ENV: development
+      # 'production': this stack now runs the live wekashi.in server.
+      # This value overrides NODE_ENV in .env.prod (compose `environment:`
+      # beats `env_file:`). In production the API:
+      #   - refuses to start unless CORS_ORIGIN is a specific origin (not *)
+      #   - refuses to start if a JWT secret is a known insecure default
+      #   - returns a generic "Internal server error" instead of real messages
+      #   - does not log every Prisma query
+      # Driver OTPs are unaffected: with no SMS provider configured they are
+      # still written to this container's log.
+      NODE_ENV: production
       PORT: "3000"
     depends_on:
       postgres:
