@@ -147,6 +147,7 @@ export async function computeRoute(opts: ComputeRouteOptions): Promise<ComputeRo
   ].join(',');
 
   const res = await fetch(`${ROUTES_API_BASE}/directions/v2:computeRoutes`, {
+    signal: AbortSignal.timeout(8000),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -215,6 +216,7 @@ export async function computeRouteMatrix(
   const fieldMask = 'originIndex,destinationIndex,duration,distanceMeters,status,condition';
 
   const res = await fetch(`${ROUTES_API_BASE}/distanceMatrix/v2:computeRouteMatrix`, {
+    signal: AbortSignal.timeout(8000),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

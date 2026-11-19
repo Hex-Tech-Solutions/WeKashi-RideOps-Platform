@@ -248,7 +248,11 @@ async function rekognition() {
   if (!rek) {
     const mod = await import('@aws-sdk/client-rekognition');
     // Credentials: the server's IAM role (default AWS credential chain).
-    const client = new mod.RekognitionClient({ region: process.env.AWS_REGION || 'ap-south-1' });
+    const client = new mod.RekognitionClient({
+      region: process.env.AWS_REGION || 'ap-south-1',
+      maxAttempts: 2,
+      requestHandler: { requestTimeout: 10_000, connectionTimeout: 3_000 },
+    });
     rek = { mod, client };
   }
   return rek;

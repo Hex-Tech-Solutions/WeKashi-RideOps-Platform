@@ -101,7 +101,7 @@ export async function createPackOrder(params: {
   if (params.notifyUrl) meta.notify_url = params.notifyUrl;
   if (Object.keys(meta).length) body.order_meta = meta;
 
-  const res = await axios.post(`${BASE_URL}/orders`, body, { headers: headers() });
+  const res = await axios.post(`${BASE_URL}/orders`, body, { headers: headers(), timeout: 10_000 });
   const data = res.data as {
     order_id: string; cf_order_id: string | number; payment_session_id: string;
     order_amount: number; order_currency: string;
@@ -130,7 +130,7 @@ export interface CashfreeOrderStatus {
  */
 export async function getOrderStatus(orderId: string): Promise<CashfreeOrderStatus> {
   assertConfigured();
-  const res = await axios.get(`${BASE_URL}/orders/${encodeURIComponent(orderId)}`, { headers: headers() });
+  const res = await axios.get(`${BASE_URL}/orders/${encodeURIComponent(orderId)}`, { headers: headers(), timeout: 10_000 });
   const data = res.data as { order_id: string; order_status: string };
 
   let cfPaymentId: string | undefined;
@@ -139,7 +139,7 @@ export async function getOrderStatus(orderId: string): Promise<CashfreeOrderStat
     try {
       const payments = await axios.get(
         `${BASE_URL}/orders/${encodeURIComponent(orderId)}/payments`,
-        { headers: headers() },
+        { headers: headers(), timeout: 10_000 },
       );
       const list = payments.data as Array<{ cf_payment_id: string | number; payment_status: string }>;
       const ok = Array.isArray(list) ? list.find((p) => p.payment_status === 'SUCCESS') : undefined;

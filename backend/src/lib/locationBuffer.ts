@@ -66,104 +66,109 @@ export async function bufferDriverLocation(
   await pipeline.exec();
 }
 
-// ─── Flush all buffered positions to DB ──────────────────────────────────────
+// --- Flush all buffered positions to DB ------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CHUNK = 300;
+let flushing = false;
+
+/** Non-blocking key listing (SCAN) - KEYS would block Redis for every client. */
+async function scanKeys(pattern: string): Promise<string[]> {
+  const out: string[] = [];
+  let cursor = '0';
+  do {
+    const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 500);
+    cursor = next;
+    out.push(...keys);
+  } while (cursor !== '0');
+  return out;
+}
 
 export async function flushLocationBuffer(): Promise<void> {
+  if (flushing) return; // never overlap two flushes
+  flushing = true;
   const start = Date.now();
 
   try {
-    // ── 1. Find all buffered driver positions ──────────────────────────────
-    const posKeys = await redis.keys(`${DRIVER_POS_PREFIX}*`);
-    if (posKeys.length === 0) return;
+    // 1. Driver positions
+    const posKeys = await scanKeys(`${DRIVER_POS_PREFIX}*`);
+    const positions: Array<{ driverId: string; lat: number; lng: number }> = [];
 
-    const posValues = await redis.mget(...posKeys);
-
-    type PosEntry = { driverId: string; lat: number; lng: number };
-    const positions: PosEntry[] = [];
-
-    for (let i = 0; i < posKeys.length; i++) {
-      const raw = posValues[i];
-      if (!raw) continue;
-      try {
-        const { lat, lng } = JSON.parse(raw) as { lat: number; lng: number };
-        const driverId = posKeys[i].slice(DRIVER_POS_PREFIX.length);
-        // Double-check coordinates from Redis are finite and in valid range
-        if (Number.isFinite(lat) && Number.isFinite(lng) &&
-            lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-          positions.push({ driverId, lat, lng });
-        }
-      } catch {
-        // malformed entry — skip
-      }
-    }
-
-    // ── 2. Bulk-update driver current_location (one raw query) ────────────
-    if (positions.length > 0) {
-      // Validate all driverIds are UUIDs before building dynamic SQL
-      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const safePositions = positions.filter((p) => UUID_RE.test(p.driverId));
-
-      if (safePositions.length > 0) {
-        const cases = safePositions
-          .map((p) => `WHEN id = '${p.driverId}' THEN ST_SetSRID(ST_MakePoint(${p.lng}, ${p.lat}), 4326)::geography`)
-          .join(' ');
-        const ids = safePositions.map((p) => `'${p.driverId}'`).join(',');
-
-        await prisma.$executeRawUnsafe(`
-          UPDATE drivers
-          SET current_location = CASE ${cases} ELSE current_location END,
-              is_online = true,
-              location_updated_at = NOW()
-          WHERE id IN (${ids})
-        `);
-      }
-    }
-
-    // ── 3. Flush ride breadcrumb trails ───────────────────────────────────
-    const trailKeys = await redis.keys(`${RIDE_TRAIL_PREFIX}*`);
-    if (trailKeys.length > 0) {
-      const breadcrumbs: Array<{ rideId: string; driverId: string; lat: number; lng: number; recordedAt: Date }> = [];
-
-      for (const key of trailKeys) {
-        // Key format: trail:<rideId>:<driverId>
-        const parts = key.slice(RIDE_TRAIL_PREFIX.length).split(':');
-        if (parts.length < 2) continue;
-        const rideId   = parts[0];
-        const driverId = parts[1];
-
-        const entries = await redis.lrange(key, 0, -1);
-        await redis.del(key); // clear after reading
-
-        for (const entry of entries) {
-          try {
-            const { lat, lng, ts } = JSON.parse(entry) as { lat: number; lng: number; ts: number };
-            breadcrumbs.push({ rideId, driverId, lat, lng, recordedAt: new Date(ts) });
-          } catch {
-            // skip malformed
+    for (let i = 0; i < posKeys.length; i += 500) {
+      const keys = posKeys.slice(i, i + 500);
+      const vals = await redis.mget(...keys);
+      for (let j = 0; j < keys.length; j++) {
+        const raw = vals[j];
+        if (!raw) continue;
+        try {
+          const { lat, lng } = JSON.parse(raw) as { lat: number; lng: number };
+          const driverId = keys[j].slice(DRIVER_POS_PREFIX.length);
+          if (UUID_RE.test(driverId) && Number.isFinite(lat) && Number.isFinite(lng) &&
+              lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+            positions.push({ driverId, lat, lng });
           }
-        }
-      }
-
-      if (breadcrumbs.length > 0) {
-        await prisma.rideLocationLog.createMany({
-          data: breadcrumbs,
-          skipDuplicates: true,
-        });
+        } catch { /* malformed - skip */ }
       }
     }
 
-    const elapsed = Date.now() - start;
+    // Parameterised bulk update in chunks, so no single statement locks
+    // thousands of driver rows or builds a giant SQL string.
+    for (let i = 0; i < positions.length; i += CHUNK) {
+      const chunk = positions.slice(i, i + CHUNK);
+      await prisma.$executeRaw`
+        UPDATE drivers d
+        SET current_location = ST_SetSRID(ST_MakePoint(v.lng, v.lat), 4326)::geography,
+            is_online = true,
+            location_updated_at = NOW()
+        FROM (
+          SELECT unnest(${chunk.map((p) => p.driverId)}::text[])::uuid AS id,
+                 unnest(${chunk.map((p) => p.lng)}::float8[]) AS lng,
+                 unnest(${chunk.map((p) => p.lat)}::float8[]) AS lat
+        ) v
+        WHERE d.id = v.id
+      `;
+    }
+
+    // 2. Ride breadcrumb trails
+    const trailKeys = await scanKeys(`${RIDE_TRAIL_PREFIX}*`);
+    const breadcrumbs: Array<{ rideId: string; driverId: string; lat: number; lng: number; recordedAt: Date }> = [];
+
+    for (const key of trailKeys) {
+      const parts = key.slice(RIDE_TRAIL_PREFIX.length).split(':');
+      if (parts.length < 2) continue;
+      const [rideId, driverId] = parts;
+
+      // Atomic read+clear: a ping landing between lrange and del can't be lost.
+      const res = await redis.multi().lrange(key, 0, -1).del(key).exec();
+      const entries = (res?.[0]?.[1] as string[] | undefined) ?? [];
+
+      for (const entry of entries) {
+        try {
+          const { lat, lng, ts } = JSON.parse(entry) as { lat: number; lng: number; ts: number };
+          breadcrumbs.push({ rideId, driverId, lat, lng, recordedAt: new Date(ts) });
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    for (let i = 0; i < breadcrumbs.length; i += 1000) {
+      await prisma.rideLocationLog.createMany({
+        data: breadcrumbs.slice(i, i + 1000),
+        skipDuplicates: true,
+      });
+    }
+
     logger.debug(
-      { drivers: positions.length, trails: trailKeys.length, elapsed },
+      { drivers: positions.length, trails: trailKeys.length, elapsed: Date.now() - start },
       'Location buffer flushed',
     );
   } catch (err) {
     logger.error({ err }, 'Location buffer flush error');
-    // Don't throw — next flush will pick up any missed data still in Redis
+  } finally {
+    flushing = false;
   }
 }
 
-// ─── Start / stop the flush timer ─────────────────────────────────────────────
+// --- Start / stop the flush timer ---------------------------------------------
 
 export function startLocationFlusher(): void {
   if (flushTimer) return;

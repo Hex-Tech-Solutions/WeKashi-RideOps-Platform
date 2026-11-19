@@ -71,6 +71,7 @@ export class Msg91SmsSender implements SmsSender {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', authkey: this.authkey },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000),
     });
     // MSG91 can report a rejected request in the body ({"type":"error"}) even
     // with HTTP 200, so check both. {"type":"success"} carries a request id.

@@ -21,6 +21,8 @@ services:
   postgres:
     image: postgis/postgis:16-3.4
     restart: unless-stopped
+    command: postgres -c max_connections=100 -c shared_buffers=1GB -c effective_cache_size=3GB -c work_mem=8MB
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -36,6 +38,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --maxmemory 512mb --maxmemory-policy volatile-lru
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
   api:
     build: ./backend
@@ -54,7 +58,7 @@ services:
       # (which rebuilds the container) silently deletes every uploaded file.
       - uploads:/app/uploads
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connection_limit=25&pool_timeout=20
       REDIS_URL: redis://redis:6379
       # 'production': this stack now runs the live wekashi.in server.
       # This value overrides NODE_ENV in .env.prod (compose `environment:`
@@ -67,6 +71,8 @@ services:
       # still written to this container's log.
       NODE_ENV: production
       PORT: "3000"
+      UV_THREADPOOL_SIZE: "8"
+      NODE_OPTIONS: "--max-old-space-size=1536"
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,6 +85,8 @@ services:
       retries: 5
       start_period: 60s
     command: sh -c "npx prisma migrate deploy && node dist/server.js"
+    mem_limit: 2500m
+    logging: { driver: json-file, options: { max-size: "20m", max-file: "5" } }
 
   web:
     build:

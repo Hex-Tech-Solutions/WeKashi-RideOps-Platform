@@ -16,6 +16,8 @@ interface AuthSocket extends Socket {
   };
 }
 
+const driverHandshakeCache = new Map<string, { vendorId: string; expires: number }>();
+
 function extractToken(socket: Socket): string | null {
   const token =
     (socket.handshake.auth as Record<string, string>).token ??
@@ -97,22 +99,43 @@ export function initSockets(httpServer: HttpServer): IoServer {
       return next(new Error('Forbidden: driver role required'));
     }
 
-    // Fetch driver to get vendorId
-    const driver = await prisma.driver.findUnique({
-      where: { id: payload.sub },
-      select: { id: true, vendorId: true, status: true },
-    });
+    try {
+      // Blocked/suspended drivers are flagged in Redis (cheap) — always check.
+      const { isDriverBlocked } = await import('../services/sessionRevocation');
+      if (await isDriverBlocked(payload.sub)) {
+        return next(new Error('Driver account not active'));
+      }
 
-    if (!driver || driver.status !== 'active') {
-      return next(new Error('Driver account not active'));
+      // Look up vendorId/status, cached briefly so a mass reconnect (every
+      // deploy) doesn't need one Postgres connection per driver.
+      const cached = driverHandshakeCache.get(payload.sub);
+      let vendorId: string;
+      if (cached && cached.expires > Date.now()) {
+        vendorId = cached.vendorId;
+      } else {
+        const driver = await prisma.driver.findUnique({
+          where: { id: payload.sub },
+          select: { id: true, vendorId: true, status: true },
+        });
+        if (!driver || driver.status !== 'active') {
+          driverHandshakeCache.delete(payload.sub);
+          return next(new Error('Driver account not active'));
+        }
+        vendorId = driver.vendorId;
+        if (driverHandshakeCache.size > 20_000) driverHandshakeCache.clear();
+        driverHandshakeCache.set(payload.sub, { vendorId, expires: Date.now() + 5 * 60_000 });
+      }
+
+      (socket as AuthSocket).data = {
+        driverId: payload.sub,
+        role: 'driver',
+        vendorId,
+      };
+      next();
+    } catch (err) {
+      logger.error({ err }, 'Driver socket handshake failed');
+      next(new Error('Server busy, retry'));
     }
-
-    (socket as AuthSocket).data = {
-      driverId: payload.sub,
-      role: 'driver',
-      vendorId: driver.vendorId,
-    };
-    next();
   });
 
   driverNs.on('connection', async (socket: Socket) => {
