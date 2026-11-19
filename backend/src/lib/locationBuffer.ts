@@ -121,7 +121,8 @@ export async function flushLocationBuffer(): Promise<void> {
             is_online = true,
             location_updated_at = NOW()
         FROM (
-          SELECT unnest(${chunk.map((p) => p.driverId)}::text[])::uuid AS id,
+          -- drivers.id is TEXT (Prisma String), so compare as text, not uuid.
+          SELECT unnest(${chunk.map((p) => p.driverId)}::text[]) AS id,
                  unnest(${chunk.map((p) => p.lng)}::float8[]) AS lng,
                  unnest(${chunk.map((p) => p.lat)}::float8[]) AS lat
         ) v
