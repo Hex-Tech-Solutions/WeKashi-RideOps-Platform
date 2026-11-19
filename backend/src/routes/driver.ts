@@ -272,8 +272,12 @@ router.post('/online', async (req: AuthRequest, res: Response, next: NextFunctio
 //   -> { sessionId, region, credentials } for the app's liveness component.
 router.post('/face-check/session', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { consent } = z.object({ consent: z.boolean().optional() }).parse(req.body ?? {});
-    res.json(await startLivenessSession(req.driver!.id, consent === true));
+    const { consent, pre } = z.object({
+      consent: z.boolean().optional(),
+      // What the free on-phone camera check measured; only logged, to tune that check.
+      pre: z.record(z.number().nullable()).optional(),
+    }).parse(req.body ?? {});
+    res.json(await startLivenessSession(req.driver!.id, consent === true, pre));
   } catch (err) {
     next(err);
   }

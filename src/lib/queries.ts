@@ -644,8 +644,12 @@ export interface LivenessSession {
 /** Step 1 of the face check: create a live-video session. `consent` is needed the first time. */
 export function useStartFaceCheck() {
   return useMutation({
-    mutationFn: (consent: boolean) =>
-      api<LivenessSession>("/driver/face-check/session", { method: "POST", body: JSON.stringify({ consent }) }),
+    mutationFn: ({ consent, pre }: { consent: boolean; pre?: Record<string, number | null> | null }) =>
+      api<LivenessSession>("/driver/face-check/session", {
+        method: "POST",
+        // `pre`: what the free on-phone camera check measured (logged to tune it).
+        body: JSON.stringify({ consent, ...(pre ? { pre } : {}) }),
+      }),
   });
 }
 

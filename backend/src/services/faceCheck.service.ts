@@ -68,6 +68,12 @@ export function livenessMinConfidence(): number {
 const SESSION_TTL_S = 300;
 const sessionKey = (sessionId: string) => `facecheck:liveness:${sessionId}`;
 const startsKey = (driverId: string) => `facecheck:starts:${driverId}`;
+const failsKey = (driverId: string) => `facecheck:fails:${driverId}`;
+/** This many failed live checks within 10 minutes ... */
+const FAILS_BEFORE_COOLDOWN = 3;
+const FAIL_WINDOW_S = 600;
+/** ... means a 5-minute wait before the next one. */
+const COOLDOWN_S = 300;
 /** Consecutive "different person" results that raise a flag for the vendor/admin. */
 export const MISMATCH_FLAG_AFTER = 3;
 
@@ -319,7 +325,11 @@ export interface LivenessSessionInfo {
  * Step 1: create a liveness session for this driver and hand the app
  * credentials that can do nothing except stream that video to Rekognition.
  */
-export async function startLivenessSession(driverId: string, consent: boolean): Promise<LivenessSessionInfo> {
+export async function startLivenessSession(
+  driverId: string,
+  consent: boolean,
+  pre?: Record<string, number | null>,
+): Promise<LivenessSessionInfo> {
   if (!isFaceCheckEnabled()) throw new ValidationError('The face check is not switched on');
   const roleArn = process.env.FACE_LIVENESS_ROLE_ARN;
   if (!roleArn) {
@@ -334,11 +344,24 @@ export async function startLivenessSession(driverId: string, consent: boolean): 
 
   await ensureConsent(driverId, consent);
 
+  // Every live check that reaches AWS is billed, pass or fail: after a few
+  // failures in a row, make the driver wait and fix the cause first.
+  const failed = Number((await redis.get(failsKey(driverId))) ?? 0);
+  if (failed >= FAILS_BEFORE_COOLDOWN) {
+    const ttl = await redis.ttl(failsKey(driverId));
+    const mins = Math.max(1, Math.ceil((ttl > 0 ? ttl : COOLDOWN_S) / 60));
+    throw new TooManyRequestsError(
+      `Too many failed tries. Wait about ${mins} minute${mins > 1 ? 's' : ''}, then try in even light with nothing bright behind you.`,
+    );
+  }
+
   const starts = await redis.incr(startsKey(driverId));
   if (starts === 1) await redis.expire(startsKey(driverId), 3600);
   if (starts > MAX_ATTEMPTS_PER_HOUR) {
     throw new TooManyRequestsError('Too many tries. Please wait a while and try again.');
   }
+
+  if (pre) logger.info({ driverId, pre }, 'Face check: starting a live check (on-phone camera check numbers)');
 
   const region = process.env.AWS_REGION || 'ap-south-1';
   try {
@@ -405,6 +428,19 @@ async function recordResult(
       livenessConfidence: live.confidence, detail: live.detail,
     },
   });
+
+  // Failed-attempt counter behind the cooldown in startLivenessSession().
+  try {
+    if (result.passed) {
+      await redis.del(failsKey(driverId));
+    } else {
+      const n = await redis.incr(failsKey(driverId));
+      if (n === 1) await redis.expire(failsKey(driverId), FAIL_WINDOW_S);
+      if (n >= FAILS_BEFORE_COOLDOWN) await redis.expire(failsKey(driverId), COOLDOWN_S);
+    }
+  } catch (err) {
+    logger.warn({ err, driverId }, 'Face check: could not update the failed-attempt counter');
+  }
 
   let validUntil: Date | null = null;
   if (result.passed) {

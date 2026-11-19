@@ -16,6 +16,7 @@ import { useStartFaceCheck, useCompleteFaceCheck, type LivenessSession } from "@
 import { ApiError } from "@/lib/api";
 import { openAppSettings } from "@/lib/deviceLocation";
 import type { LivenessFailure } from "./LivenessWidget";
+import { FaceReadinessCheck, type ReadinessSummary } from "./FaceReadinessCheck";
 
 // Loaded only when a check starts: it brings a few MB of AWS component + model.
 const LivenessWidget = lazy(() => import("./LivenessWidget"));
@@ -62,12 +63,24 @@ export function DriverFaceCheck({
   const [session, setSession] = useState<LivenessSession | null>(null);
   const [checking, setChecking] = useState(false);
   const [fail, setFail] = useState<{ text: string; cameraSettings?: boolean } | null>(null);
+  // Step 1 is a free camera check on the phone; the paid live check only starts after it passes.
+  const [stage, setStage] = useState<"intro" | "precheck">("intro");
+  const [ready, setReady] = useState<{ ready: boolean; unavailable: boolean; summary: ReadinessSummary | null }>(
+    { ready: false, unavailable: false, summary: null },
+  );
+
+  const openPrecheck = () => {
+    if (!agreed) { toast.error("Tick the box to agree first"); return; }
+    setFail(null);
+    setReady({ ready: false, unavailable: false, summary: null });
+    setStage("precheck");
+  };
 
   // Every attempt needs a NEW session (a session can be used once).
   const begin = () => {
     if (!agreed) { toast.error("Tick the box to agree first"); return; }
     setFail(null);
-    start.mutate(agreed || consentGiven, {
+    start.mutate({ consent: agreed || consentGiven, pre: ready.summary }, {
       onSuccess: (s) => setSession(s),
       onError: (e) => setFail({ text: e instanceof ApiError ? e.message : "Could not start the face check. Check your internet and try again." }),
     });
@@ -87,6 +100,7 @@ export function DriverFaceCheck({
     } catch (e) {
       setFail({ text: e instanceof ApiError ? e.message : "Could not finish the face check. Check your internet and try again." });
     } finally {
+      setReady({ ready: false, unavailable: false, summary: null });
       setSession(null);
       setChecking(false);
     }
@@ -94,6 +108,7 @@ export function DriverFaceCheck({
 
   const onWidgetError = (e: LivenessFailure) => {
     setFail(livenessErrorMessage(e.state));
+    setReady({ ready: false, unavailable: false, summary: null });
     setSession(null);
   };
 
@@ -112,7 +127,7 @@ export function DriverFaceCheck({
             session={session}
             onAnalysisComplete={finish}
             onError={onWidgetError}
-            onCancel={() => setSession(null)}
+            onCancel={() => { setReady({ ready: false, unavailable: false, summary: null }); setSession(null); }}
           />
         </Suspense>
       </div>
@@ -120,6 +135,8 @@ export function DriverFaceCheck({
   }
 
   const busy = start.isPending || checking;
+  const inPrecheck = stage === "precheck";
+  const canStart = ready.ready || ready.unavailable;
 
   return (
     <div className="fixed inset-0 z-[130] bg-background flex flex-col">
@@ -136,17 +153,28 @@ export function DriverFaceCheck({
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
-        <p className="text-sm text-muted-foreground">
-          You'll do a short live video selfie: fit your face in the oval and keep still while the screen
-          flashes colours. We match it with your Profile Photo. You only need this once: when you go online
-          and haven't passed one in the last 24 hours. Until you pass, you won't get, accept or start rides.
-        </p>
+        {!inPrecheck && (
+          <>
+            <p className="text-sm text-muted-foreground">
+              You'll do a short live video selfie: fit your face in the oval and keep still while the screen
+              flashes colours. We match it with your Profile Photo. You only need this once: when you go online
+              and haven't passed one in the last 24 hours. Until you pass, you won't get, accept or start rides.
+            </p>
 
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-lg border p-3 text-xs"><Sun className="h-5 w-5 mx-auto mb-1 text-gold" />Even light, none behind you. Screen brightness up</div>
-          <div className="rounded-lg border p-3 text-xs"><Smartphone className="h-5 w-5 mx-auto mb-1 text-gold" />Phone upright at eye level</div>
-          <div className="rounded-lg border p-3 text-xs"><Glasses className="h-5 w-5 mx-auto mb-1 text-gold" />No sunglasses or mask</div>
-        </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg border p-3 text-xs"><Sun className="h-5 w-5 mx-auto mb-1 text-gold" />Even light, none behind you. Screen brightness up</div>
+              <div className="rounded-lg border p-3 text-xs"><Smartphone className="h-5 w-5 mx-auto mb-1 text-gold" />Phone upright at eye level</div>
+              <div className="rounded-lg border p-3 text-xs"><Glasses className="h-5 w-5 mx-auto mb-1 text-gold" />No sunglasses or mask</div>
+            </div>
+          </>
+        )}
+
+        {inPrecheck && (
+          <p className="text-sm text-muted-foreground">
+            Turn your screen brightness up, hold the phone at eye level and follow the hints. The live check
+            starts when the view is good.
+          </p>
+        )}
 
         {fail && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive space-y-2">
@@ -160,7 +188,17 @@ export function DriverFaceCheck({
           </div>
         )}
 
-        {!consentGiven && (
+        {inPrecheck && (
+          <FaceReadinessCheck
+            onStatus={setReady}
+            onCameraDenied={() => {
+              setFail({ text: "The camera is off for Wekashi Cabs. Allow the camera in your phone settings, then try again.", cameraSettings: true });
+              setStage("intro");
+            }}
+          />
+        )}
+
+        {!consentGiven && !inPrecheck && (
           <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border p-3">
             <Checkbox checked={agreed} onCheckedChange={(v) => setAgreed(v === true)} className="mt-0.5 shrink-0" />
             <span className="text-xs leading-relaxed">
@@ -175,11 +213,15 @@ export function DriverFaceCheck({
       <div className="border-t px-5 py-4 space-y-2 bg-background">
         <Button
           className="w-full bg-gold text-gold-foreground hover:bg-gold/90 disabled:opacity-50"
-          disabled={busy || !agreed}
-          onClick={begin}
+          disabled={busy || !agreed || (inPrecheck && !canStart)}
+          onClick={inPrecheck ? begin : openPrecheck}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-          {checking ? "Checking…" : start.isPending ? "Starting…" : fail ? "Try again" : "Start live check"}
+          {checking ? "Checking…"
+            : start.isPending ? "Starting…"
+            : !inPrecheck ? (fail ? "Try again" : "Continue")
+            : canStart ? "Start live check"
+            : "Waiting for a good view…"}
         </Button>
         <Button variant="ghost" className="w-full" onClick={onClose} disabled={busy}>
           {goOnline ? "Cancel, stay offline" : "Later"}

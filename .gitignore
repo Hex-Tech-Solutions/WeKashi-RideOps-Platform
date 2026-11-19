@@ -84,3 +84,6 @@ pnpm-lock.yaml
 
 # ── Vite cache ────────────────────────────────────────────────────────────────
 .vite/
+
+# MediaPipe wasm copied from node_modules at build (scripts/copy-mediapipe.mjs)
+public/mediapipe/wasm/
