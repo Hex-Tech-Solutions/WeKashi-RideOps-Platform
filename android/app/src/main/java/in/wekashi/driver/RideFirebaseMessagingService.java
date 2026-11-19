@@ -134,6 +134,11 @@ public class RideFirebaseMessagingService extends FirebaseMessagingService {
             ov.putExtra("expiresAt", expiresAt);
             ov.putExtra("loginTime", data.get("loginTime"));
             ov.putExtra("firstPickupTime", data.get("firstPickupTime"));
+            // Highlighted area lines + pickup point (for "X km (Y min away)").
+            ov.putExtra("pickupArea", data.get("pickupArea"));
+            ov.putExtra("dropArea", data.get("dropArea"));
+            ov.putExtra("pickupLat", data.get("pickupLat"));
+            ov.putExtra("pickupLng", data.get("pickupLng"));
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(ov);

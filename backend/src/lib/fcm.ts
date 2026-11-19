@@ -42,6 +42,10 @@ export interface RidePushData {
   expiresAt?: string | null;     // ISO — drives the native countdown
   loginTime?: string | null;     // ISO planned start (Login/Logout time)
   firstPickupTime?: string | null; // HH:MM first pickup
+  pickupArea?: string | null;    // highlighted area line (lib/rideArea.ts)
+  dropArea?: string | null;
+  pickupLat?: number | null;     // lets the phone work out "X km (Y min away)"
+  pickupLng?: number | null;
 }
 
 /**
@@ -96,7 +100,7 @@ export async function sendRideBroadcastPush(
 
   const title = data.type === 'rental' ? 'New rental request' : 'New ride available';
   const body = data.pickupAddress
-    ? `Pickup: ${data.pickupAddress}`
+    ? `Pickup: ${data.pickupArea ? `${data.pickupArea} · ` : ''}${data.pickupAddress}`
     : 'Tap to view and accept.';
 
   // DATA-ONLY message (no `notification` block). This is deliberate: a
@@ -122,6 +126,12 @@ export async function sendRideBroadcastPush(
   if (data.expiresAt) dataPayload.expiresAt = data.expiresAt;
   if (data.loginTime) dataPayload.loginTime = data.loginTime;
   if (data.firstPickupTime) dataPayload.firstPickupTime = data.firstPickupTime;
+  if (data.pickupArea) dataPayload.pickupArea = data.pickupArea;
+  if (data.dropArea) dataPayload.dropArea = data.dropArea;
+  if (data.pickupLat != null && data.pickupLng != null) {
+    dataPayload.pickupLat = String(data.pickupLat);
+    dataPayload.pickupLng = String(data.pickupLng);
+  }
 
   try {
     const res = await client.sendEachForMulticast({

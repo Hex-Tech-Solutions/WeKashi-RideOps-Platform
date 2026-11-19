@@ -162,6 +162,10 @@ public class IncomingRideOverlayService extends Service {
         if (drop != null) tv(R.id.ovDrop).setText(drop);
 
         tv(R.id.ovPickupDist).setText("Pickup");
+        showArea(R.id.ovPickupArea, d.getStringExtra("pickupArea"));
+        showArea(R.id.ovDropArea, d.getStringExtra("dropArea"));
+        // "X km (Y min away)" from the driver's position — filled in when ready.
+        loadApproach(d.getStringExtra("pickupLat"), d.getStringExtra("pickupLng"));
         tv(R.id.ovDropDist).setText(distanceKm != null && !distanceKm.isEmpty()
                 ? distanceKm + " km trip" : "Trip");
 
@@ -205,6 +209,69 @@ public class IncomingRideOverlayService extends Service {
     }
 
     private TextView tv(int id) { return overlayView.findViewById(id); }
+
+    private void showArea(int id, String area) {
+        TextView v = tv(id);
+        if (area != null && !area.trim().isEmpty()) {
+            v.setText(area.trim());
+            v.setVisibility(View.VISIBLE);
+        } else {
+            v.setVisibility(View.GONE);
+        }
+    }
+
+    /**
+     * Driver -> pickup road distance and traffic-aware time, the same lookup the
+     * in-app card uses (POST /routing/matrix). Uses the phone's current
+     * position; shows "Pickup" until (or if it can't be) worked out.
+     */
+    @SuppressWarnings("MissingPermission")
+    private void loadApproach(String latStr, String lngStr) {
+        final double pLat, pLng;
+        try {
+            if (latStr == null || lngStr == null) return;
+            pLat = Double.parseDouble(latStr);
+            pLng = Double.parseDouble(lngStr);
+        } catch (NumberFormatException e) {
+            return;
+        }
+        boolean fine = androidx.core.content.ContextCompat.checkSelfPermission(this,
+                android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        boolean coarse = androidx.core.content.ContextCompat.checkSelfPermission(this,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (!fine && !coarse) return;
+
+        final String forRide = rideId;
+        com.google.android.gms.location.FusedLocationProviderClient fused =
+                com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this);
+        com.google.android.gms.tasks.CancellationTokenSource cts = new com.google.android.gms.tasks.CancellationTokenSource();
+        try {
+            fused.getCurrentLocation(com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, cts.getToken())
+                    .addOnSuccessListener(loc -> {
+                        if (loc != null) fetchApproach(forRide, loc.getLatitude(), loc.getLongitude(), pLat, pLng);
+                        else fused.getLastLocation().addOnSuccessListener(last -> {
+                            if (last != null) fetchApproach(forRide, last.getLatitude(), last.getLongitude(), pLat, pLng);
+                        });
+                    });
+        } catch (Exception ignored) { }
+    }
+
+    private void fetchApproach(String forRide, double oLat, double oLng, double pLat, double pLng) {
+        new Thread(() -> {
+            double[] r = RideApi.routeMatrix(getApplicationContext(), oLat, oLng, pLat, pLng);
+            if (r == null) return;
+            main.post(() -> {
+                // The card may have closed or moved on to another ride.
+                if (overlayView == null || forRide == null || !forRide.equals(rideId)) return;
+                double km = Math.round(r[0] / 100.0) / 10.0;
+                long min = Math.max(1, Math.round(r[1] / 60.0));
+                String kmText = km == Math.floor(km)
+                        ? String.valueOf((long) km)
+                        : String.format(java.util.Locale.US, "%.1f", km);
+                tv(R.id.ovPickupDist).setText(kmText + " km (" + min + " min away)");
+            });
+        }).start();
+    }
 
     private void startCountdown(String expiresAtIso) {
         long msLeft = 55_000L;

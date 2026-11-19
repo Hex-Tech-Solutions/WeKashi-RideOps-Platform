@@ -43,6 +43,64 @@ public final class RideApi {
         return post(ctx, path, isAccept, "{}");
     }
 
+    /**
+     * Road distance (m) and traffic-aware time (s) from one point to the pickup,
+     * via POST /routing/matrix — the same call the in-app ride card makes.
+     * Returns {meters, seconds}, or null if it can't be worked out.
+     */
+    public static double[] routeMatrix(Context ctx, double oLat, double oLng, double dLat, double dLng) {
+        String base = AuthStore.apiBase(ctx);
+        String access = AuthStore.access(ctx);
+        if (access == null || !isHttps(base)) return null;
+        String body = "{\"origins\":[{\"lat\":" + oLat + ",\"lng\":" + oLng + "}],"
+                + "\"destinations\":[{\"lat\":" + dLat + ",\"lng\":" + dLng + "}]}";
+        int[] status = new int[1];
+        String json = postForBody(base + "/routing/matrix", access, body, status);
+        if (json == null && status[0] == 401) {
+            if (!refreshToken(ctx)) return null;
+            json = postForBody(base + "/routing/matrix", AuthStore.access(ctx), body, status);
+        }
+        if (json == null) return null;
+        try {
+            JSONObject el = new JSONObject(json).getJSONArray("elements").getJSONObject(0);
+            if (el.isNull("distanceMeters") || el.isNull("durationSeconds")) return null;
+            return new double[] { el.getDouble("distanceMeters"), el.getDouble("durationSeconds") };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** POST and return the response body for a 2xx, else null. status[0] = HTTP status (-1 = no response). */
+    private static String postForBody(String urlStr, String bearer, String body, int[] status) {
+        status[0] = -1;
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(urlStr).openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Authorization", "Bearer " + bearer);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setDoOutput(true);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(body.getBytes("UTF-8"));
+            }
+            int code = conn.getResponseCode();
+            status[0] = code;
+            if (code < 200 || code >= 300) return null;
+            java.io.InputStream in = conn.getInputStream();
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[2048];
+            int n;
+            while ((n = in.read(chunk)) != -1) buf.write(chunk, 0, n);
+            return buf.toString("UTF-8");
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     private static Result post(Context ctx, String path, boolean isAccept, String body) {
         String base = AuthStore.apiBase(ctx);
         String access = AuthStore.access(ctx);

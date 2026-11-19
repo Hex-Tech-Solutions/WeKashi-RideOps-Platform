@@ -98,6 +98,16 @@
             android:textColor="#111111"
             android:textSize="15sp"
             android:textStyle="bold" />
+        <!-- Highlighted area / landmark, like the in-app card -->
+        <TextView
+            android:id="@+id/ovPickupArea"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#111111"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
         <TextView
             android:id="@+id/ovPickup"
             android:layout_width="match_parent"
@@ -116,6 +126,15 @@
             android:textColor="#111111"
             android:textSize="15sp"
             android:textStyle="bold" />
+        <TextView
+            android:id="@+id/ovDropArea"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#111111"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
         <TextView
             android:id="@+id/ovDrop"
             android:layout_width="match_parent"

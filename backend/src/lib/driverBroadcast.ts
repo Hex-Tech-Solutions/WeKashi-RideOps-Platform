@@ -2,6 +2,7 @@ import type { Server as IoServer } from 'socket.io';
 import { prisma } from './prisma';
 import { logger } from './logger';
 import { isFcmEnabled, sendRideBroadcastPush, sendRideDismissPush, type RidePushData } from './fcm';
+import { rideArea } from './rideArea';
 
 /** Fields we read off the ride payload to build the push. The payload is the
  *  public ride model from getRidePublicPayload(); keep this tolerant. */
@@ -18,6 +19,8 @@ interface BroadcastPayloadLike {
   type?: string;
   pickup_address?: string;
   drop_address?: string;
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
 }
 
 /**
@@ -75,6 +78,10 @@ async function pushToDrivers(driverIds: string[], payload: BroadcastPayloadLike)
       ? new Date(payload.planned_start_time).toISOString()
       : null,
     firstPickupTime: payload?.first_pickup_time ?? null,
+    pickupArea: rideArea(payload?.pickup_address),
+    dropArea: rideArea(payload?.drop_address),
+    pickupLat: payload?.pickup_lat ?? null,
+    pickupLng: payload?.pickup_lng ?? null,
   };
 
   const { staleTokens } = await sendRideBroadcastPush(tokens, data);
