@@ -263,6 +263,10 @@ model DriverFaceCheck {
   passed     Boolean
   reason     String?
   similarity Float?
+  /// Face Liveness score 0-100 for this attempt (null for attempts before it was stored).
+  livenessConfidence Float? @map("liveness_confidence")
+  /// Rekognition's retry hints for a failed live check, e.g. "HIGH_LIGHTING_DETECTED".
+  detail     String?
   selfieUrl  String?  @map("selfie_url")
   createdAt  DateTime @default(now()) @map("created_at")
 

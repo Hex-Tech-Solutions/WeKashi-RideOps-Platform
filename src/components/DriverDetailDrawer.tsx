@@ -617,13 +617,19 @@ function FaceChecksSection({ driverId, profilePhotoUrl, name }: { driverId: stri
               <div className="flex-1 min-w-0">
                 <div className={`text-sm font-medium flex items-center gap-1 ${c.passed ? "text-success" : "text-destructive"}`}>
                   {c.passed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                  {c.passed ? "Matched" : c.reason === "no_match" ? "Did not match" : "Not checked"}
-                  {c.similarity != null && <span className="text-xs text-muted-foreground font-normal">· {c.similarity}%</span>}
+                  {c.passed ? "Matched" : c.reason === "no_match" ? "Did not match" : c.livenessConfidence != null ? "Live check failed" : "Not checked"}
+                  {c.similarity != null && <span className="text-xs text-muted-foreground font-normal">· match {c.similarity}%</span>}
+                  {c.livenessConfidence != null && <span className="text-xs text-muted-foreground font-normal">· live {c.livenessConfidence}%</span>}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {format(new Date(c.createdAt), "dd MMM yyyy, HH:mm")}
                   {!c.passed && c.reason !== "no_match" && c.message ? ` · ${c.message}` : ""}
                 </div>
+                {c.detail && (
+                  <div className="text-[11px] text-muted-foreground/80 mt-0.5">
+                    Reason from AWS: {c.detail.replace(/_DETECTED/g, "").replace(/_/g, " ").toLowerCase()}
+                  </div>
+                )}
               </div>
             </div>
           ))}

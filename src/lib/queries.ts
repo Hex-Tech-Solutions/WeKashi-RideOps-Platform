@@ -668,6 +668,10 @@ export interface FaceCheckRow {
   reason: string | null;
   message: string | null;
   similarity: number | null;
+  /** Face Liveness score 0-100 (null for attempts made before it was stored). */
+  livenessConfidence?: number | null;
+  /** Rekognition's retry hints for a failed live check, e.g. "HIGH_LIGHTING_DETECTED". */
+  detail?: string | null;
   selfieUrl: string | null;
   createdAt: string;
 }

@@ -157,14 +157,14 @@ export const REASON_MESSAGES: Record<FaceCheckReason, string> = {
   no_face: 'We could not find a face. Hold the phone at eye level and look at the camera.',
   multiple_faces: 'Only you should be in the photo. Make sure nobody else is in the picture.',
   too_small: 'Your face is too small in the photo. Hold the phone a little closer.',
-  too_dark: 'The photo is too dark. Move to a brighter place or face a light.',
+  too_dark: 'Your face is too dark for the check. Face a light so your face is lit evenly, turn your screen brightness to maximum and try again.',
   blurry: 'The photo is blurry. Hold the phone still and try again.',
   pose: 'Look straight at the camera, not to the side, up or down.',
   sunglasses: 'Please take off your sunglasses. Normal glasses are fine.',
   covered: "Your face is covered. Remove your mask or anything in front of your face.",
   eyes_closed: 'Your eyes look closed. Keep them open and try again.',
   no_match: "This doesn't match your Profile Photo. Make sure it's you, in good light, and try again.",
-  too_bright: 'Too much light or glare on your face. Move out of direct sun and try again.',
+  too_bright: 'Too much light or glare on your face. Move away from strong lights, windows or sun behind or above you, hold the phone at arm\'s length and try again.',
   liveness_failed: "We couldn't confirm a live face. Hold the phone at eye level, fit your face in the oval, keep still during the colour flashes and try again.",
   profile_photo_unusable: 'Your Profile Photo can\'t be used for the face check. Ask your vendor to reject it, then upload a clear JPG or PNG photo of your face.',
   no_profile_photo: 'Your Profile Photo is not verified yet, so there is nothing to compare with.',
@@ -185,23 +185,25 @@ export interface FaceDetailLite {
 const area = (f: FaceDetailLite) => (f.BoundingBox?.Width ?? 0) * (f.BoundingBox?.Height ?? 0);
 
 /**
- * Moderate quality rules for the selfie. Returns null when it is good enough
- * to compare, otherwise the reason it isn't.
+ * Checks on the frame Rekognition took from the LIVE video. Returns null when
+ * it is fine to compare with the Profile Photo, otherwise the reason.
+ *
+ * Deliberately light: Face Liveness has already judged the video (lighting,
+ * pose, distance, eyes), and this frame is captured while the screen flashes
+ * colours, so it is naturally dark and tinted. Brightness / sharpness / pose /
+ * eyes checks here only produced false rejections. What is left: one clear
+ * face, and nothing that hides it (sunglasses, mask). The match score decides
+ * the rest.
  */
-export function evaluateSelfie(faces: FaceDetailLite[]): FaceCheckReason | null {
-  const real = faces.filter((f) => (f.Confidence ?? 0) >= 90);
+export function evaluateReferenceFace(faces: FaceDetailLite[]): FaceCheckReason | null {
+  const real = faces.filter((f) => (f.Confidence ?? 0) >= 80);
   if (real.length === 0) return 'no_face';
   const sorted = [...real].sort((a, b) => area(b) - area(a));
   const main = sorted[0];
   // A small face far in the background (a passer-by) is ignored.
   if (sorted.slice(1).some((f) => area(f) > area(main) * 0.25)) return 'multiple_faces';
-  if ((main.BoundingBox?.Width ?? 0) < 0.12) return 'too_small';
-  if ((main.Quality?.Brightness ?? 100) < 20) return 'too_dark';
-  if ((main.Quality?.Sharpness ?? 100) < 8) return 'blurry';
-  if (Math.abs(main.Pose?.Yaw ?? 0) > 35 || Math.abs(main.Pose?.Pitch ?? 0) > 35) return 'pose';
-  if (main.Sunglasses?.Value && (main.Sunglasses.Confidence ?? 0) >= 85) return 'sunglasses';
-  if (main.FaceOccluded?.Value && (main.FaceOccluded.Confidence ?? 0) >= 85) return 'covered';
-  if (main.EyesOpen?.Value === false && (main.EyesOpen.Confidence ?? 0) >= 90) return 'eyes_closed';
+  if (main.Sunglasses?.Value && (main.Sunglasses.Confidence ?? 0) >= 90) return 'sunglasses';
+  if (main.FaceOccluded?.Value && (main.FaceOccluded.Confidence ?? 0) >= 90) return 'covered';
   return null;
 }
 
@@ -261,9 +263,9 @@ async function compareWithProfile(
   try {
     const det = await client.send(new mod.DetectFacesCommand({
       Image: { Bytes: selfie },
-      Attributes: ['DEFAULT', 'SUNGLASSES', 'FACE_OCCLUDED', 'EYES_OPEN'],
+      Attributes: ['DEFAULT', 'SUNGLASSES', 'FACE_OCCLUDED'],
     }));
-    const bad = evaluateSelfie((det.FaceDetails ?? []) as FaceDetailLite[]);
+    const bad = evaluateReferenceFace((det.FaceDetails ?? []) as FaceDetailLite[]);
     if (bad) return { passed: false, reason: bad, similarity: null };
 
     const profileBytes = await readStoredFile(profile.fileUrl);
@@ -395,9 +397,13 @@ async function recordResult(
   driverId: string,
   result: { passed: boolean; reason: FaceCheckReason | null; similarity: number | null },
   selfieUrl: string | null,
+  live: { confidence: number | null; detail: string | null },
 ): Promise<FaceCheckResult> {
   await prisma.driverFaceCheck.create({
-    data: { driverId, passed: result.passed, reason: result.reason, similarity: result.similarity, selfieUrl },
+    data: {
+      driverId, passed: result.passed, reason: result.reason, similarity: result.similarity, selfieUrl,
+      livenessConfidence: live.confidence, detail: live.detail,
+    },
   });
 
   let validUntil: Date | null = null;
@@ -408,7 +414,10 @@ async function recordResult(
     await flagRepeatedMismatch(driverId);
   }
 
-  logger.info({ driverId, passed: result.passed, reason: result.reason, similarity: result.similarity }, 'Face check');
+  logger.info(
+    { driverId, passed: result.passed, reason: result.reason, similarity: result.similarity, liveScore: live.confidence },
+    'Face check',
+  );
   return {
     passed: result.passed,
     reason: result.reason,
@@ -444,6 +453,13 @@ export async function completeLivenessSession(driverId: string, sessionId: strin
     .filter(Boolean);
   const confidence = res.Confidence ?? null;
   const liveReason = evaluateLiveness({ status: res.Status, confidence, feedbackCodes });
+  // Kept with the attempt so a vendor / admin can see WHY it failed, and so the
+  // pass mark can be tuned from real scores.
+  const live = {
+    confidence: confidence == null ? null : Math.round(confidence * 10) / 10,
+    detail: [res.Status && res.Status !== 'SUCCEEDED' ? `status ${res.Status}` : '', ...feedbackCodes]
+      .filter(Boolean).join(', ') || null,
+  };
 
   // The frame Rekognition took from the live video (kept 30 days for the vendor).
   const refBytes = res.ReferenceImage?.Bytes ? Buffer.from(res.ReferenceImage.Bytes) : null;
@@ -451,7 +467,7 @@ export async function completeLivenessSession(driverId: string, sessionId: strin
 
   if (liveReason) {
     logger.warn({ driverId, status: res.Status, confidence, feedbackCodes }, 'Face check: liveness not confirmed');
-    return recordResult(driverId, { passed: false, reason: liveReason, similarity: null }, selfieUrl);
+    return recordResult(driverId, { passed: false, reason: liveReason, similarity: null }, selfieUrl, live);
   }
   if (!refBytes) {
     logger.error({ driverId }, 'Face check: liveness passed but no reference image came back');
@@ -461,7 +477,7 @@ export async function completeLivenessSession(driverId: string, sessionId: strin
   logger.info({ driverId, confidence }, 'Face check: liveness confirmed');
   const match = await compareWithProfile(driverId, refBytes);
   if (match.reason === 'service_error') throw unavailable();
-  return recordResult(driverId, match, selfieUrl);
+  return recordResult(driverId, match, selfieUrl, live);
 }
 
 /**
@@ -501,7 +517,10 @@ export async function listFaceChecks(driverId: string, take = 10) {
       where: { driverId },
       orderBy: { createdAt: 'desc' },
       take,
-      select: { id: true, passed: true, reason: true, similarity: true, selfieUrl: true, createdAt: true },
+      select: {
+        id: true, passed: true, reason: true, similarity: true, selfieUrl: true, createdAt: true,
+        livenessConfidence: true, detail: true,
+      },
     }),
     prisma.identityFlag.findFirst({
       where: { kind: 'face_mismatch', driverId, resolvedAt: null },

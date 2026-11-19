@@ -143,7 +143,7 @@ export function DriverFaceCheck({
         </p>
 
         <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-lg border p-3 text-xs"><Sun className="h-5 w-5 mx-auto mb-1 text-gold" />Good light, screen brightness up</div>
+          <div className="rounded-lg border p-3 text-xs"><Sun className="h-5 w-5 mx-auto mb-1 text-gold" />Even light, none behind you. Screen brightness up</div>
           <div className="rounded-lg border p-3 text-xs"><Smartphone className="h-5 w-5 mx-auto mb-1 text-gold" />Phone upright at eye level</div>
           <div className="rounded-lg border p-3 text-xs"><Glasses className="h-5 w-5 mx-auto mb-1 text-gold" />No sunglasses or mask</div>
         </div>
