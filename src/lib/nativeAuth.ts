@@ -14,6 +14,7 @@ interface WekashiAuthPlugin {
   clearAuth(): Promise<void>;
   showOnlineNotification(): Promise<void>;
   hideOnlineNotification(): Promise<void>;
+  takeOpenRide(): Promise<{ rideId?: string }>;
   addListener(event: "wentOffline", cb: () => void): Promise<PluginListenerHandle>;
 }
 
@@ -63,6 +64,21 @@ export async function setOnlineNotification(online: boolean): Promise<void> {
     else await WekashiAuth.hideOnlineNotification();
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * The ride the app was opened for by tapping the native ride card (once; then
+ * cleared). Covers a cold start, when the native `wekashi:openRide` event fires
+ * before the page has loaded. null on web / older APKs / nothing pending.
+ */
+export async function takeNativeOpenRide(): Promise<string | null> {
+  if (!Capacitor.isNativePlatform?.()) return null;
+  try {
+    const r = await WekashiAuth.takeOpenRide();
+    return r?.rideId ?? null;
+  } catch {
+    return null; // older APK without this method
   }
 }
 

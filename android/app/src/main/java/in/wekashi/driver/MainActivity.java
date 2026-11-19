@@ -97,10 +97,20 @@ public class MainActivity extends BridgeActivity {
    * that ride by dispatching a window event it listens for. Safe no-op if the
    * extra is absent or the web layer doesn't handle it.
    */
+  /**
+   * Ride the app was opened for, kept until the web app asks for it
+   * (WekashiAuth.takeOpenRide). On a cold start the page isn't loaded yet when
+   * the event below fires, so the web app picks it up from here instead.
+   */
+  static volatile String pendingOpenRideId;
+
   private void handleOpenRide(Intent intent) {
     if (intent == null) return;
     final String rideId = intent.getStringExtra("openRideId");
     if (rideId == null || rideId.isEmpty()) return;
+    pendingOpenRideId = rideId;
+    // Don't re-handle the same intent on a configuration change.
+    intent.removeExtra("openRideId");
 
     final WebView webView = getBridge().getWebView();
     if (webView == null) return;

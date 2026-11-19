@@ -107,6 +107,9 @@ public class IncomingRideOverlayService extends Service {
         Button reject = overlayView.findViewById(R.id.ovReject);
         accept.setOnClickListener(v -> onAccept(accept, reject));
         reject.setOnClickListener(v -> onReject());
+        // Tap anywhere else on the card: open the app on this ride's offer
+        // (still pending — the driver accepts or declines there).
+        overlayView.setOnClickListener(v -> onOpenApp());
 
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -316,6 +319,16 @@ public class IncomingRideOverlayService extends Service {
                 stopSelfClean();
             });
         }).start();
+    }
+
+    private void onOpenApp() {
+        stopSoundAndVibration();
+        Intent open = new Intent(this, MainActivity.class);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (rideId != null) open.putExtra("openRideId", rideId);
+        try { startActivity(open); } catch (Exception ignored) { }
+        stopSelfClean();
     }
 
     private void onReject() {

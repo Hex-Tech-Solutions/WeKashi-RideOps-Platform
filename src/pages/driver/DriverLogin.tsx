@@ -6,7 +6,7 @@ import { driverRequestOtp, driverRegister, ApiError } from "@/lib/api";
 import { PhoneInput, toE164, isValidMobile } from "@/components/PhoneInput";
 import { useDriverAuth } from "./useDriverAuth";
 import { toast } from "sonner";
-import { Loader2, Car, ArrowRight, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, ArrowRight, CheckCircle2, Clock } from "lucide-react";
 
 import { normalizeRegNo, isValidRegNo } from "@/lib/vehicleNo";
 
@@ -99,9 +99,7 @@ export default function DriverLogin() {
 
         {/* Header */}
         <div className="flex flex-col items-center mb-8">
-          <div className="h-14 w-14 rounded-2xl bg-gold flex items-center justify-center mb-3">
-            <Car className="h-7 w-7 text-gold-foreground" />
-          </div>
+          <img src="/wekashi-icon.png" alt="Wekashi Cabs" className="h-14 w-14 rounded-2xl mb-3 select-none" draggable={false} />
           <div className="font-bold text-xl">Wekashi Cabs</div>
           <div className="text-sm text-muted-foreground">{subtitle}</div>
         </div>

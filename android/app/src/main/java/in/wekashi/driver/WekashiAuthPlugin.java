@@ -72,6 +72,16 @@ public class WekashiAuthPlugin extends Plugin {
         call.resolve();
     }
 
+    /** The ride the app was opened for from the ride card (once), or no rideId. */
+    @PluginMethod
+    public void takeOpenRide(PluginCall call) {
+        String id = MainActivity.pendingOpenRideId;
+        MainActivity.pendingOpenRideId = null;
+        JSObject ret = new JSObject();
+        if (id != null) ret.put("rideId", id);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void hideOnlineNotification(PluginCall call) {
         OnlineStatusService.stop(getContext());
