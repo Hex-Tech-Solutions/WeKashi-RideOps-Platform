@@ -41,11 +41,7 @@ docker-compose up postgres redis -d
 npm run db:migrate
 ```
 
-Then apply GIST indexes from `prisma/migrations/init/migration.sql`:
-
-```bash
-psql $DATABASE_URL -f prisma/migrations/init/migration.sql
-```
+The GIST indexes are created by `prisma/migrations/20260730000001_init/migration.sql`, so `migrate deploy` applies them. No separate `psql` step is needed.
 
 ### 5. Seed the database
 
