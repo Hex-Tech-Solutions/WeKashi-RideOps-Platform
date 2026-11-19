@@ -35,19 +35,47 @@ public class OnlineStatusService extends Service {
 
     /** Floating quick-assist bubble, shown while online and the app is in the background. */
     private QuickAssistBubble bubble;
+    /** Native GPS while the web app (and its GPS watcher) isn't running. */
+    private NativeLocationReporter gps;
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    /** Re-checks the bubble: some phones remove it after killing/restarting the app. */
+    private static final long WATCHDOG_MS = 20_000;
+    private final Runnable watchdog = new Runnable() {
+        @Override public void run() {
+            if (bubble != null) bubble.ensure(WekashiApp.isForeground());
+            syncGps();
+            main.postDelayed(this, WATCHDOG_MS);
+        }
+    };
 
     @Override
     public void onCreate() {
         super.onCreate();
+        android.util.Log.i("WekashiOnline", "onCreate webAppAlive=" + WekashiApp.isWebAppAlive());
         bubble = new QuickAssistBubble(this);
-        WekashiApp.setForegroundListener(fg -> { if (bubble != null) bubble.update(fg); });
+        gps = new NativeLocationReporter(this);
+        WekashiApp.setAppStateListener(new WekashiApp.AppStateListener() {
+            @Override public void onForegroundChanged(boolean fg) { if (bubble != null) bubble.update(fg); }
+            @Override public void onWebAppAliveChanged(boolean alive) { syncGps(); }
+        });
+        main.postDelayed(watchdog, WATCHDOG_MS);
+    }
+
+    /** Native GPS only while the web app isn't there to send it. */
+    private void syncGps() {
+        if (gps == null) return;
+        if (WekashiApp.isWebAppAlive()) gps.stop();
+        else gps.start();
     }
 
     @Override
     public void onDestroy() {
-        WekashiApp.setForegroundListener(null);
+        main.removeCallbacks(watchdog);
+        WekashiApp.setAppStateListener(null);
         if (bubble != null) bubble.hide();
         bubble = null;
+        if (gps != null) gps.stop();
+        gps = null;
         super.onDestroy();
     }
 
@@ -68,7 +96,9 @@ public class OnlineStatusService extends Service {
         } else {
             startForeground(NOTIF_ID, buildNotification());
         }
+        android.util.Log.i("WekashiOnline", "onStartCommand intent=" + (intent == null ? "null (restarted by Android)" : action));
         if (bubble != null) bubble.update(WekashiApp.isForeground());
+        syncGps();
         // STICKY so Android restarts it (and the "online" notification) if the
         // process is killed while the driver is still on-duty.
         return START_STICKY;

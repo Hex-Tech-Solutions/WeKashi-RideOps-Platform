@@ -33,7 +33,17 @@ public final class RideApi {
         return post(ctx, "/driver/offline", true);
     }
 
+    /** Live GPS from NativeLocationReporter (web app not running). ACCEPTED = sent. */
+    public static Result postLocation(Context ctx, double lat, double lng) {
+        String body = "{\"lat\":" + lat + ",\"lng\":" + lng + ",\"native\":true}";
+        return post(ctx, "/driver/location", true, body);
+    }
+
     private static Result post(Context ctx, String path, boolean isAccept) {
+        return post(ctx, path, isAccept, "{}");
+    }
+
+    private static Result post(Context ctx, String path, boolean isAccept, String body) {
         String base = AuthStore.apiBase(ctx);
         String access = AuthStore.access(ctx);
         if (access == null) return Result.AUTH_FAILED;
@@ -43,13 +53,13 @@ public final class RideApi {
         // tampered/odd base ever slipped in.
         if (!isHttps(base)) return Result.ERROR;
 
-        int status = doPost(base + path, access);
+        int status = doPost(base + path, access, body);
 
         // Access token expired → refresh once and retry.
         if (status == 401) {
             if (!refreshToken(ctx)) return Result.AUTH_FAILED;
             access = AuthStore.access(ctx);
-            status = doPost(base + path, access);
+            status = doPost(base + path, access, body);
         }
 
         if (status >= 200 && status < 300) {
@@ -69,7 +79,7 @@ public final class RideApi {
     }
 
     /** Fire the POST with a Bearer token; returns the HTTP status (or -1). */
-    private static int doPost(String urlStr, String bearer) {
+    private static int doPost(String urlStr, String bearer, String body) {
         HttpURLConnection conn = null;
         try {
             URL url = new URL(urlStr);
@@ -80,9 +90,8 @@ public final class RideApi {
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(10000);
             conn.setDoOutput(true);
-            // Empty JSON body — these endpoints take no payload.
             try (OutputStream os = conn.getOutputStream()) {
-                os.write("{}".getBytes("UTF-8"));
+                os.write(body.getBytes("UTF-8"));
             }
             return conn.getResponseCode();
         } catch (Exception e) {

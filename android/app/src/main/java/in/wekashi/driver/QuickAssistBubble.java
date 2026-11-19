@@ -53,8 +53,10 @@ final class QuickAssistBubble {
 
     /** Show when the app is in the background, hide when it is in front. */
     void update(boolean appInForeground) {
-        if (appInForeground || !canDraw()) hide();
-        else show();
+        boolean draw = canDraw();
+        android.util.Log.i(TAG, "update foreground=" + appInForeground + " canDraw=" + draw);
+        if (appInForeground || !draw) hide();
+        else { wanted = true; retries = 0; show(); }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -127,10 +129,25 @@ final class QuickAssistBubble {
         try {
             wm.addView(bubble, lp);
             view = bubble;
+            retries = 0;
+            android.util.Log.i(TAG, "bubble shown");
         } catch (Exception e) {
-            view = null; // permission revoked mid-way, etc.
+            view = null;
+            android.util.Log.w(TAG, "bubble addView failed (try " + retries + ")", e);
+            // Right after Android restarts the app (e.g. the phone killed it on
+            // swipe-up) the window manager can refuse for a moment: retry.
+            if (retries < 5) {
+                retries++;
+                main.postDelayed(() -> { if (wanted) show(); }, 2000L * retries);
+            }
         }
     }
+
+    private static final String TAG = "WekashiBubble";
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private int retries = 0;
+    /** True while the bubble should be on screen (app in background, driver online). */
+    private boolean wanted = false;
 
     private void snapToEdge() {
         int width = ctx.getResources().getDisplayMetrics().widthPixels;
@@ -148,7 +165,27 @@ final class QuickAssistBubble {
         try { ctx.startActivity(i); } catch (Exception ignored) { }
     }
 
+    /**
+     * Watchdog check: put the bubble back if it should be on screen but isn't
+     * (the phone removed it, or adding it failed after a restart).
+     */
+    void ensure(boolean appInForeground) {
+        if (appInForeground || !canDraw()) { if (view != null) hide(); return; }
+        boolean onScreen = view != null && view.isAttachedToWindow() && view.getWindowVisibility() == View.VISIBLE;
+        if (onScreen) return;
+        android.util.Log.i(TAG, "watchdog: bubble missing (view=" + (view != null) + "), showing again");
+        if (view != null) {
+            try { wm.removeView(view); } catch (Exception ignored) { }
+            view = null;
+        }
+        wanted = true;
+        retries = 0;
+        show();
+    }
+
     void hide() {
+        wanted = false;
+        main.removeCallbacksAndMessages(null);
         if (view == null || wm == null) return;
         try { wm.removeView(view); } catch (Exception ignored) { }
         view = null;

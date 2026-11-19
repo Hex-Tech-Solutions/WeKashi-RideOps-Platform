@@ -304,8 +304,23 @@ router.post('/face-check', upload.single('selfie'), async (req: AuthRequest, res
 // POST /api/driver/location — periodic live GPS ping while online
 router.post('/location', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { lat, lng } = LocationSchema.parse(req.body);
+    const { lat, lng, native } = LocationSchema.extend({ native: z.boolean().optional() }).parse(req.body);
     await updateDriverLocation(req.driver!.id, lat, lng, io);
+    // `native`: sent by the Android app's own GPS while the web app is not
+    // running (the phone killed it). The web app normally also feeds an
+    // in-progress rental's distance meter, so do that here instead.
+    if (native) {
+      const { prisma } = await import('../lib/prisma');
+      const rental = await prisma.rental.findFirst({
+        where: { driverId: req.driver!.id, status: 'in_progress' },
+        select: { id: true },
+      });
+      if (rental) {
+        await logRentalLocation(rental.id, req.driver!.id, lat, lng).catch((err) => {
+          logger.warn({ err, rentalId: rental.id }, 'Native rental breadcrumb failed');
+        });
+      }
+    }
     res.json({ ok: true });
   } catch (err) {
     next(err);
