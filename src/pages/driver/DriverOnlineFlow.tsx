@@ -18,9 +18,6 @@ import {
 import { ApiError } from "@/lib/api";
 import { getDevicePosition } from "@/lib/deviceLocation";
 import { setOnlineNotification } from "@/lib/nativeAuth";
-import {
-  takeRestoredPhoto, onRestoredPhoto, clearPendingCapture, FACE_CHECK_CAPTURE,
-} from "@/lib/nativeCamera";
 import DriverTerms from "./DriverTerms";
 import { DriverFaceCheck } from "./DriverFaceCheck";
 
@@ -44,7 +41,7 @@ const Ctx = createContext<OnlineFlow>({
 
 export const useOnlineFlow = () => useContext(Ctx);
 
-type Step = null | { kind: "rules" } | { kind: "face"; goOnline: boolean; file?: File | null; consent?: boolean };
+type Step = null | { kind: "rules" } | { kind: "face"; goOnline: boolean };
 
 export function OnlineFlowProvider({ children }: { children: ReactNode }) {
   const { data: me } = useDriverMe();
@@ -130,17 +127,6 @@ export function OnlineFlowProvider({ children }: { children: ReactNode }) {
     });
   }, [qc]);
 
-  // A selfie that arrived after Android restarted the app while the camera was open.
-  useEffect(() => {
-    const run = () => {
-      const r = takeRestoredPhoto((p) => p.docType === FACE_CHECK_CAPTURE);
-      if (!r) return;
-      clearPendingCapture();
-      setStep({ kind: "face", goOnline: !!r.pending.goOnline, file: r.file, consent: !!r.pending.consent });
-    };
-    run();
-    return onRestoredPhoto(run);
-  }, []);
 
   // Stable functions: DriverShell uses openFaceCheck in an effect.
   const startGoOnline = useCallback(() => setStep({ kind: "rules" }), []);
@@ -164,8 +150,6 @@ export function OnlineFlowProvider({ children }: { children: ReactNode }) {
         <DriverFaceCheck
           consentGiven={!!me?.faceCheck?.consentGiven}
           goOnline={step.goOnline}
-          initialFile={step.file}
-          initialConsent={step.consent}
           onPassed={() => facePassed(step.goOnline)}
           onClose={() => setStep(null)}
         />

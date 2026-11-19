@@ -1,10 +1,23 @@
 /**
- * Phase 2: automatic face check.
+ * Phase 2: automatic face check WITH a liveness test.
  *
- * The driver takes a selfie; Amazon Rekognition (Mumbai region) checks it is a
- * clear photo of one face and compares it with the driver's VERIFIED Profile
- * Photo document. A pass is good for 2 hours and never past midnight IST, so
- * the driver checks on the first go-online of the day and then every 2 hours.
+ * The driver does a short live video selfie (Amazon Rekognition Face Liveness,
+ * Mumbai region: face in an oval + colour flashes on the screen), which a photo,
+ * a screen or a recorded video can't pass. The "reference image" Rekognition
+ * takes from that live video is then checked for quality and compared with the
+ * driver's VERIFIED Profile Photo document. A pass is good for 2 hours and never
+ * past midnight IST, so the driver checks on the first go-online of the day and
+ * then every 2 hours.
+ *
+ * Flow:
+ *   1. POST /driver/face-check/session  -> startLivenessSession(): creates the
+ *      Rekognition session and gives the app 15-minute credentials that can ONLY
+ *      stream that video (STS AssumeRole into FACE_LIVENESS_ROLE_ARN).
+ *   2. The app streams the video straight to Rekognition (Amplify component).
+ *   3. POST /driver/face-check/complete -> completeLivenessSession(): the
+ *      session must be the one we created for THIS driver (single use), then
+ *      the liveness score and the face match are checked.
+ * There is deliberately NO way to submit a plain photo.
  *
  * Without a valid check the driver:
  *   - gets no ride or rental broadcasts,
@@ -13,18 +26,21 @@
  * A trip already in progress can still be finished. A supervisor may still
  * assign a ride; the driver can't start it until they pass.
  *
- * Switched on with FACE_CHECK_ENABLED=true (plus AWS_REGION /
- * AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in .env.prod). While it is off,
- * every gate here lets the driver through.
+ * Switched on with FACE_CHECK_ENABLED=true, AWS_REGION and
+ * FACE_LIVENESS_ROLE_ARN in .env.prod. On an AWS server there are no access
+ * keys: the instance's IAM role is used. While it is off, every gate here lets
+ * the driver through.
  *
- * Selfies are deleted 30 days after they were taken (the result row stays).
+ * Reference images are deleted 30 days after they were taken (the result row stays).
  */
 import path from 'path';
+import { randomUUID } from 'crypto';
+import { redis } from '../lib/redis';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 import { AppError, TooManyRequestsError, ValidationError } from '../types';
-import { readStoredFile, deleteFromAzureBlob } from '../lib/storage';
+import { readStoredFile, deleteFromAzureBlob, saveBufferFile } from '../lib/storage';
 import { notifyFaceCheckDue } from './driverNotice.service';
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -39,8 +55,17 @@ export const FACE_CHECK_VALID_MS = 2 * 60 * 60 * 1000;
 export const SELFIE_RETENTION_DAYS = 30;
 /** Minimum Rekognition similarity (0–100) to count as the same person. */
 export const MATCH_THRESHOLD = 90;
-/** Attempts allowed per driver per hour (keeps the AWS bill bounded). */
+/** Face checks a driver may START per hour (keeps the AWS bill bounded). */
 export const MAX_ATTEMPTS_PER_HOUR = 10;
+/** Liveness score (0–100) Rekognition must reach. Tunable with FACE_LIVENESS_MIN_CONFIDENCE. */
+export function livenessMinConfidence(): number {
+  const n = Number(process.env.FACE_LIVENESS_MIN_CONFIDENCE);
+  return Number.isFinite(n) && n > 0 && n <= 100 ? n : 90;
+}
+/** A started session must be finished within this many seconds. */
+const SESSION_TTL_S = 300;
+const sessionKey = (sessionId: string) => `facecheck:liveness:${sessionId}`;
+const startsKey = (driverId: string) => `facecheck:starts:${driverId}`;
 /** Consecutive "different person" results that raise a flag for the vendor/admin. */
 export const MISMATCH_FLAG_AFTER = 3;
 
@@ -134,7 +159,7 @@ export async function getFaceCheckState(driverId: string, d: { faceCheckValidUnt
 
 export type FaceCheckReason =
   | 'no_face' | 'multiple_faces' | 'too_small' | 'too_dark' | 'blurry' | 'pose'
-  | 'sunglasses' | 'covered' | 'eyes_closed' | 'no_match'
+  | 'sunglasses' | 'covered' | 'eyes_closed' | 'no_match' | 'too_bright' | 'liveness_failed'
   | 'profile_photo_unusable' | 'no_profile_photo' | 'service_error';
 
 export const REASON_MESSAGES: Record<FaceCheckReason, string> = {
@@ -148,6 +173,8 @@ export const REASON_MESSAGES: Record<FaceCheckReason, string> = {
   covered: "Your face is covered. Remove your mask or anything in front of your face.",
   eyes_closed: 'Your eyes look closed. Keep them open and try again.',
   no_match: "This doesn't match your Profile Photo. Make sure it's you, in good light, and try again.",
+  too_bright: 'Too much light or glare on your face. Move out of direct sun and try again.',
+  liveness_failed: "We couldn't confirm a live face. Hold the phone at eye level, fit your face in the oval, keep still during the colour flashes and try again.",
   profile_photo_unusable: 'Your Profile Photo can\'t be used for the face check. Ask your vendor to reject it, then upload a clear JPG or PNG photo of your face.',
   no_profile_photo: 'Your Profile Photo is not verified yet, so there is nothing to compare with.',
   service_error: 'The face check is not working right now. Please try again in a minute.',
@@ -187,6 +214,32 @@ export function evaluateSelfie(faces: FaceDetailLite[]): FaceCheckReason | null 
   return null;
 }
 
+/** Rekognition liveness feedback codes -> our reasons (first mapped code wins). */
+const FEEDBACK_REASON: Record<string, FaceCheckReason> = {
+  LOW_LIGHTING_DETECTED: 'too_dark',
+  HIGH_LIGHTING_DETECTED: 'too_bright',
+  FACE_OBSTRUCTION_DETECTED: 'covered',
+  EYES_CLOSED_DETECTED: 'eyes_closed',
+  FACE_NOT_ALIGNED: 'pose',
+  FACE_NOT_VISIBLE: 'no_face',
+  LOW_VIDEO_QUALITY_DETECTED: 'blurry',
+};
+
+/**
+ * Did the live video pass? null = yes. Otherwise the reason, using
+ * Rekognition's own retry hints when it gave any. Pure, so it is easy to test.
+ */
+export function evaluateLiveness(
+  r: { status?: string; confidence?: number | null; feedbackCodes?: string[] },
+  minConfidence = livenessMinConfidence(),
+): FaceCheckReason | null {
+  if (r.status === 'SUCCEEDED' && (r.confidence ?? 0) >= minConfidence) return null;
+  for (const code of r.feedbackCodes ?? []) {
+    if (FEEDBACK_REASON[code]) return FEEDBACK_REASON[code];
+  }
+  return 'liveness_failed';
+}
+
 // ─── Rekognition ─────────────────────────────────────────────────────────────
 
 type RekModule = typeof import('@aws-sdk/client-rekognition');
@@ -195,7 +248,7 @@ let rek: { mod: RekModule; client: InstanceType<RekModule['RekognitionClient']> 
 async function rekognition() {
   if (!rek) {
     const mod = await import('@aws-sdk/client-rekognition');
-    // Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+    // Credentials: the server's IAM role (default AWS credential chain).
     const client = new mod.RekognitionClient({ region: process.env.AWS_REGION || 'ap-south-1' });
     rek = { mod, client };
   }
@@ -251,6 +304,94 @@ async function compareWithProfile(
 
 // ─── Running a check ─────────────────────────────────────────────────────────
 
+/** Keep a driver's one-time consent (needed before the first check). */
+async function ensureConsent(driverId: string, consent: boolean): Promise<void> {
+  const driver = await prisma.driver.findUnique({ where: { id: driverId }, select: { faceConsentAt: true } });
+  if (driver?.faceConsentAt) return;
+  if (!consent) throw new ValidationError('Please agree to the face check first');
+  await prisma.driver.update({ where: { id: driverId }, data: { faceConsentAt: new Date() } });
+}
+
+const unavailable = () =>
+  new AppError(503, REASON_MESSAGES.service_error, 'FACE_CHECK_UNAVAILABLE');
+
+export interface LivenessSessionInfo {
+  sessionId: string;
+  region: string;
+  /** 15-minute credentials that can ONLY stream this liveness video. */
+  credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string; expiration: string };
+}
+
+/**
+ * Step 1: create a liveness session for this driver and hand the app
+ * credentials that can do nothing except stream that video to Rekognition.
+ */
+export async function startLivenessSession(driverId: string, consent: boolean): Promise<LivenessSessionInfo> {
+  if (!isFaceCheckEnabled()) throw new ValidationError('The face check is not switched on');
+  const roleArn = process.env.FACE_LIVENESS_ROLE_ARN;
+  if (!roleArn) {
+    logger.error('Face check: FACE_LIVENESS_ROLE_ARN is not set');
+    throw unavailable();
+  }
+
+  // Nothing to compare with -> tell the driver why, before spending an AWS call.
+  const profile = await verifiedProfilePhoto(driverId);
+  if (!profile) throw new ValidationError(REASON_MESSAGES.no_profile_photo);
+  if (!isJpegOrPng(profile.fileUrl)) throw new ValidationError(REASON_MESSAGES.profile_photo_unusable);
+
+  await ensureConsent(driverId, consent);
+
+  const starts = await redis.incr(startsKey(driverId));
+  if (starts === 1) await redis.expire(startsKey(driverId), 3600);
+  if (starts > MAX_ATTEMPTS_PER_HOUR) {
+    throw new TooManyRequestsError('Too many tries. Please wait a while and try again.');
+  }
+
+  const region = process.env.AWS_REGION || 'ap-south-1';
+  try {
+    const { mod, client } = await rekognition();
+    const created = await client.send(new mod.CreateFaceLivenessSessionCommand({
+      ClientRequestToken: randomUUID(),
+      // The reference image comes back to us as bytes; nothing is kept in S3.
+      Settings: { AuditImagesLimit: 0 },
+    }));
+    const sessionId = created.SessionId;
+    if (!sessionId) throw new Error('Rekognition returned no SessionId');
+    // Bind the session to this driver: only they may complete it, once.
+    await redis.set(sessionKey(sessionId), driverId, 'EX', SESSION_TTL_S);
+
+    const { STSClient, AssumeRoleCommand } = await import('@aws-sdk/client-sts');
+    const sts = new STSClient({ region });
+    const out = await sts.send(new AssumeRoleCommand({
+      RoleArn: roleArn,
+      RoleSessionName: `driver-${driverId.replace(/[^A-Za-z0-9]/g, '').slice(0, 12)}`,
+      DurationSeconds: 900, // the shortest STS allows
+      // Even if the role were ever widened, these credentials can do only this.
+      Policy: JSON.stringify({
+        Version: '2012-10-17',
+        Statement: [{ Effect: 'Allow', Action: 'rekognition:StartFaceLivenessSession', Resource: '*' }],
+      }),
+    }));
+    const c = out.Credentials;
+    if (!c?.AccessKeyId || !c.SecretAccessKey || !c.SessionToken || !c.Expiration) {
+      throw new Error('STS returned no credentials');
+    }
+    return {
+      sessionId,
+      region,
+      credentials: {
+        accessKeyId: c.AccessKeyId,
+        secretAccessKey: c.SecretAccessKey,
+        sessionToken: c.SessionToken,
+        expiration: c.Expiration.toISOString(),
+      },
+    };
+  } catch (err) {
+    logger.error({ err, driverId }, 'Face check: could not start a liveness session');
+    throw unavailable();
+  }
+}
+
 export interface FaceCheckResult {
   passed: boolean;
   reason: FaceCheckReason | null;
@@ -258,32 +399,12 @@ export interface FaceCheckResult {
   validUntil: Date | null;
 }
 
-/**
- * Run one face check. `selfie` is the image bytes; `selfieUrl` is where the
- * route stored it. `consent` must be true the first time.
- */
-export async function runFaceCheck(
+/** Store an attempt, and on a pass start the 2-hour window. */
+async function recordResult(
   driverId: string,
-  selfie: Buffer,
-  selfieUrl: string,
-  consent: boolean,
+  result: { passed: boolean; reason: FaceCheckReason | null; similarity: number | null },
+  selfieUrl: string | null,
 ): Promise<FaceCheckResult> {
-  if (!isFaceCheckEnabled()) throw new ValidationError('The face check is not switched on');
-
-  const driver = await prisma.driver.findUnique({ where: { id: driverId }, select: { faceConsentAt: true } });
-  if (!driver?.faceConsentAt) {
-    if (!consent) throw new ValidationError('Please agree to the face check first');
-    await prisma.driver.update({ where: { id: driverId }, data: { faceConsentAt: new Date() } });
-  }
-
-  const lastHour = await prisma.driverFaceCheck.count({
-    where: { driverId, createdAt: { gt: new Date(Date.now() - 60 * 60 * 1000) } },
-  });
-  if (lastHour >= MAX_ATTEMPTS_PER_HOUR) {
-    throw new TooManyRequestsError('Too many tries. Please wait a while and try again.');
-  }
-
-  const result = await compareWithProfile(driverId, selfie);
   await prisma.driverFaceCheck.create({
     data: { driverId, passed: result.passed, reason: result.reason, similarity: result.similarity, selfieUrl },
   });
@@ -303,6 +424,53 @@ export async function runFaceCheck(
     message: result.reason ? REASON_MESSAGES[result.reason] : null,
     validUntil,
   };
+}
+
+/**
+ * Step 3: the app says the video was sent. Fetch the verdict from Rekognition
+ * (never trusting the app), then check liveness, photo quality and the match.
+ */
+export async function completeLivenessSession(driverId: string, sessionId: string): Promise<FaceCheckResult> {
+  if (!isFaceCheckEnabled()) throw new ValidationError('The face check is not switched on');
+
+  // Single use, and only by the driver it was created for.
+  const owner = await redis.getdel(sessionKey(sessionId));
+  if (owner !== driverId) {
+    throw new ValidationError('This face check expired. Please start again.');
+  }
+
+  let res;
+  try {
+    const { mod, client } = await rekognition();
+    res = await client.send(new mod.GetFaceLivenessSessionResultsCommand({ SessionId: sessionId }));
+  } catch (err) {
+    logger.error({ err, driverId }, 'Face check: could not read the liveness result');
+    throw unavailable();
+  }
+
+  const feedbackCodes = ((res as { Feedback?: Array<{ Code?: string }> }).Feedback ?? [])
+    .map((f) => f.Code ?? '')
+    .filter(Boolean);
+  const confidence = res.Confidence ?? null;
+  const liveReason = evaluateLiveness({ status: res.Status, confidence, feedbackCodes });
+
+  // The frame Rekognition took from the live video (kept 30 days for the vendor).
+  const refBytes = res.ReferenceImage?.Bytes ? Buffer.from(res.ReferenceImage.Bytes) : null;
+  const selfieUrl = refBytes ? await saveBufferFile(refBytes, '.jpg', 'image/jpeg').catch(() => null) : null;
+
+  if (liveReason) {
+    logger.warn({ driverId, status: res.Status, confidence, feedbackCodes }, 'Face check: liveness not confirmed');
+    return recordResult(driverId, { passed: false, reason: liveReason, similarity: null }, selfieUrl);
+  }
+  if (!refBytes) {
+    logger.error({ driverId }, 'Face check: liveness passed but no reference image came back');
+    throw unavailable();
+  }
+
+  logger.info({ driverId, confidence }, 'Face check: liveness confirmed');
+  const match = await compareWithProfile(driverId, refBytes);
+  if (match.reason === 'service_error') throw unavailable();
+  return recordResult(driverId, match, selfieUrl);
 }
 
 /**

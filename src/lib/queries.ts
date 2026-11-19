@@ -634,16 +634,27 @@ export interface FaceCheckResult {
   validUntil: string | null;
 }
 
-/** Send a selfie for the face check. */
-export function useSubmitFaceCheck() {
+/** A liveness session for the face check: the id, region, and 15-minute streaming-only credentials. */
+export interface LivenessSession {
+  sessionId: string;
+  region: string;
+  credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string; expiration: string };
+}
+
+/** Step 1 of the face check: create a live-video session. `consent` is needed the first time. */
+export function useStartFaceCheck() {
+  return useMutation({
+    mutationFn: (consent: boolean) =>
+      api<LivenessSession>("/driver/face-check/session", { method: "POST", body: JSON.stringify({ consent }) }),
+  });
+}
+
+/** Step 2: the live video was sent. The server fetches the verdict and matches the Profile Photo. */
+export function useCompleteFaceCheck() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, consent }: { file: File; consent: boolean }) => {
-      const form = new FormData();
-      form.append("selfie", file);
-      if (consent) form.append("consent", "1");
-      return api<FaceCheckResult>("/driver/face-check", { method: "POST", body: form });
-    },
+    mutationFn: (sessionId: string) =>
+      api<FaceCheckResult>("/driver/face-check/complete", { method: "POST", body: JSON.stringify({ sessionId }) }),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["driver", "me"] });
       void qc.invalidateQueries({ queryKey: ["driver", "offers"] });

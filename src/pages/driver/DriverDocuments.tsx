@@ -31,7 +31,7 @@ import {
 import { toast } from "sonner";
 import {
   isCameraAvailable, takePhoto, CameraError,
-  takeRestoredPhoto, onRestoredPhoto, clearPendingCapture, FACE_CHECK_CAPTURE,
+  takeRestoredPhoto, onRestoredPhoto, clearPendingCapture,
 } from "@/lib/nativeCamera";
 import { openAppSettings } from "@/lib/deviceLocation";
 
@@ -212,8 +212,7 @@ function useRestoredPhotoUpload() {
   const mutate = upload.mutate;
   useEffect(() => {
     const run = () => {
-      // Face-check selfies are handled by the face-check screen.
-      const r = takeRestoredPhoto((p) => p.docType !== FACE_CHECK_CAPTURE);
+      const r = takeRestoredPhoto();
       if (!r) return;
       clearPendingCapture();
       const { pending, file } = r;

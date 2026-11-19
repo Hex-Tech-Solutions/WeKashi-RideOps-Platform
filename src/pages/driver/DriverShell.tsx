@@ -9,7 +9,7 @@ import DriverDocuments from "./DriverDocuments";
 import { DriverAccountPanel } from "./DriverAccountPanel";
 import { SosModal } from "@/components/SosModal";
 import { OPEN_SCREEN_EVENT, takePendingScreen, type NoticeScreen } from "@/lib/notificationNav";
-import { getPendingCapture, hasRestoredPhoto, FACE_CHECK_CAPTURE } from "@/lib/nativeCamera";
+import { getPendingCapture, hasRestoredPhoto } from "@/lib/nativeCamera";
 import { OnlineFlowProvider, useOnlineFlow } from "./DriverOnlineFlow";
 import { DriverChat } from "@/components/DriverChat";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -90,11 +90,7 @@ function ShellInner() {
     // App restarted by Android while the camera was open: go back to Documents,
     // where the photo is uploaded once it arrives. (A face-check selfie is
     // picked up by OnlineFlowProvider on the Rides tab.)
-    else {
-      const isDoc = (p: { docType: string }) => p.docType !== FACE_CHECK_CAPTURE;
-      const pending = getPendingCapture();
-      if ((pending && isDoc(pending)) || hasRestoredPhoto(isDoc)) open("documents");
-    }
+    else if (getPendingCapture() || hasRestoredPhoto()) open("documents");
     const onEvent = (e: Event) => {
       takePendingScreen();
       open((e as CustomEvent<NoticeScreen>).detail);

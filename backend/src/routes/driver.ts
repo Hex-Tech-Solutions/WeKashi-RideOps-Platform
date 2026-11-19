@@ -12,9 +12,8 @@ import {
 } from '../services/driver.service';
 import { addDriverDocument, listDriverDocuments, deleteDriverDocument, assertCanUploadDocument } from '../services/document.service';
 import fs from 'fs';
-import path from 'path';
-import { upload, USE_AZURE_STORAGE, uploadToAzureBlob, deleteFromAzureBlob } from '../lib/storage';
-import { assertCanGoOnline, runFaceCheck } from '../services/faceCheck.service';
+import { upload, USE_AZURE_STORAGE, uploadToAzureBlob } from '../lib/storage';
+import { assertCanGoOnline, startLivenessSession, completeLivenessSession } from '../services/faceCheck.service';
 import { validateDocDetails, DOC_TYPE_RULES } from '../lib/documentTypes';
 import {
   requireIndianMobile, normalizeIndianMobile, normalizeDl, normalizeAadhaar, maskAadhaar,
@@ -265,42 +264,31 @@ router.post('/online', async (req: AuthRequest, res: Response, next: NextFunctio
   }
 });
 
-// POST /api/driver/face-check — multipart: "selfie" (JPG/PNG) + consent=1 the
-// first time. Compares it with the verified Profile Photo (faceCheck.service).
-router.post('/face-check', upload.single('selfie'), async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const file = req.file;
-  const removeLocal = () => {
-    if (!USE_AZURE_STORAGE && file?.path) fs.promises.unlink(file.path).catch(() => undefined);
-  };
+// Face check (Phase 2) = a LIVE video selfie (Rekognition Face Liveness), then a
+// match against the verified Profile Photo. There is deliberately no endpoint
+// that accepts a plain photo. See services/faceCheck.service.ts.
+//
+// POST /api/driver/face-check/session  { consent?: boolean }
+//   -> { sessionId, region, credentials } for the app's liveness component.
+router.post('/face-check/session', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (!file) throw new ValidationError('Take a selfie first');
-    if (!['image/jpeg', 'image/png'].includes(file.mimetype)) {
-      removeLocal();
-      throw new ValidationError('The selfie must be a JPG or PNG photo');
-    }
-    const bytes = USE_AZURE_STORAGE ? file.buffer : await fs.promises.readFile(file.path);
-    const consent = ['1', 'true'].includes(String((req.body as { consent?: string }).consent ?? ''));
-    let selfieUrl: string;
-    try {
-      selfieUrl = await resolveFileUrl(file);
-    } catch (e) {
-      removeLocal();
-      throw e;
-    }
-    let result;
-    try {
-      result = await runFaceCheck(req.driver!.id, bytes, selfieUrl, consent);
-    } catch (e) {
-      // Nothing was recorded (consent missing / too many tries): don't keep the file.
-      await deleteFromAzureBlob(path.basename(selfieUrl)).catch(() => undefined);
-      throw e;
-    }
-    res.json(result);
+    const { consent } = z.object({ consent: z.boolean().optional() }).parse(req.body ?? {});
+    res.json(await startLivenessSession(req.driver!.id, consent === true));
   } catch (err) {
     next(err);
   }
 });
 
+// POST /api/driver/face-check/complete  { sessionId }
+//   -> { passed, reason, message, validUntil }
+router.post('/face-check/complete', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { sessionId } = z.object({ sessionId: z.string().min(10).max(100) }).parse(req.body);
+    res.json(await completeLivenessSession(req.driver!.id, sessionId));
+  } catch (err) {
+    next(err);
+  }
+});
 // POST /api/driver/location — periodic live GPS ping while online
 router.post('/location', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

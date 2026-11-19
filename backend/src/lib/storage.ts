@@ -66,6 +66,19 @@ export async function uploadToAzureBlob(
   return `/api/files/${filename}`;
 }
 
+// ─── Save an in-memory file (not an upload) ───────────────────────────────────
+
+/**
+ * Store bytes the server produced itself (e.g. the liveness reference photo)
+ * the same way an upload is stored. Returns the `/api/files/<name>` URL.
+ */
+export async function saveBufferFile(buffer: Buffer, ext: '.jpg' | '.png', mimeType: string): Promise<string> {
+  if (USE_AZURE_STORAGE) return uploadToAzureBlob(buffer, `file${ext}`, mimeType);
+  const filename = `${uuidv4()}${ext}`;
+  await fs.promises.writeFile(path.join(UPLOAD_DIR, filename), buffer);
+  return `/api/files/${filename}`;
+}
+
 // ─── Delete a blob from Azure Blob Storage ────────────────────────────────────
 
 export async function deleteFromAzureBlob(filename: string): Promise<void> {
