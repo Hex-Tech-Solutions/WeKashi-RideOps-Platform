@@ -131,7 +131,7 @@ export function RoleLayout({ role, user, nav, topNav, children }: RoleLayoutProp
           })}
         </nav>
 
-        <div className="px-3 py-3 border-t border-sidebar-border space-y-1">
+        <div className="px-3 pt-3 pb-16 border-t border-sidebar-border space-y-1">
           <MadeInIndiaWatermark collapsed={collapsed} />
           <button
             onClick={() => setCollapsed((c) => !c)}
@@ -191,11 +191,11 @@ export function RoleLayout({ role, user, nav, topNav, children }: RoleLayoutProp
                     className={cn(
                       "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm whitespace-nowrap border transition-colors",
                       active
-                        ? "bg-foreground text-background border-foreground font-medium"
-                        : "border-border text-foreground/80 hover:border-gold hover:text-foreground",
+                        ? "bg-gold text-gold-foreground border-gold font-semibold shadow-sm"
+                        : "bg-zinc-900 text-white border-zinc-900 hover:bg-zinc-800 hover:border-gold",
                     )}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
+                    <Icon className={cn("h-4 w-4 shrink-0", !active && "text-gold")} />
                     <span>{item.label}</span>
                     {item.badge !== undefined && (
                       <span className="text-[10px] font-semibold bg-gold text-gold-foreground rounded-full px-1.5 py-0.5 leading-none">{item.badge}</span>

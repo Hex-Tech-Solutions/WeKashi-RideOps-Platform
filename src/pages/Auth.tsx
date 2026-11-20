@@ -79,9 +79,8 @@ export default function Auth() {
             <div className="mt-6 pt-5 border-t border-white/10 text-center">
               <p className="text-xs text-white/40 mb-2">Don't have an account?</p>
               <Button
-                variant="outline"
                 size="sm"
-                className="border-white/20 text-white/70 hover:text-white hover:bg-white/10"
+                className="bg-gold text-gold-foreground hover:bg-gold/90"
                 onClick={() => setScreen("register")}
               >
                 Request an account
@@ -93,7 +92,7 @@ export default function Auth() {
         )}
 
         <p className="text-center text-xs text-white/40 mt-6">
-          Driver? Use the <Link to="/driver" className="text-gold hover:underline">driver app</Link>.
+          Driver? Use the <a href="https://play.google.com/store/apps/details?id=in.wekashi.in" target="_blank" rel="noopener noreferrer" className="text-gold hover:underline">driver app</a>.
         </p>
       </div>
     </div>
