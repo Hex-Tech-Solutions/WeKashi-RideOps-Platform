@@ -67,8 +67,8 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <WhatsAppButton />
       <BrowserRouter>
+      <WhatsAppButton />
         <AuthProvider>
           <Routes>
             <Route path="/" element={<Landing />} />
