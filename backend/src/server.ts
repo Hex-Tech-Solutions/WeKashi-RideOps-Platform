@@ -96,6 +96,13 @@ async function bootstrap(): Promise<void> {
     stopFaceCheckSweeper();
     stopLocationFlusher();
 
+    // Open sockets keep httpServer.close() waiting forever, which made every
+    // deploy hit the 10s forced exit and skip the final location flush.
+    // Disconnect this instance's sockets first (clients auto-reconnect).
+    for (const ns of ['/driver', '/supervisor', '/admin']) {
+      io.of(ns).local.disconnectSockets(true);
+    }
+
     httpServer.close(async () => {
       try {
         // Final flush before shutdown — don't lose buffered positions

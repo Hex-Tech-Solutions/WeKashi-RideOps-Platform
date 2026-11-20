@@ -60,7 +60,7 @@ const scenarios = {
   },
   health: {
     executor: 'constant-arrival-rate',
-    rate: 1, timeUnit: '1s', duration: '10m',
+    rate: 1, timeUnit: '1s', duration: SMOKE ? '50s' : '10m',
     preAllocatedVUs: 2, maxVUs: 5,
     exec: 'health',
   },

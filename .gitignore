@@ -89,3 +89,4 @@ pnpm-lock.yaml
 public/mediapipe/wasm/
 
 scripts/loadtest/tokens.json
+scripts/loadtest/fulltokens.json

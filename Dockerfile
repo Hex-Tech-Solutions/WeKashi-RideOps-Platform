@@ -27,6 +27,16 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker/security-headers.conf /etc/nginx/conf.d/security-headers.conf
 
+# Connection limits. The stock image allows 1024 connections / file descriptors
+# per worker, and every proxied socket.io connection uses two (client + API).
+# Load test (Nov 2026): at ~2,000 open sockets nginx ran out of descriptors and
+# answered EVERY request with 500. Raise both, and fail the build if the edit
+# didn't apply.
+RUN sed -i -E 's/worker_connections +[0-9]+;/worker_connections 16384;/' /etc/nginx/nginx.conf \
+ && sed -i '1i worker_rlimit_nofile 65535;' /etc/nginx/nginx.conf \
+ && grep -q 'worker_connections 16384;' /etc/nginx/nginx.conf \
+ && grep -q '^worker_rlimit_nofile 65535;' /etc/nginx/nginx.conf
+
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]

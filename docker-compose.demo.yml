@@ -86,6 +86,8 @@ services:
       start_period: 60s
     command: sh -c "npx prisma migrate deploy && node dist/server.js"
     mem_limit: 2500m
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
     logging: { driver: json-file, options: { max-size: "20m", max-file: "5" } }
 
   web:
@@ -99,6 +101,10 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8090:80"
+    # nginx proxies every driver socket; the default 1024 file limit made it
+    # fail all requests at ~2,000 open sockets (load test, Nov 2026).
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
 
 volumes:
   pgdata:
