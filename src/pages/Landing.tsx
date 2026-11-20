@@ -570,7 +570,8 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-6 space-y-6 text-xs text-white/40">
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
             <div className="space-y-1.5">
-              <div className="text-white/70 font-semibold text-sm">{BUSINESS.tradeName}</div>
+              <div className="text-white/70 font-semibold text-sm">{BUSINESS.productName}</div>
+              <div>A product of {BUSINESS.tradeName}</div>
               <div>Proprietor: {BUSINESS.legalName}</div>
               <div>GSTIN: {BUSINESS.gstin}</div>
               <div className="max-w-xs leading-relaxed">{formattedAddress()}</div>
@@ -606,7 +607,8 @@ export default function Landing() {
           </div>
 
           <div className="border-t border-white/10 pt-5">
-            © 2026 {BUSINESS.tradeName} · Employee transport, on-demand
+            © 2026 {BUSINESS.productName} · {BUSINESS.productName} is a product of {BUSINESS.tradeName} (Proprietor: {BUSINESS.legalName}), GSTIN {BUSINESS.gstin}, {BUSINESS.address.city}, {BUSINESS.address.country} ·{" "}
+            <a href={`mailto:${BUSINESS.support.email}`} className="hover:text-white transition">{BUSINESS.support.email}</a>
           </div>
         </div>
       </footer>

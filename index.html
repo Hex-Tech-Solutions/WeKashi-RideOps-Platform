@@ -7,16 +7,18 @@
     <meta name="description" content="Wekashi Cab — safe, reliable employee transport. Connect supervisors directly to vetted cab drivers, on demand." />
     <meta name="author" content="Wekashi Cab" />
 
+    <link rel="canonical" href="https://wekashi.in/" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/wekashi-icon.png" />
 
     <meta property="og:title" content="Wekashi Cab — On-demand employee transport" />
     <meta property="og:description" content="Safe, reliable cab service. Fill cab shortages in minutes with a marketplace of vetted drivers." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/wekashi-logo.jpg" />
+    <meta property="og:url" content="https://wekashi.in/" />
+    <meta property="og:image" content="https://wekashi.in/wekashi-logo.jpg" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="/wekashi-logo.jpg" />
+    <meta name="twitter:image" content="https://wekashi.in/wekashi-logo.jpg" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -24,7 +26,30 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static content for crawlers and no-JavaScript visitors. React replaces it when the app loads. -->
+      <div style="min-height:100vh;background:#080808;color:#fff;font-family:Poppins,Arial,sans-serif;padding:32px 24px">
+        <header>
+          <h1 style="font-size:28px;margin:0 0 8px">Wekashi Cab</h1>
+          <p style="margin:0;color:#d4af37">Safe. Reliable. On time. Every time.</p>
+        </header>
+        <main style="max-width:720px">
+          <p>Wekashi Cab is an on-demand employee transport platform in Bengaluru, India. Supervisors and vendors book rides, manage rosters, airport transfers and rentals, and track trips live, while vetted, verified drivers accept rides through the Wekashi driver app.</p>
+          <ul>
+            <li>On-demand rides that fill cab shortages in minutes</li>
+            <li>Roster and saved-group booking for office commutes</li>
+            <li>Live trip tracking, SOS and issue reporting</li>
+            <li>Rentals and airport transfers</li>
+          </ul>
+          <p><a href="/auth" style="color:#d4af37">Sign in</a> to the Wekashi console.</p>
+        </main>
+        <footer style="margin-top:32px;font-size:13px;color:#aaa">
+          <p>&copy; 2026 Wekashi Cab &middot; Wekashi Cab is a product of Shreeya Tours and Travels (Proprietor: Padma Priya R), GSTIN 29GVBPP3987H1ZU, Bengaluru, India &middot; <a href="mailto:info@wekashi.in" style="color:#d4af37">info@wekashi.in</a></p>
+          <p>Shreeya Tours and Travels, Ground Floor, No 002, H Block, Thunga Vallegerhali, Phase 1 BDA Apartment, RV Niketan, Bengaluru, Bengaluru Urban, Karnataka 560059, India<br />Phone: <a href="tel:+918050441392" style="color:#d4af37">+91 80504 41392</a> &middot; Email: <a href="mailto:info@wekashi.in" style="color:#d4af37">info@wekashi.in</a></p>
+          <p><a href="/about" style="color:#aaa">About</a> &middot; <a href="/privacy-policy" style="color:#aaa">Privacy Policy</a> &middot; <a href="/terms" style="color:#aaa">Terms</a> &middot; <a href="/refund-policy" style="color:#aaa">Refund Policy</a> &middot; <a href="/data-deletion" style="color:#aaa">Data Deletion</a></p>
+        </footer>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
