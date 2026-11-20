@@ -322,7 +322,19 @@ router.post('/location', async (req: AuthRequest, res: Response, next: NextFunct
 // POST /api/driver/offline
 router.post('/offline', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await setDriverOnlineStatus(req.driver!.id, false);
+    // A driver cannot go offline in the middle of a trip: going offline stops
+    // their live GPS, which the supervisor, the SOS flow and the rental meter
+    // depend on. They go offline after the drop.
+    const { prisma } = await import('../lib/prisma');
+    const driverId = req.driver!.id;
+    const [ridesInProgress, rentalsInProgress] = await Promise.all([
+      prisma.ride.count({ where: { driverId, status: 'in_progress' } }),
+      prisma.rental.count({ where: { driverId, status: 'in_progress' } }),
+    ]);
+    if (ridesInProgress + rentalsInProgress > 0) {
+      throw new ConflictError('Finish your current trip before going offline');
+    }
+    await setDriverOnlineStatus(driverId, false);
     res.json({ isOnline: false });
   } catch (err) {
     next(err);

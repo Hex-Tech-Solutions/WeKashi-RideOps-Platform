@@ -300,6 +300,14 @@ export default function DriverHome() {
       // is due, then online — see DriverOnlineFlow.tsx.
       onlineFlow.startGoOnline();
     } else {
+      // Can't go offline mid-trip (the server enforces this too).
+      const onTrip =
+        rides.some((r) => r.status === "in_progress") ||
+        myRentals.some((r) => r.status === "in_progress");
+      if (onTrip) {
+        toast.error("Finish your current trip before going offline");
+        return;
+      }
       goOffline.mutate(undefined, {
         onSuccess: () => { toast.success("You're offline"); void setOnlineNotification(false); },
         onError: (e: any) => toast.error(e?.message ?? "Failed"),

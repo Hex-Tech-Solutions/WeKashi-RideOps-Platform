@@ -10,6 +10,8 @@ import { initPackExpirySweeper, stopPackExpirySweeper } from './services/creditN
 import { initRideReminderSweeper, stopRideReminderSweeper } from './services/rideReminders.service';
 import { initFaceCheckSweeper, stopFaceCheckSweeper } from './services/faceCheck.service';
 import { startLocationFlusher, stopLocationFlusher, flushLocationBuffer } from './lib/locationBuffer';
+import { setDriverRidesNotifier } from './lib/activeRideCache';
+import { setDriverRentalsNotifier } from './services/rental.service';
 import { prisma } from './lib/prisma';
 import { redis } from './lib/redis';
 import { logger } from './lib/logger';
@@ -21,15 +23,11 @@ async function bootstrap(): Promise<void> {
   await prisma.$connect();
   logger.info('Database connected');
 
-  // ── L2: Reset all driver isOnline flags on startup ──────────────────────────
-  // Prevents drivers being permanently stuck as "online" after server crashes.
-  const resetCount = await prisma.driver.updateMany({
-    where: { isOnline: true },
-    data: { isOnline: false },
-  });
-  if (resetCount.count > 0) {
-    logger.info({ count: resetCount.count }, 'Reset stale driver online status on startup');
-  }
+  // Driver online status is NOT reset on startup. Under Model 2, online is a
+  // deliberate state that changes only when the driver taps Go Offline or their
+  // FCM token is found dead (uninstall). The old startup reset knocked every
+  // driver offline on each deploy, and apps that refreshed in that window
+  // stopped receiving rides.
 
   // ── M7: Purge expired/revoked refresh tokens ─────────────────────────────────
   // Runs once on startup; a scheduled job can also run this periodically.
@@ -50,6 +48,16 @@ async function bootstrap(): Promise<void> {
 
   // Initialize Socket.io (must happen before app so io is available for routes)
   const io = initSockets(httpServer);
+
+  // Tell a driver's app the moment their rides or held rentals change, so it
+  // can poll slowly the rest of the time. Goes through the Redis adapter, so
+  // it reaches the driver whichever instance holds their socket.
+  setDriverRidesNotifier((driverIds) => {
+    for (const id of driverIds) io.of('/driver').to(`driver:${id}`).emit('driver:rides_changed', {});
+  });
+  setDriverRentalsNotifier((driverId) => {
+    io.of('/driver').to(`driver:${driverId}`).emit('driver:rentals_changed', {});
+  });
 
   // Create Express app with io injected
   const app = createApp(io);
@@ -84,7 +92,10 @@ async function bootstrap(): Promise<void> {
   });
 
   // Graceful shutdown
+  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return; // a second SIGTERM/SIGINT must not restart the sequence
+    shuttingDown = true;
     logger.info({ signal }, 'Shutdown signal received');
 
     stopBroadcastSweeper();
@@ -117,11 +128,18 @@ async function bootstrap(): Promise<void> {
       }
     });
 
-    // Force shutdown after 10s
+    // close() waits for every open connection. nginx keeps idle keep-alive
+    // connections to the API, so close idle ones now and force the rest after
+    // 3s. Without this, shutdown hit the forced exit and skipped the flush.
+    httpServer.closeIdleConnections();
+    setTimeout(() => httpServer.closeAllConnections(), 3_000).unref();
+
+    // Safety net. docker-compose gives the api 20s (stop_grace_period) before
+    // SIGKILL, so this must stay below that.
     setTimeout(() => {
       logger.error('Forced shutdown after timeout');
       process.exit(1);
-    }, 10_000).unref();
+    }, 15_000).unref();
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -43,7 +43,18 @@ const STEPS = SMOKE ? [100] : (__ENV.DRIVER_STEPS || '500,1000,2000,3000,4000').
 const SUPERVISORS = parseInt(__ENV.SUPERVISORS || (SMOKE ? '10' : '50'), 10);
 const SOCKETS = parseInt(__ENV.SOCKETS || (SMOKE ? '20' : '500'), 10);
 
-const DRIVER_CYCLE_S = 8;  // fastest driver-screen poll interval
+// Driver app behaviour (driver-app-load-reduction): one GPS ping every 10 s
+// (on a ride; idle drivers ping every 30 s, so this is the heavy case). Polls
+// are the slow safety net: offers / rides / rentals x2 / issues / credits every
+// 30 s, scheduled and stats every 60 s. Each 10 s cycle sends the GPS ping and
+// each poll with probability 10 / interval, so per-driver rates match.
+// LEGACY_POLLING=1 restores the old 8 s polling for before/after comparison.
+const LEGACY = __ENV.LEGACY_POLLING === '1';
+const DRIVER_CYCLE_S = LEGACY ? 8 : 10;
+const POLL_EVERY_S = LEGACY
+  ? { offers: 8, rides: 8, scheduled: 8, rentals_available: 8, rentals_mine: 8, issues: 8, credits: 30, stats: 60 }
+  : { offers: 30, rides: 30, scheduled: 60, rentals_available: 30, rentals_mine: 30, issues: 30, credits: 30, stats: 60 };
+const BROADCAST_PROBE = __ENV.BROADCAST_PROBE === '1';
 const SUP_CYCLE_S = 15;    // live-ops / rides / rentals poll interval
 
 // Driver stages: each step = 1m ramp + 2m hold (smoke: 20s + 30s).
@@ -88,6 +99,20 @@ const scenarios = {
   },
 };
 
+// Broadcast latency probe: holds ONE socket as the first real driver and
+// measures, for every ride:broadcast it receives, receive time minus the
+// broadcast start (broadcast_expires_at - 60 s auction window). That driver
+// must be online and near the test ride's pickup to be offered it.
+if (BROADCAST_PROBE && realDrivers.length > 0) {
+  scenarios.broadcast_probe = {
+    executor: 'per-vu-iterations',
+    vus: 1,
+    iterations: 1,
+    maxDuration: `${totalSec + 60}s`,
+    exec: 'broadcastProbe',
+  };
+}
+
 if (SOCKETS > 0 && realDrivers.length + realSupervisors.length > 0) {
   scenarios.sockets = {
     executor: 'per-vu-iterations',
@@ -124,6 +149,7 @@ export const options = {
     'http_req_duration{name:sup_issues}': p95(1500),
     'http_req_duration{name:sup_payments}': p95(1500),
     rate_limited_429: ['count<1'],
+    ...(BROADCAST_PROBE ? { broadcast_latency_ms: ['p(95)<1000'] } : {}),
   },
 };
 
@@ -150,25 +176,32 @@ function record(responses) {
   });
 }
 
-// One driver's 8-second polling cycle. Fake ids only, so the GPS ping can
-// never move a real driver or mark one online.
+const DRIVER_POLLS = [
+  ['offers', '/api/driver/offers', 'drv_offers'],
+  ['rides', '/api/driver/rides', 'drv_rides'],
+  ['scheduled', '/api/driver/scheduled', 'drv_scheduled'],
+  ['rentals_available', '/api/driver/rentals/available', 'drv_rentals_available'],
+  ['rentals_mine', '/api/driver/rentals/mine', 'drv_rentals_mine'],
+  ['issues', '/api/issues', 'drv_issues'],
+  ['credits', '/api/driver/credits', 'drv_credits'],
+  ['stats', '/api/driver/stats', 'drv_stats'],
+];
+
+// One driver's DRIVER_CYCLE_S cycle. Fake ids only, so the GPS ping can never
+// move a real driver or mark one online.
 export function driverCycle() {
   const token = pick(fakeDrivers);
   const reqs = [
-    get('/api/driver/offers', 'drv_offers', token),
-    get('/api/driver/rides', 'drv_rides', token),
-    get('/api/driver/scheduled', 'drv_scheduled', token),
-    get('/api/driver/rentals/available', 'drv_rentals_available', token),
-    get('/api/driver/rentals/mine', 'drv_rentals_mine', token),
-    get('/api/issues', 'drv_issues', token),
     ['POST', `${BASE}/api/driver/location`,
       JSON.stringify({ lat: 12.9 + Math.random() * 0.2, lng: 77.5 + Math.random() * 0.2 }),
       { headers: auth(token), tags: { name: 'gps_ping' }, timeout: '20s' }],
   ];
-  if (Math.random() < DRIVER_CYCLE_S / 30) reqs.push(get('/api/driver/credits', 'drv_credits', token));
-  if (Math.random() < DRIVER_CYCLE_S / 60) reqs.push(get('/api/driver/stats', 'drv_stats', token));
+  for (const [key, path, name] of DRIVER_POLLS) {
+    if (Math.random() < DRIVER_CYCLE_S / POLL_EVERY_S[key]) reqs.push(get(path, name, token));
+  }
   record(http.batch(reqs));
 }
+
 
 // One supervisor console's 15-second cycle; the dashboard polls every 30s.
 export function supervisorCycle() {
@@ -189,6 +222,34 @@ export function supervisorCycle() {
 // hold for the whole test. Real ids only (the driver handshake checks the DB).
 // Like the real socket.io client, a dropped socket reconnects after a random
 // 1-5s delay, so an API restart shows how fast every client gets back.
+const broadcastLatency = new Trend('broadcast_latency_ms', true);
+const broadcastsSeen = new Counter('broadcasts_seen');
+
+export function broadcastProbe() {
+  const token = realDrivers[0];
+  const end = Date.now() + (totalSec - 15) * 1000;
+  while (Date.now() < end - 2000) {
+    ws.connect(`${WS_BASE}/socket.io/?EIO=4&transport=websocket`, {}, (s) => {
+      s.on('message', (msg) => {
+        if (msg === '2') { s.send('3'); return; }
+        if (msg.startsWith('0')) { s.send(`40/driver,${JSON.stringify({ token })}`); return; }
+        if (!msg.startsWith('42/driver,')) return;
+        let event;
+        let payload;
+        try { [event, payload] = JSON.parse(msg.slice('42/driver,'.length)); } catch (_) { return; }
+        if (event !== 'ride:broadcast' || !payload || !payload.broadcast_expires_at) return;
+        const startedAt = Date.parse(payload.broadcast_expires_at) - 60_000;
+        const ms = Date.now() - startedAt;
+        broadcastLatency.add(ms);
+        broadcastsSeen.add(1);
+        console.log(`ride:broadcast ${payload.id} received ${ms} ms after broadcast start`);
+      });
+      s.setTimeout(() => s.close(), Math.max(1000, end - Date.now()));
+    });
+    sleep(1 + Math.random() * 2);
+  }
+}
+
 const wsJoinTime = new Trend('ws_join_time', true);
 const wsJoined = new Rate('ws_joined');
 const wsReconnects = new Counter('ws_reconnects');

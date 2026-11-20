@@ -28,6 +28,18 @@ public class GoOfflineReceiver extends BroadcastReceiver {
         final PendingResult pending = goAsync();
         new Thread(() -> {
             RideApi.Result r = RideApi.goOffline(app);
+            // 409: the driver is mid-trip and the server refused. Stay online:
+            // keep the notification and native GPS running, and say why.
+            if (r == RideApi.Result.UNAVAILABLE) {
+                try {
+                    android.os.Handler h = new android.os.Handler(app.getMainLooper());
+                    h.post(() -> Toast.makeText(app,
+                            "Finish your current trip before going offline",
+                            Toast.LENGTH_LONG).show());
+                } catch (Exception ignored) { }
+                pending.finish();
+                return;
+            }
             // Stop the notification regardless — if the call failed (e.g. no
             // network), the driver clearly intends to be offline; the server
             // state reconciles on next app open. Avoids a stuck notification.

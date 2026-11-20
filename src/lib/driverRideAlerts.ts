@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { io, type Socket } from "socket.io-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { tokenStore } from "@/lib/api";
+import { setDriverSocketState } from "@/lib/driverSocketState";
 
 export interface DriverBroadcastPayload {
   id?: string;
@@ -33,8 +34,12 @@ export function alertDriverOfBroadcast(): void {
 }
 
 /**
- * One authenticated driver socket for the whole DriverShell. Polling remains
- * enabled as a reconciliation fallback for reconnects and missed events.
+ * One authenticated driver socket for the whole DriverShell.
+ *
+ * Ride broadcasts and data changes arrive here instantly, so the driver
+ * queries poll slowly (30-60 s) as a safety net. While the socket is down the
+ * offers list polls fast again (see driverSocketState.ts), and every
+ * (re)connect refetches everything so nothing missed while offline is lost.
  */
 export function useDriverBroadcastSocket(
   enabled: boolean,
@@ -45,11 +50,45 @@ export function useDriverBroadcastSocket(
   useEffect(() => {
     if (!enabled || !tokenStore.access) return undefined;
 
+    // Online but not yet connected: offers poll fast until the socket is up.
+    setDriverSocketState("disconnected");
+
     const socket: Socket = io("/driver", {
       auth: { token: tokenStore.access },
       transports: ["websocket", "polling"],
       autoConnect: true,
     });
+
+    // Fires on the first connect AND on every reconnect. Refetch offers at
+    // once and mark every other driver query stale, so a broadcast or change
+    // that happened while disconnected shows up immediately.
+    const handleConnect = () => {
+      setDriverSocketState("connected");
+      void queryClient.refetchQueries({ queryKey: ["driver", "offers"], type: "all" });
+      // Not ["driver","me"]: after a server restart the DB briefly shows the
+      // driver offline until their next GPS ping is flushed (up to 60 s).
+      // Refetching `me` now would flip the app offline and stop those pings.
+      void queryClient.invalidateQueries({
+        queryKey: ["driver"],
+        predicate: (q) => q.queryKey[1] !== "me",
+      });
+      void queryClient.invalidateQueries({ queryKey: ["driverSos"] });
+    };
+    const handleDisconnect = () => setDriverSocketState("disconnected");
+
+    // A ride was assigned / queued / promoted / cancelled for this driver.
+    const handleRidesChanged = () => {
+      void queryClient.refetchQueries({ queryKey: ["driver", "rides"], type: "all" });
+      void queryClient.refetchQueries({ queryKey: ["driver", "scheduled"], type: "all" });
+    };
+    // A rental this driver holds changed (e.g. the supervisor cancelled it).
+    const handleRentalsChanged = () => {
+      void queryClient.refetchQueries({ queryKey: ["driver", "rentals"], type: "all" });
+    };
+    // New SOS / issue chat message.
+    const handleIssueMessage = () => {
+      void queryClient.refetchQueries({ queryKey: ["driverSos"], type: "all" });
+    };
 
     const handleBroadcast = (payload: DriverBroadcastPayload) => {
       // The server persists the RideOffer before emitting. Force an IMMEDIATE
@@ -68,12 +107,26 @@ export function useDriverBroadcastSocket(
       void queryClient.refetchQueries({ queryKey: ["driver", "offers"], type: "all" });
     };
 
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleDisconnect);
     socket.on("ride:broadcast", handleBroadcast);
     socket.on("ride:dismiss", handleDismiss);
+    socket.on("driver:rides_changed", handleRidesChanged);
+    socket.on("driver:rentals_changed", handleRentalsChanged);
+    socket.on("issue:message", handleIssueMessage);
     return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleDisconnect);
       socket.off("ride:broadcast", handleBroadcast);
       socket.off("ride:dismiss", handleDismiss);
+      socket.off("driver:rides_changed", handleRidesChanged);
+      socket.off("driver:rentals_changed", handleRentalsChanged);
+      socket.off("issue:message", handleIssueMessage);
       socket.disconnect();
+      // Driver went offline (or the shell unmounted): no offers to receive.
+      setDriverSocketState("off");
     };
   }, [enabled, onBroadcast, queryClient]);
 }

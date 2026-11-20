@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, tokenStore } from "@/lib/api";
 import { getPoint, DROP } from "@/lib/geo";
 import { normalizeMobile } from "@/components/PhoneInput";
+import { offersPollInterval, useDriverSocketState, useDriverPoll } from "@/lib/driverSocketState";
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
@@ -755,12 +756,19 @@ export function useSetVendorDriverVehicle() {
 }
 
 export function useDriverOffers() {
+  // New rides arrive instantly over the socket (ride:broadcast) and by push;
+  // this poll is the safety net: 30 s while the socket is up, 8 s while an
+  // online driver's socket is down (see driverSocketState.ts).
+  const socketState = useDriverSocketState();
   return useQuery({
     queryKey: ["driver", "offers"],
     // `offers` is capped server-side (soonest-expiring first); `totalCount`
     // is the uncapped total, used to show "N available" on the Rides tab.
     queryFn: () => api<{ offers: RideRow[]; totalCount: number }>("/driver/offers"),
-    refetchInterval: 8_000,
+    // Offline drivers are never offered rides, so don't ask at all.
+    enabled: socketState !== "off",
+    refetchInterval: offersPollInterval(socketState),
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -768,7 +776,9 @@ export function useDriverRides() {
   return useQuery({
     queryKey: ["driver", "rides"],
     queryFn: () => api<Paginated<RideRow>>("/driver/rides"),
-    refetchInterval: 8_000,
+    // Safety net only: `driver:rides_changed` refetches this instantly.
+    // No polling at all while the driver is offline with no work in hand.
+    refetchInterval: useDriverPoll(30_000),
   });
 }
 
@@ -1078,7 +1088,8 @@ export function useScheduledRides() {
   return useQuery({
     queryKey: ["driver", "scheduled"],
     queryFn: () => api<{ scheduled: RideRow[] }>("/driver/scheduled"),
-    refetchInterval: 10_000,
+    // Claimable only 4h+ ahead; `driver:rides_changed` refetches on claim/release.
+    refetchInterval: useDriverPoll(60_000),
   });
 }
 
@@ -1178,7 +1189,8 @@ export function useDriverSosIssues() {
   return useQuery({
     queryKey: ["driverSos"],
     queryFn: () => api<{ issues: IssueRow[] }>("/issues"),
-    refetchInterval: 10_000,
+    // `issue:message` refetches this instantly.
+    refetchInterval: useDriverPoll(30_000),
   });
 }
 
@@ -2129,7 +2141,7 @@ export function useDriverCredits() {
   return useQuery({
     queryKey: ["driverCredits"],
     queryFn: () => api<{ available: number; packs: CreditPackView[] }>("/driver/credits"),
-    refetchInterval: 30_000,
+    refetchInterval: useDriverPoll(30_000),
   });
 }
 
@@ -2201,7 +2213,7 @@ export function useDriverStats() {
   return useQuery({
     queryKey: ["driver", "stats"],
     queryFn: () => api<DriverStats>("/driver/stats"),
-    refetchInterval: 60_000,
+    refetchInterval: useDriverPoll(60_000),
   });
 }
 
@@ -2481,7 +2493,7 @@ export function useDriverRentalsAvailable() {
   return useQuery({
     queryKey: ["driver", "rentals", "available"],
     queryFn: () => api<{ rentals: RentalRow[] }>("/driver/rentals/available"),
-    refetchInterval: 8_000,
+    refetchInterval: useDriverPoll(30_000),
     // Never serve a stale snapshot — a cancelled/claimed rental must drop off
     // the list, not linger from cache.
     staleTime: 0,
@@ -2494,7 +2506,8 @@ export function useDriverRentalsMine() {
   return useQuery({
     queryKey: ["driver", "rentals", "mine"],
     queryFn: () => api<{ rentals: RentalRow[] }>("/driver/rentals/mine"),
-    refetchInterval: 8_000,
+    // Own actions invalidate this; `driver:rentals_changed` covers a supervisor cancel.
+    refetchInterval: useDriverPoll(30_000),
     staleTime: 0,
     refetchOnWindowFocus: true,
     refetchOnMount: "always",
@@ -2534,7 +2547,7 @@ export function useDriverRentalHistory() {
   return useQuery({
     queryKey: ["driver", "rentals", "history"],
     queryFn: () => api<{ rentals: RentalHistoryRow[] }>("/driver/rentals/history"),
-    refetchInterval: 20_000,
+    refetchInterval: useDriverPoll(20_000),
   });
 }
 
@@ -2577,7 +2590,7 @@ export function useDriverTrips(range: TripRange) {
       rentals: RentalHistoryRow[];
       summary: { trips: number; earnings: number };
     }>(`/driver/trips?range=${range}`),
-    refetchInterval: 60_000,
+    refetchInterval: useDriverPoll(60_000),
   });
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, type IssueRow } from "@/lib/queries";
+import { useDriverMe, useDriverRides, useDriverSosIssues, useDriverOffers, useDriverRentalsMine, type IssueRow } from "@/lib/queries";
+import { setDriverBusy, rideKeepsDriverBusy } from "@/lib/driverSocketState";
 import { useDriverBroadcastSocket, type DriverBroadcastPayload } from "@/lib/driverRideAlerts";
 import { IncomingRideOverlay } from "./IncomingRideOverlay";
 import DriverHome from "./DriverHome";
@@ -44,9 +45,21 @@ function ShellInner() {
   const { data: ridesData } = useDriverRides();
   const { data: sosData }   = useDriverSosIssues();
   const { data: offersData } = useDriverOffers();
+  const { data: rentalsMine } = useDriverRentalsMine();
   const online = me?.isOnline ?? false;
-  const availableOffersCount = offersData?.totalCount ?? 0;
+  const availableOffersCount = online ? offersData?.totalCount ?? 0 : 0;
   const queryClient = useQueryClient();
+
+  // Offline with no work in hand = dormant: the app stops all background
+  // requests (see driverSocketState.ts). A ride in progress, one due within 2h,
+  // or a held rental keeps it live even if the driver went offline.
+  const busy =
+    (ridesData?.rides ?? []).some((r) => rideKeepsDriverBusy(r)) ||
+    (rentalsMine?.rentals ?? []).length > 0;
+  useEffect(() => {
+    setDriverBusy(busy);
+  }, [busy]);
+  useEffect(() => () => setDriverBusy(false), []);
 
   // Rapido-style live broadcast alert: vibration + sound + surface the offer.
   // Only active while the driver is Online. The hook itself refetches offers.

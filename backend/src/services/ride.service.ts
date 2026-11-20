@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
 import { invalidateDriverActiveRide } from '../lib/activeRideCache';
+import { cachedScheduledList, invalidateScheduledCache } from '../lib/scheduledCache';
 import { startRideBroadcast } from '../lib/broadcastSweeper';
 import { findNearbyDrivers, FINISHING_DISTANCE_KM } from './driver.service';
 import {
@@ -142,6 +143,7 @@ export async function createRide(
       });
       await createRidePax(scheduledId, input.employeeIds, input.scheduledPickupTimes);
     }
+    await invalidateScheduledCache();
     return { ride: { id: scheduledId, status: 'scheduled' }, nearbyCount: 0 };
   }
 
@@ -418,6 +420,7 @@ export async function cancelRide(
   });
   await redis.del(`ride:broadcast:${rideId}`);
   await invalidateDriverActiveRide(ride.driverId);
+  await invalidateScheduledCache();
   await afterQueuedPromotion(promotedRideId);
 
   // A driver who had accepted / been given this ride must be told it is off.
@@ -763,6 +766,7 @@ export async function claimScheduledRide(rideId: string, driverId: string): Prom
     `;
   });
   await invalidateDriverActiveRide(driverId);
+  await invalidateScheduledCache();
   logger.info({ rideId, driverId }, 'Scheduled ride claimed');
 }
 
@@ -790,6 +794,7 @@ export async function driverReleaseScheduledRide(
   `;
 
   await invalidateDriverActiveRide(driverId);
+  await invalidateScheduledCache();
   logger.info({ rideId, driverId }, 'Driver released scheduled ride');
 }
 
@@ -962,6 +967,7 @@ export async function manualAssignRide(
 
   await redis.del(`ride:broadcast:${rideId}`);
   await invalidateDriverActiveRide(driverId);
+  await invalidateScheduledCache();
 
   // Ensure per-passenger OTP legs exist (older rides may predate ride_pax).
   const paxCount = await prisma.ridePax.count({ where: { rideId } });
@@ -984,7 +990,13 @@ export async function manualAssignRide(
   );
 }
 
+// Cached for 10s per vehicle type (see lib/scheduledCache.ts). Dates come back
+// as ISO strings, which is what the route sends as JSON anyway.
 export async function listScheduledRidesForDriver(vehicleType?: string | null) {
+  return cachedScheduledList(vehicleType, () => buildScheduledRidesForDriver(vehicleType));
+}
+
+async function buildScheduledRidesForDriver(vehicleType?: string | null) {
   const cutoff = new Date(Date.now() + 4 * 60 * 60 * 1000); // claim window closes 4h before
   const where: Record<string, unknown> = { status: 'scheduled', scheduledFor: { gt: cutoff } };
   if (vehicleType) where.OR = [{ vehicleType: null }, { vehicleType }];
@@ -1074,6 +1086,8 @@ export async function sweepStaleScheduledRides(io?: IoServer): Promise<void> {
       logger.error({ err, rideId: r.id }, 'Failed to promote scheduled ride to broadcasting');
     }
   }
+
+  if (toPromote.length > 0) await invalidateScheduledCache();
 
   // 2) Expire truly-stale rides: unclaimed scheduled ones past their time, and
   //    claimed ones never started more than 1h after their time (driver no-show).
@@ -1448,5 +1462,6 @@ export async function deleteRide(
     prisma.ride.delete({ where: { id: rideId } }),
   ]);
 
+  if (ride.status === 'scheduled') await invalidateScheduledCache();
   logger.info({ rideId, by: requestor.role }, 'Ride deleted');
 }

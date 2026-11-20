@@ -67,15 +67,40 @@ export async function getDriverActiveRide(driverId: string): Promise<ActiveRide 
   return ride;
 }
 
-/** Drop the cached entry for one or more drivers. Safe to call with null/undefined. */
+/**
+ * Called with the drivers whose rides just changed. server.ts registers one
+ * that emits `driver:rides_changed` to each driver's socket, so the driver app
+ * refreshes at once instead of waiting for its (now slow) poll. Injected so this
+ * module stays free of Socket.IO.
+ */
+type DriverNotifier = (driverIds: string[]) => void;
+let ridesNotifier: DriverNotifier | null = null;
+
+export function setDriverRidesNotifier(fn: DriverNotifier | null): void {
+  ridesNotifier = fn;
+}
+
+/**
+ * Drop the cached entry for one or more drivers and tell their apps that their
+ * rides changed. Safe to call with null/undefined. Never throws.
+ */
 export async function invalidateDriverActiveRide(
   ...driverIds: Array<string | null | undefined>
 ): Promise<void> {
-  const keys = driverIds.filter((id): id is string => !!id).map((id) => `${KEY_PREFIX}${id}`);
-  if (keys.length === 0) return;
+  const ids = [...new Set(driverIds.filter((id): id is string => !!id))];
+  if (ids.length === 0) return;
+  const keys = ids.map((id) => `${KEY_PREFIX}${id}`);
   try {
     await redis.del(...keys);
   } catch (err) {
     logger.warn({ err, keys }, 'activeRideCache invalidate failed (TTL will expire it)');
+  }
+  if (ridesNotifier) {
+    try {
+      ridesNotifier(ids);
+    } catch (err) {
+      // The ride change has already committed; the app's poll reconciles.
+      logger.warn({ err, driverIds: ids }, 'driver rides notifier failed');
+    }
   }
 }

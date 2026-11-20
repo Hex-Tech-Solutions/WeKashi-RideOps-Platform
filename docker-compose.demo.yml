@@ -44,6 +44,9 @@ services:
   api:
     build: ./backend
     restart: unless-stopped
+    # Lets the API finish its graceful shutdown (final GPS flush) before
+    # Docker sends SIGKILL. Keep above the 15s forced exit in server.ts.
+    stop_grace_period: 20s
     env_file: .env.prod
     # FCM service-account key (push notifications). Put the JSON downloaded from
     # Firebase Console → Project Settings → Service accounts into ./secrets/ on

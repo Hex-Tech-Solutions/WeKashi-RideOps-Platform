@@ -676,6 +676,16 @@ export async function releaseRental(rentalId: string, driverId: string): Promise
   return { released: true };
 }
 
+// Called with a driver whose held rental changed (e.g. the supervisor cancelled
+// it). server.ts registers one that emits `driver:rentals_changed` to that
+// driver's socket, so the app drops the rental at once. Injected so this
+// service stays free of Socket.IO.
+let rentalsNotifier: ((driverId: string) => void) | null = null;
+
+export function setDriverRentalsNotifier(fn: ((driverId: string) => void) | null): void {
+  rentalsNotifier = fn;
+}
+
 // Supervisor cancels a rental entirely.
 export async function cancelRental(rentalId: string, supervisorId: string): Promise<void> {
   const rental = await prisma.rental.findUnique({
@@ -689,6 +699,11 @@ export async function cancelRental(rentalId: string, supervisorId: string): Prom
   // The driver who accepted or started it must be told it is off.
   if (rental.driverId && (rental.status === 'assigned' || rental.status === 'in_progress')) {
     void notifyRentalCancelled(rental.driverId, { pickupAddress: rental.pickupAddress, customerName: rental.customerName });
+    try {
+      rentalsNotifier?.(rental.driverId);
+    } catch (err) {
+      logger.warn({ err, rentalId }, 'driver rentals notifier failed');
+    }
   }
 }
 

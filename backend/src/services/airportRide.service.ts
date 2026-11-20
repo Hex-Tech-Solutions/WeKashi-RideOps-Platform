@@ -25,6 +25,7 @@ import { getRidePublicPayload } from './ride.service';
 import { consumeOneCredit } from './creditPack.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
 import { invalidateDriverActiveRide } from '../lib/activeRideCache';
+import { invalidateScheduledCache } from '../lib/scheduledCache';
 
 const gen4 = () => String(randomInt(1000, 10000));
 const BROADCAST_RADIUS_KM = 10;
@@ -144,6 +145,7 @@ export async function createAirportRide(
 
   if (scheduled) {
     logger.info({ rideId, supervisorId: input.supervisorId }, 'Airport ride scheduled');
+    await invalidateScheduledCache();
     return { ride: { id: rideId, status: 'scheduled' }, nearbyCount: 0 };
   }
 

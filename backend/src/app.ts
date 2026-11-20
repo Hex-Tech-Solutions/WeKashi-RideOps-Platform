@@ -2,6 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import { logger } from './lib/logger';
+import { httpLogLevel } from './lib/httpLogLevel';
 import authRouter from './routes/auth';
 import adminRouter from './routes/admin';
 import driverRouter, { createDriverRouter } from './routes/driver';
@@ -69,11 +70,8 @@ export function createApp(io: IoServer): express.Application {
     pinoHttp({
       logger,
       redact: ['req.headers.authorization'],
-      customLogLevel: (_req, res) => {
-        if (res.statusCode >= 500) return 'error';
-        if (res.statusCode >= 400) return 'warn';
-        return 'info';
-      },
+      // Hot driver routes are silent on success; errors and 4xx always log.
+      customLogLevel: (req, res, err) => httpLogLevel((req as { originalUrl?: string }).originalUrl ?? req.url ?? '', res.statusCode, err),
     }),
   );
 
