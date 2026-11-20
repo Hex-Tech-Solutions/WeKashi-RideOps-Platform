@@ -63,38 +63,29 @@ async function bootstrap(): Promise<void> {
   const app = createApp(io);
   httpServer.on('request', app);
 
-  // Background jobs (sweepers, reminders, GPS flush) must run in exactly ONE
-  // API process. With several processes they would each send every reminder
-  // and flush the same GPS buffer. docker-compose sets RUN_BACKGROUND_JOBS=0
-  // on the extra `api-extra` processes; the main `api` keeps the default.
-  const runJobs = process.env.RUN_BACKGROUND_JOBS !== '0';
-  if (runJobs) {
-    // Start broadcast sweeper
-    initBroadcastSweeper(io);
+  // Start broadcast sweeper
+  initBroadcastSweeper(io);
 
-    // Start KYC expiry sweeper
-    initKycSweeper();
+  // Start KYC expiry sweeper
+  initKycSweeper();
 
-    // Expire sign-up requests not approved within 7 days (frees phone + vehicle)
-    initSignupSweeper();
+  // Expire sign-up requests not approved within 7 days (frees phone + vehicle)
+  initSignupSweeper();
 
-    // Document expiry reminders (30/15/7/1 days + expired) — hourly (#13)
-    initDocExpirySweeper();
+  // Document expiry reminders (30/15/7/1 days + expired) — hourly (#13)
+  initDocExpirySweeper();
 
-    // Pack-expiry reminders (30/7/1 days before unused credits expire)
-    initPackExpirySweeper();
+  // Pack-expiry reminders (30/7/1 days before unused credits expire)
+  initPackExpirySweeper();
 
-    // Pickup reminders for scheduled rides / rentals a driver holds (24h, 2h, 45min)
-    initRideReminderSweeper();
+  // Pickup reminders for scheduled rides / rentals a driver holds (24h, 2h, 45min)
+  initRideReminderSweeper();
 
-    // Phase 2 face check: "face check due" pushes + 30-day selfie deletion (5 min)
-    initFaceCheckSweeper();
+  // Phase 2 face check: "face check due" pushes + 30-day selfie deletion (5 min)
+  initFaceCheckSweeper();
 
-    // Start location buffer flusher (bulk-writes GPS positions to DB every 60s)
-    startLocationFlusher();
-  } else {
-    logger.info('Background jobs disabled in this process (RUN_BACKGROUND_JOBS=0)');
-  }
+  // Start location buffer flusher (bulk-writes GPS positions to DB every 60s)
+  startLocationFlusher();
 
   httpServer.listen(PORT, () => {
     logger.info({ port: PORT, env: process.env.NODE_ENV }, 'RideOps API server started');
@@ -126,7 +117,7 @@ async function bootstrap(): Promise<void> {
     httpServer.close(async () => {
       try {
         // Final flush before shutdown — don't lose buffered positions
-        if (runJobs) await flushLocationBuffer();
+        await flushLocationBuffer();
         await prisma.$disconnect();
         redis.disconnect();
         logger.info('Graceful shutdown complete');

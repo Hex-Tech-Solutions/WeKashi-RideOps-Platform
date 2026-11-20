@@ -93,47 +93,6 @@ services:
       nofile: { soft: 65535, hard: 65535 }
     logging: { driver: json-file, options: { max-size: "20m", max-file: "5" } }
 
-  # Extra API processes on the same server, so the API uses more than one CPU
-  # core (load test, Nov 2026: one Node process saturated at ~1,300 drivers
-  # with the app open). Same code as `api`, but:
-  #   - no migrations (api runs them and must be healthy first)
-  #   - RUN_BACKGROUND_JOBS=0: sweepers, reminders and the GPS flush run only
-  #     in `api`, so nothing is sent or written twice
-  #   - nginx sends /api/* to api + both replicas; sockets stay on `api`
-  # Rate limits and caches live in Redis, so all processes share them.
-  api-extra:
-    build: ./backend
-    restart: unless-stopped
-    stop_grace_period: 20s
-    deploy:
-      replicas: 2
-    env_file: .env.prod
-    volumes:
-      - ./secrets:/app/secrets:ro
-      - uploads:/app/uploads
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connection_limit=25&pool_timeout=20
-      REDIS_URL: redis://redis:6379
-      NODE_ENV: production
-      PORT: "3000"
-      UV_THREADPOOL_SIZE: "8"
-      NODE_OPTIONS: "--max-old-space-size=1024"
-      RUN_BACKGROUND_JOBS: "0"
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    command: node dist/server.js
-    mem_limit: 1500m
-    ulimits:
-      nofile: { soft: 65535, hard: 65535 }
-    logging: { driver: json-file, options: { max-size: "20m", max-file: "5" } }
-
   web:
     build:
       context: .
@@ -142,8 +101,6 @@ services:
     restart: unless-stopped
     depends_on:
       api:
-        condition: service_healthy
-      api-extra:
         condition: service_healthy
     ports:
       - "127.0.0.1:8090:80"
