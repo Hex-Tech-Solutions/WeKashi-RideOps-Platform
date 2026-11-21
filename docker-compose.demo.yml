@@ -105,14 +105,18 @@ services:
     build: ./backend
     restart: unless-stopped
     stop_grace_period: 20s
+    # How many extra processes. 2 on a 4 vCPU server; on a bigger server set
+    # API_EXTRA_REPLICAS in .env.prod (about vCPUs - 2), up to 7 (see pool).
     deploy:
-      replicas: 2
+      replicas: ${API_EXTRA_REPLICAS:-2}
     env_file: .env.prod
     volumes:
       - ./secrets:/app/secrets:ro
       - uploads:/app/uploads
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connection_limit=25&pool_timeout=20
+      # 10 connections per extra process: api (25) + 7 extras (70) stays under
+      # Postgres max_connections=100. Load tests never had more than 2 busy.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connection_limit=10&pool_timeout=20
       REDIS_URL: redis://redis:6379
       NODE_ENV: production
       PORT: "3000"
