@@ -1,5 +1,10 @@
 import rateLimit from 'express-rate-limit';
 import { verifyAccessToken } from '../lib/jwt';
+import { RedisRateLimitStore } from '../lib/redisRateLimitStore';
+
+// Counts live in Redis so all API processes share them. If Redis is down,
+// requests pass rather than fail (passOnStoreError); the app needs Redis anyway.
+const shared = (name: string) => ({ store: new RedisRateLimitStore(`rl:${name}:`), passOnStoreError: true });
 
 // Key by authenticated user/driver id when a valid bearer token is present,
 // falling back to IP otherwise (covers login/register and any request with
@@ -39,6 +44,7 @@ export const globalRateLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: userOrIpKey,
   message: { error: 'Too many requests', code: 'TOO_MANY_REQUESTS' },
+  ...shared('global'),
 });
 
 export const authRateLimiter = rateLimit({
@@ -47,6 +53,7 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many auth requests', code: 'TOO_MANY_REQUESTS' },
+  ...shared('auth'),
 });
 
 export const otpRateLimiter = rateLimit({
@@ -59,6 +66,7 @@ export const otpRateLimiter = rateLimit({
     const body = req.body as { phone?: string };
     return body.phone ?? req.ip ?? 'unknown';
   },
+  ...shared('otp'),
 });
 
 // Rate limiter for file serving — prevents enumeration and DoS via disk I/O
@@ -68,6 +76,7 @@ export const fileRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many file requests', code: 'TOO_MANY_REQUESTS' },
+  ...shared('file'),
 });
 
 // Rate limiter for token refresh endpoint
@@ -77,4 +86,5 @@ export const refreshRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many refresh requests', code: 'TOO_MANY_REQUESTS' },
+  ...shared('refresh'),
 });
