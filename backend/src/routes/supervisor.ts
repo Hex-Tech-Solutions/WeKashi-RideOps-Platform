@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { zIndianMobile } from '../lib/identity';
 import { prisma } from '../lib/prisma';
+import { Prisma } from '@prisma/client';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
 import { NotFoundError, ForbiddenError } from '../types';
@@ -581,116 +582,78 @@ router.get('/dashboard', async (req: AuthRequest, res: Response, next: NextFunct
       prisma.ride.aggregate({ where: { supervisorId: supId, status: 'completed', completedAt: { gte: monthStart } }, _sum: { price: true } }),
     ]);
 
-    // ── OTD this month ────────────────────────────────────────────────────────
-    const completedWithTimestamps = await prisma.ride.findMany({
-      where: {
-        supervisorId: supId,
-        status: 'completed',
-        completedAt: { gte: monthStart },
-        plannedStartTime: { not: null },
-        startedAt: { not: null },
-      },
-      select: { plannedStartTime: true, startedAt: true },
-    });
-    const otdCount = completedWithTimestamps.filter(
-      (r) => r.startedAt! <= r.plannedStartTime!
-    ).length;
-    const otdPct = completedWithTimestamps.length
-      ? Math.round((otdCount / completedWithTimestamps.length) * 100)
-      : null;
+    // ── OTD, trends, delay causes, volume, coverage ──────────────────────────
+    // Counted by Postgres. These used to load every matching ride (some with
+    // all columns, coverage with every passenger) into Node on each 30 s poll,
+    // so the cost grew with ride history. Same results, a few rows each now.
+    // Day keys are UTC dates, as before (toISOString().slice(0, 10)).
+    const GRACE = Prisma.sql`interval '10 minutes'`; // 10 min default grace
+    const S = Prisma.sql`started_at::timestamptz`;
+    const P = Prisma.sql`planned_start_time::timestamptz`;
+    const D = Prisma.sql`driver_reporting_time::timestamptz`;
+    const timed = Prisma.sql`supervisor_id = ${supId} AND status = 'completed'
+      AND planned_start_time IS NOT NULL AND started_at IS NOT NULL`;
+    const vol14Since = new Date(now.getTime() - 14 * 86400_000);
 
-    // ── 30-day OTD trend (daily) ───────────────────────────────────────────────
-    const trend30 = await prisma.ride.findMany({
-      where: {
-        supervisorId: supId,
-        status: 'completed',
-        completedAt: { gte: day30Start },
-        plannedStartTime: { not: null },
-        startedAt: { not: null },
-      },
-      select: { completedAt: true, plannedStartTime: true, startedAt: true },
-    });
+    const [otdMonth, trendRows, delayRow, volRows, coverageRow] = await Promise.all([
+      prisma.$queryRaw<Array<{ total: number; on_time: number }>>`
+        SELECT count(*)::int AS total,
+               count(*) FILTER (WHERE ${S} <= ${P})::int AS on_time
+        FROM rides WHERE ${timed} AND completed_at >= ${monthStart}`,
+      prisma.$queryRaw<Array<{ d: string; total: number; on_time: number }>>`
+        SELECT to_char(completed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d,
+               count(*)::int AS total,
+               count(*) FILTER (WHERE ${S} <= ${P})::int AS on_time
+        FROM rides WHERE ${timed} AND completed_at >= ${day30Start}
+        GROUP BY 1 ORDER BY 1`,
+      prisma.$queryRaw<Array<{ early: number; on_time: number; employee: number; driver: number }>>`
+        SELECT
+          count(*) FILTER (WHERE ${S} < ${P})::int AS early,
+          count(*) FILTER (WHERE ${S} >= ${P} AND ${S} <= ${P} + ${GRACE})::int AS on_time,
+          count(*) FILTER (WHERE ${S} > ${P} + ${GRACE}
+            AND driver_reporting_time IS NOT NULL AND ${D} <= ${P} + ${GRACE})::int AS employee,
+          count(*) FILTER (WHERE ${S} > ${P} + ${GRACE}
+            AND (driver_reporting_time IS NULL OR ${D} > ${P} + ${GRACE}))::int AS driver
+        FROM rides WHERE ${timed} AND completed_at >= ${day30Start}`,
+      prisma.$queryRaw<Array<{ d: string; login: number; logout: number }>>`
+        SELECT to_char(created_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d,
+               count(*) FILTER (WHERE type::text = 'login')::int AS login,
+               count(*) FILTER (WHERE type::text <> 'login')::int AS logout
+        FROM rides
+        WHERE supervisor_id = ${supId} AND status <> 'cancelled' AND created_at >= ${vol14Since}
+        GROUP BY 1 ORDER BY 1`,
+      prisma.$queryRaw<Array<{ n: number }>>`
+        SELECT count(DISTINCT p.employee_id)::int AS n
+        FROM ride_pax p JOIN rides r ON r.id = p.ride_id
+        WHERE r.supervisor_id = ${supId} AND r.status = 'completed'
+          AND r.completed_at >= ${weekStart} AND p.no_show = false`,
+    ]);
 
-    // Group by date string
-    const trendMap: Record<string, { total: number; onTime: number }> = {};
-    for (const r of trend30) {
-      const d = r.completedAt!.toISOString().slice(0, 10);
-      if (!trendMap[d]) trendMap[d] = { total: 0, onTime: 0 };
-      trendMap[d].total++;
-      if (r.startedAt! <= r.plannedStartTime!) trendMap[d].onTime++;
-    }
-    const otdTrend = Object.entries(trendMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, v]) => ({
-        date,
-        otdPct: Math.round((v.onTime / v.total) * 100),
-        total: v.total,
-        onTime: v.onTime,
-      }));
+    const otdTotal = otdMonth[0]?.total ?? 0;
+    const otdPct = otdTotal ? Math.round(((otdMonth[0]?.on_time ?? 0) / otdTotal) * 100) : null;
 
-    // ── Delay cause breakdown (last 30 days) ──────────────────────────────────
-    const delayRides = await prisma.ride.findMany({
-      where: {
-        supervisorId: supId,
-        status: 'completed',
-        completedAt: { gte: day30Start },
-        plannedStartTime: { not: null },
-        startedAt: { not: null },
-      },
-    });
+    const otdTrend = trendRows.map((r) => ({
+      date: r.d,
+      otdPct: Math.round((r.on_time / r.total) * 100),
+      total: r.total,
+      onTime: r.on_time,
+    }));
 
-    const delayCounts = { early: 0, onTime: 0, employee: 0, driver: 0, noData: 0 };
-    const gracMs = 600_000; // 10 min default
-    for (const r of delayRides) {
-      const planned = r.plannedStartTime!;
-      const actual  = r.startedAt!;
-      const target  = new Date(planned.getTime() + gracMs);
-      const delayMs = actual.getTime() - planned.getTime();
-      if (delayMs < 0) { delayCounts.early++; continue; }
-      if (actual <= target) { delayCounts.onTime++; continue; }
-      // Over grace — attribute by driver reporting (arrival) time, not sign-in.
-      const driverReport = r.driverReportingTime;
-      if (driverReport && driverReport > target) {
-        delayCounts.driver++;          // cab arrived after target
-      } else if (driverReport) {
-        delayCounts.employee++;        // cab on time, boarding slipped
-      } else {
-        delayCounts.driver++;          // no arrival stamp → default to driver
-      }
-    }
+    const dr = delayRow[0];
+    const delayCounts = {
+      early: dr?.early ?? 0,
+      onTime: dr?.on_time ?? 0,
+      employee: dr?.employee ?? 0,
+      driver: dr?.driver ?? 0,
+      noData: 0,
+    };
 
-    // ── Ride volume by type per day (last 14 days) ────────────────────────────
-    const vol14 = await prisma.ride.findMany({
-      where: {
-        supervisorId: supId,
-        status: { not: 'cancelled' },
-        createdAt: { gte: new Date(now.getTime() - 14 * 86400_000) },
-      },
-      select: { createdAt: true, type: true },
-    });
-    const volMap: Record<string, { login: number; logout: number }> = {};
-    for (const r of vol14) {
-      const d = r.createdAt.toISOString().slice(0, 10);
-      if (!volMap[d]) volMap[d] = { login: 0, logout: 0 };
-      if (r.type === 'login') volMap[d].login++;
-      else volMap[d].logout++;
-    }
-    const volumeTrend = Object.entries(volMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, v]) => ({ date, ...v, total: v.login + v.logout }));
+    const volumeTrend = volRows.map((r) => ({ date: r.d, login: r.login, logout: r.logout, total: r.login + r.logout }));
 
-    // ── Employee coverage this week ───────────────────────────────────────────
-    const ridesThisWeekFull = await prisma.ride.findMany({
-      where: { supervisorId: supId, status: 'completed', completedAt: { gte: weekStart } },
-      include: { pax: { select: { employeeId: true, noShow: true } } },
-    });
-    const uniqueEmployeeIds = new Set(
-      ridesThisWeekFull.flatMap((r) => r.pax.filter((p) => !p.noShow).map((p) => p.employeeId))
-    );
+    const employeesCoveredThisWeek = coverageRow[0]?.n ?? 0;
     const coveragePct = totalEmployees
-      ? Math.round((uniqueEmployeeIds.size / totalEmployees) * 100)
+      ? Math.round((employeesCoveredThisWeek / totalEmployees) * 100)
       : 0;
-
     // ── Open issues list (top 5) ──────────────────────────────────────────────
     const recentIssues = await prisma.driverIssue.findMany({
       where: { supervisorId: supId, status: 'open' },
@@ -715,7 +678,7 @@ router.get('/dashboard', async (req: AuthRequest, res: Response, next: NextFunct
         otdPct,
         openIssues,
         sosThisMonth,
-        employeesCoveredThisWeek: uniqueEmployeeIds.size,
+        employeesCoveredThisWeek,
         coveragePct,
       },
       otdTrend,
