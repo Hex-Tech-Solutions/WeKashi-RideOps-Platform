@@ -4,25 +4,25 @@ import { Loader2 } from "lucide-react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { loadGoogleMaps } from "@/lib/googleMaps";
 import type { LiveDriver } from "@/lib/queries";
+// Same top-down car the supervisor booking map uses (GoogleRouteMap.tsx).
+import carTopUrl from "@/assets/car-top.png";
 
 const mapStyle: google.maps.MapTypeStyle[] = [
   { featureType: "poi", stylers: [{ visibility: "off" }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
 ];
 
-const ACTIVE_COLOR = "#D5B036";
-const OTHER_COLOR = "#6b7280";
+const CAR_ICON_SIZE = 34; // px, same as the supervisor booking map
+// Account not active: same car, faded.
+const INACTIVE_OPACITY = 0.45;
 
-const pinIcon = (g: typeof google, color: string): google.maps.Symbol => ({
-  path: g.maps.SymbolPath.CIRCLE,
-  scale: 7,
-  fillColor: color,
-  fillOpacity: 1,
-  strokeColor: "#fff",
-  strokeWeight: 2,
+const carIcon = (g: typeof google): google.maps.Icon => ({
+  url: carTopUrl,
+  scaledSize: new g.maps.Size(CAR_ICON_SIZE, CAR_ICON_SIZE),
+  anchor: new g.maps.Point(CAR_ICON_SIZE / 2, CAR_ICON_SIZE / 2),
 });
 
-interface Pin { marker: google.maps.Marker; lat: number; lng: number; color: string }
+interface Pin { marker: google.maps.Marker; lat: number; lng: number; active: boolean }
 
 // Real-time map of every online cab, driven by /drivers/live-locations.
 //
@@ -81,15 +81,16 @@ export function LiveCabMap({ drivers, height = 520 }: { drivers: LiveDriver[]; h
 
     for (const d of drivers) {
       seen.add(d.id);
-      const color = d.status === "active" ? ACTIVE_COLOR : OTHER_COLOR;
+      const active = d.status === "active";
       const pin = pins.get(d.id);
       if (!pin) {
         const marker = new g.maps.Marker({
           position: { lat: d.lat, lng: d.lng },
-          icon: pinIcon(g, color),
+          icon: carIcon(g),
+          opacity: active ? 1 : INACTIVE_OPACITY,
           title: `${d.fullName}${d.vehicleType ? ` · ${d.vehicleType}` : ""} · ${d.status}`,
         });
-        pins.set(d.id, { marker, lat: d.lat, lng: d.lng, color });
+        pins.set(d.id, { marker, lat: d.lat, lng: d.lng, active });
         added.push(marker);
         continue;
       }
@@ -99,10 +100,10 @@ export function LiveCabMap({ drivers, height = 520 }: { drivers: LiveDriver[]; h
         pin.lng = d.lng;
         changed = true;
       }
-      if (pin.color !== color) {
-        pin.marker.setIcon(pinIcon(g, color));
+      if (pin.active !== active) {
+        pin.marker.setOpacity(active ? 1 : INACTIVE_OPACITY);
         pin.marker.setTitle(`${d.fullName}${d.vehicleType ? ` · ${d.vehicleType}` : ""} · ${d.status}`);
-        pin.color = color;
+        pin.active = active;
       }
     }
 
@@ -139,8 +140,9 @@ export function LiveCabMap({ drivers, height = 520 }: { drivers: LiveDriver[]; h
       )}
       {ready && !error && (
         <div className="absolute bottom-3 left-3 bg-card/95 rounded-md px-3 py-2 text-xs flex items-center gap-3 border shadow-sm">
-          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-gold" /> Active</span>
-          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-muted-foreground" /> Online (other)</span>
+          <span className="flex items-center gap-1.5"><img src={carTopUrl} alt="" className="h-4 w-4" /> Active</span>
+          <span className="flex items-center gap-1.5"><img src={carTopUrl} alt="" className="h-4 w-4 opacity-50" /> Online (other)</span>
+          <span className="flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded-full bg-blue-600 text-[8px] text-white flex items-center justify-center">5</span> Group</span>
           <span className="text-muted-foreground">{drivers.length} cab{drivers.length === 1 ? "" : "s"} online</span>
         </div>
       )}
