@@ -45,6 +45,13 @@ async function bootstrap(): Promise<void> {
 
   // Create HTTP server
   const httpServer = http.createServer();
+  // nginx reuses idle connections to the API (upstream keepalive, 30s). Node's
+  // default keep-alive timeout is 5s: Node closed connections nginx still
+  // reused, nginx saw resets, marked the API process down, and with several
+  // processes returned "no live upstreams" 502s (load test, Nov 2026). Keep
+  // idle connections longer than nginx does, so nginx always closes first.
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.headersTimeout = 66_000; // must exceed keepAliveTimeout
 
   // Initialize Socket.io (must happen before app so io is available for routes)
   const io = initSockets(httpServer);
