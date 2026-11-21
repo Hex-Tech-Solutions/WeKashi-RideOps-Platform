@@ -4,7 +4,6 @@ import {
   offersPollInterval,
   setDriverSocketState,
   getDriverSocketState,
-  OFFERS_POLL_CONNECTED_MS,
   OFFERS_POLL_DISCONNECTED_MS,
   isDriverDormant,
   driverPollInterval,
@@ -30,7 +29,7 @@ describe("offersPollInterval", () => {
           expect(ms).toBe(OFFERS_POLL_DISCONNECTED_MS);
           expect(ms).toBeLessThanOrEqual(8_000);
         } else {
-          expect(ms).toBe(OFFERS_POLL_CONNECTED_MS);
+          expect(ms).toBe(false); // no timed poll: socket + FCM deliver offers
         }
       }),
       { numRuns: 300 },

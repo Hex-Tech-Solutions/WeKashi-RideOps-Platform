@@ -757,8 +757,8 @@ export function useSetVendorDriverVehicle() {
 
 export function useDriverOffers() {
   // New rides arrive instantly over the socket (ride:broadcast) and by push;
-  // this poll is the safety net: 30 s while the socket is up, 8 s while an
-  // online driver's socket is down (see driverSocketState.ts).
+  // no timed poll while the socket is up; 8 s while an online driver's socket
+  // is down (see driverSocketState.ts). Refetched on reconnect and app focus.
   const socketState = useDriverSocketState();
   return useQuery({
     queryKey: ["driver", "offers"],

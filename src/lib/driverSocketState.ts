@@ -15,7 +15,10 @@ import { useSyncExternalStore } from "react";
  */
 export type DriverSocketState = "off" | "connected" | "disconnected";
 
-export const OFFERS_POLL_CONNECTED_MS = 30_000;
+// While the socket is up there is no timed offers poll: a new ride arrives over
+// the socket and by FCM, and offers are refetched on (re)connect and when the
+// app comes to the front. A ride only lives 60 s, so a slow poll would rarely
+// catch a missed one anyway.
 export const OFFERS_POLL_DISCONNECTED_MS = 8_000;
 
 let state: DriverSocketState = "off";
@@ -92,7 +95,7 @@ export function useDriverSocketState(): DriverSocketState {
   return useSyncExternalStore(subscribe, getDriverSocketState, getDriverSocketState);
 }
 
-/** Offers poll interval: fast only while an online driver's socket is down. */
-export function offersPollInterval(s: DriverSocketState): number {
-  return s === "disconnected" ? OFFERS_POLL_DISCONNECTED_MS : OFFERS_POLL_CONNECTED_MS;
+/** Offers poll: every 8 s only while an online driver's socket is down; otherwise none. */
+export function offersPollInterval(s: DriverSocketState): number | false {
+  return s === "disconnected" ? OFFERS_POLL_DISCONNECTED_MS : false;
 }
