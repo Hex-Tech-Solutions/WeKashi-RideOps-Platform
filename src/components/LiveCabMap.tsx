@@ -1,6 +1,7 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { loadGoogleMaps } from "@/lib/googleMaps";
 import type { LiveDriver } from "@/lib/queries";
 
@@ -9,11 +10,35 @@ const mapStyle: google.maps.MapTypeStyle[] = [
   { featureType: "transit", stylers: [{ visibility: "off" }] },
 ];
 
+const ACTIVE_COLOR = "#D5B036";
+const OTHER_COLOR = "#6b7280";
+
+const pinIcon = (g: typeof google, color: string): google.maps.Symbol => ({
+  path: g.maps.SymbolPath.CIRCLE,
+  scale: 7,
+  fillColor: color,
+  fillOpacity: 1,
+  strokeColor: "#fff",
+  strokeWeight: 2,
+});
+
+interface Pin { marker: google.maps.Marker; lat: number; lng: number; color: string }
+
 // Real-time map of every online cab, driven by /drivers/live-locations.
+//
+// Built for thousands of cabs (load test, Nov 2026: the old version drew a
+// labelled pin per driver and restyled every one of them on each 10 s refresh;
+// with ~3,000 online the browser froze with "page not responding"):
+//   - nearby cabs are grouped into numbered bubbles that split as you zoom in
+//   - a pin is created once; later refreshes only move pins that actually moved
+//     and recolour pins whose status changed
+//   - the map zooms to fit the cabs once, then leaves the view to the admin
 export function LiveCabMap({ drivers, height = 520 }: { drivers: LiveDriver[]; height?: number }) {
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const clustererRef = useRef<MarkerClusterer | null>(null);
+  const pinsRef = useRef<Map<string, Pin>>(new Map());
+  const fittedRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,56 +48,80 @@ export function LiveCabMap({ drivers, height = 520 }: { drivers: LiveDriver[]; h
     loadGoogleMaps()
       .then((g) => {
         if (cancelled || !mapEl.current) return;
-        mapRef.current = new g.maps.Map(mapEl.current, {
+        const map = new g.maps.Map(mapEl.current, {
           center: { lat: 12.9716, lng: 77.5946 }, // Bangalore fallback
           zoom: 11,
           disableDefaultUI: true,
           zoomControl: true,
           styles: mapStyle,
         });
+        mapRef.current = map;
+        clustererRef.current = new MarkerClusterer({ map });
         setReady(true);
       })
       .catch((e) => setError(e.message));
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clustererRef.current?.clearMarkers();
+      clustererRef.current = null;
+      pinsRef.current.clear();
+    };
   }, []);
 
-  // Sync markers with the driver list.
+  // Sync pins with the driver list: add new, move/recolour changed, drop gone.
   useEffect(() => {
-    if (!ready || !mapRef.current) return;
-    const g = (window as any).google as typeof google;
     const map = mapRef.current;
+    const clusterer = clustererRef.current;
+    if (!ready || !map || !clusterer) return;
+    const g = (window as any).google as typeof google;
+    const pins = pinsRef.current;
     const seen = new Set<string>();
-    const bounds = new g.maps.LatLngBounds();
+    const added: google.maps.Marker[] = [];
+    let changed = false;
 
-    drivers.forEach((d) => {
+    for (const d of drivers) {
       seen.add(d.id);
-      const pos = { lat: d.lat, lng: d.lng };
-      bounds.extend(pos);
-      const color = d.status === "active" ? "#D5B036" : "#6b7280";
-      let marker = markersRef.current.get(d.id);
-      if (!marker) {
-        marker = new g.maps.Marker({ map, position: pos });
-        markersRef.current.set(d.id, marker);
+      const color = d.status === "active" ? ACTIVE_COLOR : OTHER_COLOR;
+      const pin = pins.get(d.id);
+      if (!pin) {
+        const marker = new g.maps.Marker({
+          position: { lat: d.lat, lng: d.lng },
+          icon: pinIcon(g, color),
+          title: `${d.fullName}${d.vehicleType ? ` · ${d.vehicleType}` : ""} · ${d.status}`,
+        });
+        pins.set(d.id, { marker, lat: d.lat, lng: d.lng, color });
+        added.push(marker);
+        continue;
       }
-      marker.setPosition(pos);
-      marker.setTitle(`${d.fullName}${d.vehicleType ? ` · ${d.vehicleType}` : ""} · ${d.status}`);
-      marker.setIcon({
-        path: g.maps.SymbolPath.CIRCLE,
-        scale: 9,
-        fillColor: color,
-        fillOpacity: 1,
-        strokeColor: "#fff",
-        strokeWeight: 2,
-      });
-      marker.setLabel({ text: "🚖", fontSize: "12px" });
+      if (pin.lat !== d.lat || pin.lng !== d.lng) {
+        pin.marker.setPosition({ lat: d.lat, lng: d.lng });
+        pin.lat = d.lat;
+        pin.lng = d.lng;
+        changed = true;
+      }
+      if (pin.color !== color) {
+        pin.marker.setIcon(pinIcon(g, color));
+        pin.marker.setTitle(`${d.fullName}${d.vehicleType ? ` · ${d.vehicleType}` : ""} · ${d.status}`);
+        pin.color = color;
+      }
+    }
+
+    const removed: google.maps.Marker[] = [];
+    pins.forEach((pin, id) => {
+      if (!seen.has(id)) { removed.push(pin.marker); pins.delete(id); }
     });
 
-    // Remove markers for drivers no longer online.
-    markersRef.current.forEach((marker, id) => {
-      if (!seen.has(id)) { marker.setMap(null); markersRef.current.delete(id); }
-    });
+    // Batch every change into one cluster redraw.
+    if (added.length) clusterer.addMarkers(added, true);
+    if (removed.length) clusterer.removeMarkers(removed, true);
+    if (added.length || removed.length || changed) clusterer.render();
 
-    if (drivers.length > 0) map.fitBounds(bounds, 80);
+    if (!fittedRef.current && drivers.length > 0) {
+      const bounds = new g.maps.LatLngBounds();
+      for (const d of drivers) bounds.extend({ lat: d.lat, lng: d.lng });
+      map.fitBounds(bounds, 80);
+      fittedRef.current = true;
+    }
   }, [ready, drivers]);
 
   return (

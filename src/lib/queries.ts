@@ -855,7 +855,7 @@ export function useLiveDriverLocations() {
   return useQuery({
     queryKey: ["liveDriverLocations"],
     queryFn: () => api<{ drivers: LiveDriver[] }>("/drivers/live-locations"),
-    refetchInterval: 10000,
+    refetchInterval: 30_000, // every online cab; a 30 s refresh is plenty for an overview map
   });
 }
 
