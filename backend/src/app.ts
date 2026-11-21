@@ -39,7 +39,11 @@ export function createApp(io: IoServer): express.Application {
   const app = express();
 
   // Trust proxy (for correct IP in rate-limiter when behind nginx/LB)
-  app.set('trust proxy', 1);
+  // Two proxies sit in front of the API: Caddy (TLS, on the host) and nginx
+  // (web container). With 1, req.ip was Docker's gateway for EVERY request, so
+  // per-IP rate limits (login, OTP, token refresh, files) were shared by all
+  // users combined. Caddy sets X-Forwarded-For itself, so clients can't spoof it.
+  app.set('trust proxy', 2);
 
   // ── Security headers via helmet ────────────────────────────────────────────
   app.use(helmet({

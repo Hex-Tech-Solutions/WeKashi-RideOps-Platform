@@ -49,7 +49,9 @@ export const globalRateLimiter = rateLimit({
 
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  // Per IP. Many phones share one IP on Indian mobile networks (carrier NAT).
+  // OTPs are also limited per phone number: 5 requests / 10 min, 5 tries per code.
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many auth requests', code: 'TOO_MANY_REQUESTS' },
@@ -72,7 +74,7 @@ export const otpRateLimiter = rateLimit({
 // Rate limiter for file serving — prevents enumeration and DoS via disk I/O
 export const fileRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 60,             // 60 file requests per minute per IP
+  max: 200,            // per IP; vendors reviewing documents open many files
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many file requests', code: 'TOO_MANY_REQUESTS' },
@@ -82,7 +84,9 @@ export const fileRateLimiter = rateLimit({
 // Rate limiter for token refresh endpoint
 export const refreshRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  // Every signed-in user refreshes once per access-token lifetime, and a refused
+  // refresh logs them out. Generous per IP (carrier NAT); needs a valid token.
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many refresh requests', code: 'TOO_MANY_REQUESTS' },
