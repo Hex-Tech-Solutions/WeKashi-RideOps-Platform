@@ -69,21 +69,27 @@ export default function DriverHome() {
   const myRentals = rentalsMine?.rentals ?? [];
 
   // Scheduled-ride timing gates: a claimed scheduled ride only surfaces as an
-  // ACTIVE ride 45 min before pickup (enough lead to navigate + confirm
-  // arrival), and can be STARTED from 40 min before. Before that it stays in
+  // ACTIVE ride 45 min before its FIRST PICKUP (enough lead to navigate + confirm
+  // arrival), and can be STARTED from the same moment. Before that it stays in
   // the Scheduled tab — the driver shouldn't confirm arrival hours early.
-  // A live-broadcast ride (no scheduledFor) is active immediately, as before.
+  // `pickupAt` is the first stop's pickup time; `scheduledFor` is only the login /
+  // shift time, which can be hours later, so it is the fallback (rides without a
+  // pickup time). A live-broadcast ride (no scheduledFor) is active immediately.
   // Both windows are equal so the ride is startable the moment it appears as
   // active — no dead zone where it's active but Start is disabled.
-  const ACTIVE_WINDOW_MS = 45 * 60 * 1000;       // 45 minutes before pickup
-  const START_WINDOW_MS = 45 * 60 * 1000;        // 45 minutes before pickup
+  const ACTIVE_WINDOW_MS = 45 * 60 * 1000;       // 45 minutes before the first pickup
+  const START_WINDOW_MS = 45 * 60 * 1000;        // 45 minutes before the first pickup
+  const firstPickupMs = (r: RideRow): number | null =>
+    r.scheduledFor ? new Date(r.pickupAt ?? r.scheduledFor).getTime() : null;
   const scheduledReady = (r: RideRow) => {
-    if (!r.scheduledFor) return true; // live ride — always active
-    return new Date(r.scheduledFor).getTime() - Date.now() <= ACTIVE_WINDOW_MS;
+    const t = firstPickupMs(r);
+    if (t == null) return true; // live ride — always active
+    return t - Date.now() <= ACTIVE_WINDOW_MS;
   };
   const canStartScheduled = (r: RideRow) => {
-    if (!r.scheduledFor) return true;
-    return new Date(r.scheduledFor).getTime() - Date.now() <= START_WINDOW_MS;
+    const t = firstPickupMs(r);
+    if (t == null) return true;
+    return t - Date.now() <= START_WINDOW_MS;
   };
 
   // The ACTIVE ride is the one the driver is serving now: assigned/in_progress
@@ -264,8 +270,8 @@ export default function DriverHome() {
   const isLogoutRide = (ride: RideRow) => ride.type === "logout";
 
   const canStartTrip = (ride: RideRow) => {
-    // Scheduled rides can't be started until 40 min before pickup, regardless
-    // of ride type.
+    // Scheduled rides can't be started until 45 min before the first pickup,
+    // regardless of ride type.
     if (!canStartScheduled(ride)) return false;
     if (!isLogoutRide(ride)) return true;
     // Must be at the office and have everyone accounted for before departing.
@@ -274,8 +280,8 @@ export default function DriverHome() {
 
   const startBlockedReason = (ride: RideRow) => {
     if (!canStartScheduled(ride) && ride.scheduledFor) {
-      const t = format(new Date(ride.scheduledFor), "EEE d MMM, HH:mm");
-      return `This scheduled ride starts near ${t}. You can begin it 40 minutes before pickup.`;
+      const t = format(new Date(ride.pickupAt ?? ride.scheduledFor), "EEE d MMM, HH:mm");
+      return `The first pickup of this scheduled ride is at ${t}. You can begin it 45 minutes before.`;
     }
     if (!arrivedRideIds.has(ride.id)) return "Confirm arrival at the office first.";
     return "Verify every employee's boarding OTP (or mark them no-show) before starting.";

@@ -209,17 +209,22 @@ export async function notifyRideCancelled(
 /** Reminder for a ride the driver claimed or was assigned. */
 export async function notifyRideReminder(
   driverId: string,
-  ride: { pickupAddress: string; scheduledFor: Date },
+  // scheduledFor = the time the driver must be at the FIRST PICKUP. For a group
+  // ride `loginAt` is the (later) login / shift time, shown for context.
+  ride: { pickupAddress: string; scheduledFor: Date; loginAt?: Date | null },
   minutesLeft: number,
   isRental = false,
 ): Promise<void> {
   const mins = Math.max(1, Math.round(minutesLeft));
   const inText = mins >= 120 ? `in about ${Math.round(mins / 60)} hours` : mins >= 60 ? 'in about an hour' : `in ${mins} minutes`;
+  const loginText = ride.loginAt
+    ? ` Login ${ride.loginAt.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })}.`
+    : '';
   await safely(driverId, 'ride_reminder', () => pushNotice(driverId, {
     kind: 'ride_reminder',
     screen: ride.scheduledFor.getTime() - Date.now() > ACTIVE_WINDOW_MS ? 'scheduled' : 'home',
-    title: `${isRental ? 'Rental' : 'Ride'} pickup ${inText}`,
-    body: `${formatIst(ride.scheduledFor)} · ${short(ride.pickupAddress, 80)}. `
+    title: `${isRental ? 'Rental pickup' : 'First pickup'} ${inText}`,
+    body: `${formatIst(ride.scheduledFor)} · ${short(ride.pickupAddress, 80)}.${loginText} `
       + (mins <= 45 ? 'You can start the trip now.' : 'Be ready on time.'),
   }));
 }

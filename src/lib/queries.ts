@@ -343,6 +343,12 @@ export interface RideRow {
   plannedStartTime?: string | null;
   /** First stop's supervisor-set pickup time (HH:MM) — shown on the offer card. */
   firstPickupTime?: string | null;
+  /**
+   * Real moment of the first pickup (ISO), for scheduled rides. `scheduledFor` is
+   * the login / shift time, which can be hours later. The driver app unlocks a
+   * claimed ride 45 minutes before THIS.
+   */
+  pickupAt?: string | null;
   claimedAt?: string | null;
   driverId: string | null;
   vendorId: string | null;

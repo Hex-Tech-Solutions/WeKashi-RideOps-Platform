@@ -18,6 +18,7 @@ import { createRidePax, sendPaxOtpSms } from './ridePax.service';
 import { spareCredits, consumeOneCredit } from './creditPack.service';
 import { assertDriverCanTakeRides, noExpiredDocSql } from '../lib/rideEligibility';
 import { assertFaceCheckValid } from './faceCheck.service';
+import { firstPickupAt } from '../lib/rideTiming';
 import { notifyRideAssigned, notifyRideCancelled } from './driverNotice.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
 import { emitDriverBroadcast } from '../lib/driverBroadcast';
@@ -1013,8 +1014,12 @@ async function buildScheduledRidesForDriver(vehicleType?: string | null) {
 
 // Attach `firstPickupTime` (HH:MM of the earliest stop that has a supervisor-set
 // pickup time) to each ride, so the driver sees the same shift + pickup times on
-// scheduled cards as on live broadcast offer cards.
-async function attachFirstPickupTimes<T extends { id: string }>(rides: T[]): Promise<(T & { firstPickupTime: string | null })[]> {
+// scheduled cards as on live broadcast offer cards. For a scheduled ride also
+// attach `pickupAt` (ISO): the real moment of the first pickup, which is what the
+// driver app counts "45 minutes before" from (scheduledFor is the shift time).
+async function attachFirstPickupTimes<T extends { id: string; scheduledFor?: Date | null; type?: string | null }>(
+  rides: T[],
+): Promise<(T & { firstPickupTime: string | null; pickupAt: string | null })[]> {
   if (rides.length === 0) return [];
   const ids = rides.map((r) => r.id);
   const firstPickups = await prisma.ridePax.findMany({
@@ -1026,7 +1031,11 @@ async function attachFirstPickupTimes<T extends { id: string }>(rides: T[]): Pro
   for (const p of firstPickups) {
     if (!byRide.has(p.rideId) && p.scheduledPickupTime) byRide.set(p.rideId, p.scheduledPickupTime);
   }
-  return rides.map((r) => ({ ...r, firstPickupTime: byRide.get(r.id) ?? null }));
+  return rides.map((r) => {
+    const firstPickupTime = byRide.get(r.id) ?? null;
+    const pickupAt = r.scheduledFor ? firstPickupAt(r.scheduledFor, r.type, firstPickupTime).toISOString() : null;
+    return { ...r, firstPickupTime, pickupAt };
+  });
 }
 
 // Expire stale scheduled rides: unclaimed ones past their time, and claimed
