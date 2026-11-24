@@ -187,7 +187,7 @@ export default function DriverBoarding({ rideId, onAllBoarded }: DriverBoardingP
             </Button>
 
             {activePax && (
-              <PaxNoShow rideId={rideId} pax={activePax} canConfirmArrival={false} onDone={close} />
+              <PaxNoShow rideId={rideId} pax={activePax} onDone={close} />
             )}
           </div>
         </DialogContent>

@@ -528,6 +528,12 @@ export function createRidesRouter(io: IoServer): Router {
   router.post('/:id/pax/:paxId/arrived', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       await confirmStopArrival(req.params.id, req.driver!.id, req.params.paxId);
+      // The first stop confirmed is the driver's reporting time (on-time reports);
+      // login rides no longer have a separate ride-level arrival slider.
+      await prisma.$executeRaw`
+        UPDATE rides SET driver_reporting_time = NOW()
+        WHERE id = ${req.params.id} AND driver_reporting_time IS NULL
+      `;
       res.json({ ok: true });
     } catch (err) {
       next(err);

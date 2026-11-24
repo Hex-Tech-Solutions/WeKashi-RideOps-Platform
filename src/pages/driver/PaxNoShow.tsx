@@ -6,26 +6,23 @@
  * and the employee's scheduled pickup) -> (3) driver types their own vehicle
  * number instead of an OTP to mark the no-show.
  *
- * For logout rides arrival is confirmed once for the whole office stop by the
- * "I've arrived" slider on the ride card, so no per-employee arrival button is
- * shown there (`canConfirmArrival` false).
+ * Arrival itself is confirmed by the slider (office slider for logout, one slider
+ * per stop for login), so this only renders once the employee has an arrival time.
  */
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { UserX, MapPin, Timer } from "lucide-react";
+import { UserX, Timer } from "lucide-react";
 import { toast } from "sonner";
-import { useMarkNoShow, useMarkPaxArrived, type RidePaxRow } from "@/lib/queries";
+import { useMarkNoShow, type RidePaxRow } from "@/lib/queries";
 
 export interface PaxNoShowProps {
   rideId: string;
   pax: RidePaxRow;
-  canConfirmArrival: boolean;
   onDone: () => void;
 }
 
-export default function PaxNoShow({ rideId, pax, canConfirmArrival, onDone }: PaxNoShowProps) {
-  const arrive = useMarkPaxArrived();
+export default function PaxNoShow({ rideId, pax, onDone }: PaxNoShowProps) {
   const noShow = useMarkNoShow();
   const [plate, setPlate] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -37,34 +34,8 @@ export default function PaxNoShow({ rideId, pax, canConfirmArrival, onDone }: Pa
     return () => clearInterval(t);
   }, [opensAt]);
 
-  if (!pax.arrivedAt) {
-    if (!canConfirmArrival) {
-      return (
-        <p className="text-[11px] text-muted-foreground text-center">
-          Confirm arrival with the slider first. No-show opens 5 minutes after.
-        </p>
-      );
-    }
-    return (
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full"
-        disabled={arrive.isPending}
-        onClick={() =>
-          arrive.mutate(
-            { rideId, paxId: pax.id },
-            {
-              onSuccess: () => toast.success("Arrival confirmed. No-show opens after 5 minutes."),
-              onError: (e: any) => toast.error(e?.message ?? "Could not confirm arrival"),
-            },
-          )
-        }
-      >
-        <MapPin className="h-3.5 w-3.5" /> I've arrived at this stop
-      </Button>
-    );
-  }
+  // Arrival is confirmed with the slider before this component is shown.
+  if (!pax.arrivedAt) return null;
 
   const msLeft = opensAt != null ? Math.max(0, opensAt - now) : 0;
   if (msLeft > 0) {

@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
 import ArrivedSlider from "./ArrivedSlider";
+import ActiveRideHeader from "./ActiveRideHeader";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
 import { OfferCountdown } from "./OfferCountdown";
 import { DriverEarningsCard } from "./DriverEarningsCard";
@@ -406,56 +407,72 @@ export default function DriverHome() {
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Active ride</div>
             <Card className="border-gold/50">
               <CardContent className="p-4 space-y-3">
-                <RideSummary ride={active} />
+                <ActiveRideHeader
+                  ride={active}
+                  firstPickupLabel={summaryTime(active.firstPickupTime)}
+                  details={<RideSummary ride={active} />}
+                  onCantTake={active.status === "assigned" ? () => { setCancelReason(""); setCancelOpen(true); } : undefined}
+                />
                 {active.status === "assigned" ? (
                   <div className="space-y-3">
-                    {/* Navigate to pickup — office for logout, first employee's
-                        home for login. Always rendered while the driver hasn't
-                        confirmed arrival: prefers exact PostGIS coords, falls
-                        back to the pickup address so the link never vanishes
-                        just because the ride-detail request hasn't resolved. */}
-                    {!arrivedRideIds.has(active.id) && (
-                      <a
-                        href={
-                          activeRideFull?.pickupLat != null && activeRideFull?.pickupLng != null
-                            ? mapsUrl(activeRideFull.pickupLat, activeRideFull.pickupLng)
-                            : mapsUrlForAddress(active.pickupAddress)
-                        }
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2.5 text-sm font-medium"
-                      >
-                        <Navigation className="h-4 w-4" />
-                        Navigate to pickup — open maps
-                      </a>
-                    )}
-                    {/* Arrived slider — shown until driver confirms */}
-                    {!arrivedRideIds.has(active.id) && (
-                      <ArrivedSlider
-                        isPending={markArrived.isPending}
-                        onArrived={() => {
-                          markArrived.mutate(active.id, {
-                            onSuccess: () => {
-                              setArrivedRideIds((s) => new Set(s).add(active.id));
-                              toast.success("Arrival confirmed — start collecting passengers");
-                            },
-                            onError: (e: any) => toast.error(e?.message ?? "Failed"),
-                          });
-                        }}
-                      />
-                    )}
-                    {arrivedRideIds.has(active.id) && (
-                      <div className="flex items-center justify-center gap-2 text-xs text-success py-1">
-                        <Check className="h-3.5 w-3.5" /> Arrival confirmed at pickup location
+                    {isLogoutRide(active) ? (
+                      /* LOGOUT: one pickup point (the office). Arrive, verify each
+                         employee's boarding OTP, then Start trip. */
+                      !arrivedRideIds.has(active.id) ? (
+                        <div className="space-y-2">
+                          <div className="text-sm font-semibold">Head to the office</div>
+                          <div className="text-xs text-muted-foreground">{active.pickupAddress}</div>
+                          <a
+                            href={
+                              activeRideFull?.pickupLat != null && activeRideFull?.pickupLng != null
+                                ? mapsUrl(activeRideFull.pickupLat, activeRideFull.pickupLng)
+                                : mapsUrlForAddress(active.pickupAddress)
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2.5 text-sm font-medium"
+                          >
+                            <Navigation className="h-4 w-4" />
+                            Navigate to office
+                          </a>
+                          <ArrivedSlider
+                            isPending={markArrived.isPending}
+                            label="Slide when you reach the office"
+                            note={null}
+                            onArrived={() => {
+                              markArrived.mutate(active.id, {
+                                onSuccess: () => {
+                                  setArrivedRideIds((s) => new Set(s).add(active.id));
+                                  toast.success("Arrival confirmed. Verify each employee's boarding OTP.");
+                                },
+                                onError: (e: any) => toast.error(e?.message ?? "Could not confirm arrival"),
+                              });
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <DriverBoarding rideId={active.id} onAllBoarded={setAllBoarded} />
+                      )
+                    ) : (
+                      /* LOGIN: start the trip, then every employee stop has its own
+                         arrival slider, OTP and no-show (DriverTrip). */
+                      <div className="space-y-2">
+                        <div className="text-sm font-semibold">Ready to go</div>
+                        <div className="text-xs text-muted-foreground">First pickup: {active.pickupAddress}</div>
+                        <a
+                          href={
+                            activeRideFull?.pickupLat != null && activeRideFull?.pickupLng != null
+                              ? mapsUrl(activeRideFull.pickupLat, activeRideFull.pickupLng)
+                              : mapsUrlForAddress(active.pickupAddress)
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2.5 text-sm font-medium"
+                        >
+                          <Navigation className="h-4 w-4" />
+                          Navigate to first pickup
+                        </a>
                       </div>
-                    )}
-
-                    {/* Logout rides: employees board together at the office, so
-                        boarding is verified HERE — before departure — not after
-                        Start trip. Only shown once the driver confirms arrival,
-                        since there's nobody to board until the cab is there. */}
-                    {isLogoutRide(active) && arrivedRideIds.has(active.id) && (
-                      <DriverBoarding rideId={active.id} onAllBoarded={setAllBoarded} />
                     )}
 
                     <Button
@@ -471,17 +488,6 @@ export default function DriverHome() {
                         {startBlockedReason(active)}
                       </p>
                     )}
-
-                    {/* Can't do this ride — hands it back so another driver can
-                        take it, rather than the driver simply not turning up. */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full text-muted-foreground hover:text-destructive"
-                      onClick={() => { setCancelReason(""); setCancelOpen(true); }}
-                    >
-                      <X className="h-3.5 w-3.5" /> Can't take this ride
-                    </Button>
                   </div>
                 ) : (
                   <>
