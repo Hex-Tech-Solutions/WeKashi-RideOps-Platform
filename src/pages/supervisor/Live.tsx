@@ -123,7 +123,7 @@ export default function Live() {
                   <div className="flex gap-2 items-center">
                     <Dialog>
                       <DialogTrigger asChild><Button variant="outline"><Route className="h-3.5 w-3.5" /> Trip &amp; OTPs</Button></DialogTrigger>
-                      <DialogContent><DialogHeader><DialogTitle>Trip progress</DialogTitle></DialogHeader><TripProgress rideId={r.id} type={r.type} /></DialogContent>
+                      <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden grid-cols-[minmax(0,1fr)] [&>*]:min-w-0"><DialogHeader><DialogTitle>Trip progress</DialogTitle></DialogHeader><TripProgress rideId={r.id} type={r.type} /></DialogContent>
                     </Dialog>
                     <Button onClick={() => setAssignRideId(r.id)} className="bg-gold text-gold-foreground hover:bg-gold/90 shadow-gold">Find &amp; assign driver</Button>
                     <Button
@@ -330,7 +330,7 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="w-full"><Route className="h-3.5 w-3.5" /> Trip &amp; OTPs</Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[85vh] overflow-y-auto">
+            <DialogContent className="max-h-[85vh] overflow-y-auto overflow-x-hidden grid-cols-[minmax(0,1fr)] [&>*]:min-w-0">
               <DialogHeader><DialogTitle>Trip progress</DialogTitle></DialogHeader>
               {/* Per-stop / total ETA — only meaningful once the trip has
                   actually started (in_progress). Same live tracker shown
