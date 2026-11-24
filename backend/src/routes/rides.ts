@@ -21,7 +21,7 @@ import {
   manualAssignRide,
   deleteRide,
 } from '../services/ride.service';
-import { getRidePax, verifyPickup, verifyDrop, markNoShow, verifyEscortDrop } from '../services/ridePax.service';
+import { getRidePax, verifyPickup, verifyDrop, markNoShow, confirmStopArrival, verifyEscortDrop } from '../services/ridePax.service';
 import { createAirportRide, verifyAirportPickup, verifyAirportDrop } from '../services/airportRide.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -315,6 +315,10 @@ export function createRidesRouter(io: IoServer): Router {
         res.status(400).json({ error: 'Ride is not active', code: 'VALIDATION_ERROR' });
         return;
       }
+      // Must be physically at the stop (within 150 m); also stamps the per-stop
+      // arrival time that starts the 5-minute no-show wait.
+      const { confirmStopArrival } = await import('../services/ridePax.service');
+      await confirmStopArrival(ride.id, req.driver!.id);
       await prisma.$executeRaw`
         UPDATE rides
         SET driver_reporting_time = NOW()
@@ -519,11 +523,25 @@ export function createRidesRouter(io: IoServer): Router {
     }
   });
 
-  // POST /rides/:id/pax/:paxId/no-show — mark passenger no-show
+  // POST /rides/:id/pax/:paxId/arrived — driver confirms arrival at this employee's
+  // stop (login: their home). Geofenced; starts the 5-minute no-show wait.
+  router.post('/:id/pax/:paxId/arrived', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await confirmStopArrival(req.params.id, req.driver!.id, req.params.paxId);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+  // POST /rides/:id/pax/:paxId/no-show — mark passenger no-show. The driver types
+  // their own vehicle number instead of an OTP, after arriving and waiting 5 min.
   router.post('/:id/pax/:paxId/no-show', requireRole('driver'), async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const result = await markNoShow(req.params.id, req.params.paxId, req.driver!.id);
+      const { vehicleNo } = z.object({ vehicleNo: z.string().min(4).max(20) }).parse(req.body);
+      const result = await markNoShow(req.params.id, req.params.paxId, req.driver!.id, vehicleNo);
       await notifyPax(req.params.id, 'pax:no_show');
+      const r = await getRide(req.params.id);
+      io.of('/supervisor').to(`supervisor:${r.supervisorId}`).emit('ride:pax_no_show', { rideId: req.params.id, paxId: req.params.paxId });
       res.json(result);
     } catch (err) {
       next(err);

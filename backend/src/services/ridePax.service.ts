@@ -7,6 +7,7 @@ import { randomInt } from 'crypto';
 import { consumeOneCredit } from './creditPack.service';
 import { promoteQueuedRide } from '../lib/ridePromotion';
 import { invalidateDriverActiveRide } from '../lib/activeRideCache';
+import { firstPickupAt } from '../lib/rideTiming';
 
 // Use crypto.randomInt for cryptographically secure OTPs
 const gen4 = () => String(randomInt(1000, 10000));
@@ -97,7 +98,7 @@ export async function getRidePax(rideId: string, opts: { includeOtp: boolean }) 
   const ride = await prisma.ride.findUnique({
     where: { id: rideId },
     select: {
-      type: true, escortRequired: true, escortName: true,
+      type: true, scheduledFor: true, escortRequired: true, escortName: true,
       escortOtp: true, escortDroppedAt: true,
     },
   });
@@ -107,9 +108,10 @@ export async function getRidePax(rideId: string, opts: { includeOtp: boolean }) 
     id: string; seq: number; name: string; gender: string | null; emp_phone: string | null; sup_phone: string | null;
     pickup_otp: string; drop_otp: string; scheduled_pickup_time: string | null;
     picked_at: Date | null; dropped_at: Date | null; no_show: boolean; lat: number; lng: number;
+    arrived_at: Date | null; no_show_at: Date | null;
   }>>`
     SELECT rp.id, rp.seq, e.name, e.gender, e.phone as emp_phone, u.phone as sup_phone,
-      rp.pickup_otp, rp.drop_otp, rp.scheduled_pickup_time, rp.picked_at, rp.dropped_at, rp.no_show,
+      rp.pickup_otp, rp.drop_otp, rp.scheduled_pickup_time, rp.picked_at, rp.dropped_at, rp.no_show, rp.arrived_at, rp.no_show_at,
       ST_Y(e.pickup_location::geometry) as lat,
       ST_X(e.pickup_location::geometry) as lng
     FROM ride_pax rp
@@ -145,6 +147,11 @@ export async function getRidePax(rideId: string, opts: { includeOtp: boolean }) 
         pickedAt: r.picked_at,
         droppedAt: r.dropped_at,
         noShow: r.no_show,
+        arrivedAt: r.arrived_at,
+        noShowAt: r.no_show_at,
+        // When the driver may mark this employee no-show (null until they have
+        // confirmed arrival at this stop).
+        noShowOpensAt: noShowOpensAt(r.arrived_at, ride.scheduledFor, ride.type, r.scheduled_pickup_time),
         ...(opts.includeOtp ? { pickupOtp: r.pickup_otp, dropOtp: r.drop_otp } : {}),
       };
     }),
@@ -281,10 +288,126 @@ export async function verifyDrop(rideId: string, paxId: string, otp: string, dri
   return { ok: true };
 }
 
-export async function markNoShow(rideId: string, paxId: string, driverId: string) {
-  await assertDriverRide(rideId, driverId);
-  await loadPax(rideId, paxId);
-  await prisma.ridePax.update({ where: { id: paxId }, data: { noShow: true } });
+// --- Stop arrival + no-show -------------------------------------------------
+export const NO_SHOW_WAIT_MS = 5 * 60_000;   // wait this long at the stop first
+export const ARRIVAL_RADIUS_M = 150;         // driver must be this close to confirm arrival
+const GPS_MAX_AGE_MS = 3 * 60_000;           // the driver's last GPS fix must be this fresh
+
+/**
+ * When the driver may mark an employee no-show: 5 minutes after the LATER of
+ * the driver's arrival at the stop and that employee's scheduled pickup time
+ * (arriving early does not start the clock early). Without a usable scheduled
+ * time (live rides) it is 5 minutes after arrival.
+ */
+export function noShowOpensAt(
+  arrivedAt: Date | null,
+  scheduledFor: Date | null,
+  type: string | null,
+  pickupHHMM: string | null,
+): Date | null {
+  if (!arrivedAt) return null;
+  const sched = scheduledFor && /^\d{2}:\d{2}$/.test(pickupHHMM ?? '')
+    ? firstPickupAt(scheduledFor, type, pickupHHMM)
+    : null;
+  const base = sched && sched.getTime() > arrivedAt.getTime() ? sched : arrivedAt;
+  return new Date(base.getTime() + NO_SHOW_WAIT_MS);
+}
+
+/** "KA 05-NM 5271" -> "KA05NM5271" */
+const normPlate = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Throws unless the driver's latest GPS fix is fresh and within the radius of (lat,lng). */
+async function assertDriverAt(driverId: string, lat: number, lng: number): Promise<void> {
+  const rows = await prisma.$queryRaw<Array<{ d: number | null; updated: Date | null }>>`
+    SELECT ST_Distance(current_location, ST_Point(${lng}, ${lat})::geography)::float8 AS d,
+           location_updated_at AS updated
+    FROM drivers WHERE id = ${driverId}
+  `;
+  const r = rows[0];
+  if (!r || r.d == null || !r.updated || Date.now() - new Date(r.updated).getTime() > GPS_MAX_AGE_MS) {
+    throw new ValidationError("We can't see your location right now. Check GPS is on, then try again.");
+  }
+  if (r.d > ARRIVAL_RADIUS_M) {
+    throw new ValidationError(
+      `You are about ${Math.round(r.d)} m from the pickup point. Get within ${ARRIVAL_RADIUS_M} m to confirm arrival.`,
+    );
+  }
+}
+
+/**
+ * The driver confirms arrival at a stop (must be within ARRIVAL_RADIUS_M).
+ *  - logout ride: the stop is the office; every employee still to board is stamped.
+ *  - login ride: the stop is that employee's home (`paxId`, or the next one still
+ *    to be picked up when omitted).
+ * Idempotent: an existing arrival time is never overwritten. Rides without
+ * passenger rows (airport, legacy) are not geofenced.
+ */
+export async function confirmStopArrival(rideId: string, driverId: string, paxId?: string): Promise<void> {
+  const ride = await assertDriverRide(rideId, driverId);
+  if (!['assigned', 'in_progress'].includes(ride.status)) throw new ValidationError('Ride is not active');
+  const pending = await prisma.ridePax.findMany({
+    where: { rideId, pickedAt: null, noShow: false },
+    orderBy: { seq: 'asc' },
+    select: { id: true, employeeId: true },
+  });
+  if (pending.length === 0) return;
+  let ids: string[];
+  let lat: number;
+  let lng: number;
+  if (ride.type === 'logout') {
+    const rows = await prisma.$queryRaw<Array<{ lat: number; lng: number }>>`
+      SELECT ST_Y(pickup_point::geometry) AS lat, ST_X(pickup_point::geometry) AS lng FROM rides WHERE id = ${rideId}
+    `;
+    if (!rows[0]) return;
+    ({ lat, lng } = rows[0]);
+    ids = pending.map((p) => p.id);
+  } else {
+    const target = paxId ? pending.find((p) => p.id === paxId) : pending[0];
+    if (!target) return;
+    const rows = await prisma.$queryRaw<Array<{ lat: number; lng: number }>>`
+      SELECT ST_Y(pickup_location::geometry) AS lat, ST_X(pickup_location::geometry) AS lng
+      FROM employees WHERE id = ${target.employeeId}
+    `;
+    if (!rows[0]) return;
+    ({ lat, lng } = rows[0]);
+    ids = [target.id];
+  }
+  await assertDriverAt(driverId, lat, lng);
+  await prisma.ridePax.updateMany({ where: { id: { in: ids }, arrivedAt: null }, data: { arrivedAt: new Date() } });
+}
+
+/**
+ * Mark an employee no-show. Instead of an OTP the driver types their own
+ * vehicle number, and only after confirming arrival at this stop and waiting
+ * out the 5 minutes (see noShowOpensAt).
+ */
+export async function markNoShow(rideId: string, paxId: string, driverId: string, vehicleNo: string) {
+  const ride = await assertDriverRide(rideId, driverId);
+  if (!['assigned', 'in_progress'].includes(ride.status)) throw new ValidationError('Ride is not active');
+  const pax = await loadPax(rideId, paxId);
+  if (pax.noShow) return { ok: true };
+  if (pax.pickedAt) throw new ValidationError('This passenger has already boarded');
+  if (!pax.arrivedAt) throw new ValidationError('Confirm your arrival at this stop first');
+  const opens = noShowOpensAt(pax.arrivedAt, ride.scheduledFor, ride.type, pax.scheduledPickupTime);
+  if (opens && Date.now() < opens.getTime()) {
+    const s = Math.ceil((opens.getTime() - Date.now()) / 1000);
+    throw new ValidationError(`No-show opens in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}. Keep waiting for the passenger.`);
+  }
+  const driver = await prisma.driver.findUnique({
+    where: { id: driverId },
+    select: { vehicle: { select: { regNo: true } } },
+  });
+  const plate = driver?.vehicle?.regNo;
+  if (!plate) throw new ValidationError('No vehicle is registered on your account');
+  // Same attempt cap as OTP entry: max 5 tries per passenger per hour.
+  const key = `pax:noshow:attempts:${paxId}`;
+  const attempts = await redis.incr(key);
+  if (attempts === 1) await redis.expire(key, 3600);
+  if (attempts > 5) throw new TooManyRequestsError('Too many attempts. Try again later.');
+  if (normPlate(vehicleNo) !== normPlate(plate)) throw new ValidationError('That is not your vehicle number');
+  await redis.del(key);
+  await prisma.ridePax.update({ where: { id: paxId }, data: { noShow: true, noShowAt: new Date() } });
+  logger.info({ rideId, paxId, driverId }, 'Passenger marked no-show');
   await maybeComplete(rideId);
   return { ok: true };
 }

@@ -8,7 +8,6 @@ import {
   useRidePax,
   useVerifyPickup,
   useVerifyDrop,
-  useMarkNoShow,
   useVerifyEscortDrop,
   mapsUrl,
   multiStopMapsUrl,
@@ -30,6 +29,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import PaxNoShow from "./PaxNoShow";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,6 @@ export default function DriverTrip({
   const { data, isLoading } = useRidePax(rideId);
   const verifyPickup = useVerifyPickup();
   const verifyDrop = useVerifyDrop();
-  const noShow = useMarkNoShow();
   const verifyEscortDrop = useVerifyEscortDrop();
   const [otp, setOtp] = useState("");
   const [escortOtpInput, setEscortOtpInput] = useState("");
@@ -184,7 +183,7 @@ export default function DriverTrip({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {/* Escort card — shown prominently at the top when escort is assigned */}
       {escortRequired && escortName && (
         <div className="rounded-lg border border-amber-400/60 bg-amber-50 p-3 flex items-center gap-3">
@@ -220,7 +219,7 @@ export default function DriverTrip({
           href={multiStopMapsUrl(navStops.map((p) => ({ lat: p.lat, lng: p.lng })))}
           target="_blank"
           rel="noreferrer"
-          className="flex items-center justify-center gap-2 w-full rounded-md border border-gold/50 bg-gold/5 text-gold-dark py-2 text-sm font-medium"
+          className="flex items-center justify-center gap-2 w-full rounded-md border border-gold/50 bg-gold/5 text-gold-dark py-1.5 text-xs font-medium"
         >
           <Route className="h-4 w-4" />
           Navigate full route ({navStops.length} stops)
@@ -301,7 +300,7 @@ export default function DriverTrip({
         /* Next stop — navigation only. The OTP entry lives in a dialog opened
            from the passenger list below, so this card stays short enough that
            "Complete trip" remains reachable without scrolling on a phone. */
-        <div className="rounded-lg border border-gold/50 bg-gold/5 p-3 space-y-2">
+        <div className="rounded-lg border border-gold/50 bg-gold/5 p-2.5 space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs uppercase tracking-wider text-gold-dark font-semibold flex items-center gap-1.5 min-w-0">
               {phase === "pickup" ? <LogIn className="h-3.5 w-3.5 shrink-0" /> : <LogOut className="h-3.5 w-3.5 shrink-0" />}
@@ -324,7 +323,7 @@ export default function DriverTrip({
               href={mapsUrl(current.lat, current.lng)}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2.5 text-sm font-medium"
+              className="flex items-center justify-center gap-2 w-full rounded-md bg-foreground text-background py-2 text-sm font-medium"
             >
               <Navigation className="h-4 w-4" />
               {phase === "pickup" ? "Go to pickup" : "Go to drop-off"} — open maps
@@ -420,25 +419,13 @@ export default function DriverTrip({
 
             {/* No-show only applies before boarding — a passenger already in the
                 cab cannot be marked as never having boarded. */}
-            {otpPaxPhase !== "awaiting_drop" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-muted-foreground"
-                disabled={noShow.isPending}
-                onClick={() => {
-                  if (!otpPax) return;
-                  noShow.mutate(
-                    { rideId, paxId: otpPax.id },
-                    {
-                      onSuccess: () => { toast(`${otpPax.name} marked no-show`); setOtpPaxId(null); setOtp(""); },
-                      onError: (e: any) => toast.error(e?.message ?? "Failed"),
-                    },
-                  );
-                }}
-              >
-                <UserX className="h-3.5 w-3.5" /> No-show (didn't board)
-              </Button>
+            {otpPax && otpPaxPhase !== "awaiting_drop" && (
+              <PaxNoShow
+                rideId={rideId}
+                pax={otpPax}
+                canConfirmArrival={isLogin}
+                onDone={() => { setOtpPaxId(null); setOtp(""); }}
+              />
             )}
           </div>
         </DialogContent>
@@ -451,26 +438,25 @@ export default function DriverTrip({
           space. For login rides the office IS a separate endpoint that appears
           nowhere else, so it stays. */}
       {isLogin && dropAddress && (
-        <div className="rounded-lg border border-foreground/20 bg-secondary p-3 space-y-2">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-            <MapPin className="h-3.5 w-3.5" />
-            Final destination — office
+        <div className="flex items-center gap-2 rounded-lg border border-foreground/20 bg-secondary px-3 py-2">
+          <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Final destination - office</div>
+            <div className="truncate text-xs font-medium">{dropAddress}</div>
           </div>
-          <div className="text-sm font-medium">{dropAddress}</div>
           {dropLat != null && dropLng != null && (
             <a
               href={mapsUrl(dropLat, dropLng)}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-center gap-2 w-full rounded-md border border-foreground/20 py-2 text-sm font-medium hover:bg-foreground/5 transition-colors"
+              aria-label="Navigate to destination"
+              className="shrink-0 rounded-md border border-foreground/20 p-2 hover:bg-foreground/5 transition-colors"
             >
               <Navigation className="h-4 w-4" />
-              Navigate to destination
             </a>
           )}
         </div>
-      )}
-    </div>
+      )}    </div>
   );
 }
 

@@ -24,9 +24,9 @@ import {
 import {
   useRidePax,
   useVerifyPickup,
-  useMarkNoShow,
   type RidePaxRow,
 } from "@/lib/queries";
+import PaxNoShow from "./PaxNoShow";
 import {
   Check, UserX, Loader2, Phone, LogIn, Shield, UserCheck, CheckCircle2, ChevronRight,
 } from "lucide-react";
@@ -41,7 +41,6 @@ export interface DriverBoardingProps {
 export default function DriverBoarding({ rideId, onAllBoarded }: DriverBoardingProps) {
   const { data, isLoading } = useRidePax(rideId);
   const verifyPickup = useVerifyPickup();
-  const noShow = useMarkNoShow();
   const [otp, setOtp] = useState("");
   const [openPaxId, setOpenPaxId] = useState<string | null>(null);
 
@@ -70,16 +69,6 @@ export default function DriverBoarding({ rideId, onAllBoarded }: DriverBoardingP
     );
   };
 
-  const markNoShow = () => {
-    if (!activePax) return;
-    noShow.mutate(
-      { rideId, paxId: activePax.id },
-      {
-        onSuccess: () => { toast(`${activePax.name} marked no-show`); close(); },
-        onError: (e: any) => toast.error(e?.message ?? "Failed"),
-      },
-    );
-  };
 
   if (isLoading) {
     return (
@@ -197,15 +186,9 @@ export default function DriverBoarding({ rideId, onAllBoarded }: DriverBoardingP
               <Check className="h-4 w-4" /> Verify
             </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full text-muted-foreground"
-              disabled={noShow.isPending}
-              onClick={markNoShow}
-            >
-              <UserX className="h-3.5 w-3.5" /> No-show (didn't board)
-            </Button>
+            {activePax && (
+              <PaxNoShow rideId={rideId} pax={activePax} canConfirmArrival={false} onDone={close} />
+            )}
           </div>
         </DialogContent>
       </Dialog>

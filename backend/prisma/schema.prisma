@@ -624,6 +624,8 @@ model RidePax {
   pickedAt            DateTime? @map("picked_at")
   droppedAt           DateTime? @map("dropped_at")
   noShow              Boolean   @default(false) @map("no_show")
+  arrivedAt          DateTime? @map("arrived_at") // driver confirmed at THIS stop (geofenced)
+  noShowAt           DateTime? @map("no_show_at") // when the driver marked it (vehicle-number entry)
 
   ride     Ride     @relation(fields: [rideId], references: [id])
   employee Employee @relation(fields: [employeeId], references: [id])

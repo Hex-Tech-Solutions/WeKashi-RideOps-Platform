@@ -916,6 +916,9 @@ export interface RidePaxRow {
   pickedAt: string | null;
   droppedAt: string | null;
   noShow: boolean;
+  arrivedAt?: string | null;
+  /** When no-show may be marked (ISO); null until arrival at this stop is confirmed. */
+  noShowOpensAt?: string | null;
   pickupOtp?: string;
   dropOtp?: string;
 }
@@ -1049,11 +1052,21 @@ export function useVerifyDrop() {
   });
 }
 
-export function useMarkNoShow() {
+/** Driver confirms arrival at one employee's stop (geofenced server-side). Starts the 5-minute no-show wait. */
+export function useMarkPaxArrived() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ rideId, paxId }: { rideId: string; paxId: string }) =>
-      api(`/rides/${rideId}/pax/${paxId}/no-show`, { method: "POST" }),
+      api(`/rides/${rideId}/pax/${paxId}/arrived`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ridepax"] }),
+  });
+}
+
+export function useMarkNoShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rideId, paxId, vehicleNo }: { rideId: string; paxId: string; vehicleNo: string }) =>
+      api(`/rides/${rideId}/pax/${paxId}/no-show`, { method: "POST", body: JSON.stringify({ vehicleNo }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ridepax"] }); qc.invalidateQueries({ queryKey: ["driver"] }); },
   });
 }
