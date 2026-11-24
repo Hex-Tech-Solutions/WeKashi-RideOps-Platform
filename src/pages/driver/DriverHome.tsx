@@ -18,6 +18,7 @@ import { DriverAirportRide } from "./DriverAirportRide";
 import { toast } from "sonner";
 import DriverTrip from "./DriverTrip";
 import DriverBoarding from "./DriverBoarding";
+import ArrivedSlider from "./ArrivedSlider";
 import { DriverOfferCard, type ApproachInfo } from "./DriverOfferCard";
 import { OfferCountdown } from "./OfferCountdown";
 import { DriverEarningsCard } from "./DriverEarningsCard";
@@ -680,7 +681,7 @@ export default function DriverHome() {
 // and — for logout rides with an escort — the escort's own return-drop OTP
 // is also verified. Mirrors the gate enforced server-side in maybeComplete().
 function completionBlockedReason(ride: RideRow) {
-  if (ride.type !== "login" && ride.escortRequired) {
+  if (ride.type === "logout" && ride.escortRequired) {
     return "Verify all drop OTPs, then the escort's return-drop OTP, to enable trip completion.";
   }
   return "Verify all drop OTPs to enable trip completion.";
@@ -775,66 +776,6 @@ function RideSummary({ ride }: { ride: RideRow }) {
             )}
           </span>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Arrived slider ───────────────────────────────────────────────────────────
-// The driver drags the thumb all the way right to confirm they're at the pickup.
-
-function ArrivedSlider({ onArrived, isPending }: { onArrived: () => void; isPending: boolean }) {
-  const [value, setValue] = useState(0);
-  const confirmed = value >= 95;
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = Number(e.target.value);
-    setValue(v);
-    if (v >= 95) {
-      onArrived();
-    }
-  };
-
-  // Reset if not yet confirmed and user releases thumb mid-way
-  const handleRelease = () => {
-    if (!confirmed) setValue(0);
-  };
-
-  return (
-    <div className={`rounded-lg border px-4 py-3 space-y-2 transition-colors ${confirmed ? "border-success/50 bg-success/5" : "border-gold/40 bg-gold/5"}`}>
-      <div className="flex items-center gap-2 text-xs font-semibold text-gold-dark">
-        <ChevronsRight className="h-3.5 w-3.5 animate-pulse" />
-        Slide to confirm arrival at pickup location
-      </div>
-      <div className="relative">
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={value}
-          disabled={isPending || confirmed}
-          onChange={handleChange}
-          onMouseUp={handleRelease}
-          onTouchEnd={handleRelease}
-          className="w-full h-10 appearance-none rounded-full cursor-pointer disabled:cursor-default"
-          style={{
-            background: `linear-gradient(to right, hsl(var(--gold)) ${value}%, hsl(var(--muted)) ${value}%)`,
-            WebkitAppearance: "none",
-          }}
-        />
-        {!confirmed && (
-          <span className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground pointer-events-none select-none">
-            {value < 10 ? "Slide right →" : value < 95 ? "Keep going →" : ""}
-          </span>
-        )}
-        {confirmed && (
-          <span className="absolute inset-0 flex items-center justify-center text-xs text-success font-semibold pointer-events-none select-none">
-            ✓ Arrived
-          </span>
-        )}
-      </div>
-      <div className="text-[10px] text-muted-foreground">
-        This stamps your reporting time for on-time delivery tracking.
       </div>
     </div>
   );

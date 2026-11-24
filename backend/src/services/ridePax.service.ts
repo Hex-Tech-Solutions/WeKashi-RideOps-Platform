@@ -264,6 +264,10 @@ export async function verifyEscortDrop(rideId: string, otp: string, driverId: st
 export async function verifyPickup(rideId: string, paxId: string, otp: string, driverId: string) {
   await assertDriverRide(rideId, driverId);
   const pax = await loadPax(rideId, paxId);
+  // A no-show is final for the driver: the boarding OTP no longer works. Only a
+  // supervisor can undo it (undoNoShow).
+  if (pax.noShow) throw new ValidationError('This employee was marked no-show. Ask your supervisor if this is a mistake.');
+  if (!pax.arrivedAt) throw new ValidationError('Confirm your arrival at this stop first');
   await checkPaxOtpRateLimit(paxId);
   if (pax.pickupOtp !== otp) throw new ValidationError('Incorrect pickup OTP');
   // Clear rate limit on success
@@ -279,7 +283,8 @@ export async function verifyDrop(rideId: string, paxId: string, otp: string, dri
   // A passenger must be verified boarded before they can be verified dropped.
   // This matters most for logout rides now that boarding at the office is
   // its own verified step (mirrors login's home-pickup requirement).
-  if (!pax.noShow && !pax.pickedAt) throw new ValidationError('Passenger has not boarded yet');
+  if (pax.noShow) throw new ValidationError('This employee was marked no-show and cannot be dropped.');
+  if (!pax.pickedAt) throw new ValidationError('Passenger has not boarded yet');
   await checkPaxOtpRateLimit(paxId);
   if (pax.dropOtp !== otp) throw new ValidationError('Incorrect drop OTP');
   await redis.del(`pax:otp:attempts:${paxId}`);
@@ -374,6 +379,26 @@ export async function confirmStopArrival(rideId: string, driverId: string, paxId
   }
   await assertDriverAt(driverId, lat, lng);
   await prisma.ridePax.updateMany({ where: { id: { in: ids }, arrivedAt: null }, data: { arrivedAt: new Date() } });
+}
+
+/**
+ * Supervisor (own ride) or admin reverses a driver's no-show, e.g. marked by
+ * mistake. Only while the ride is still open; a completed ride is final.
+ * The employee keeps their original OTPs and arrival time.
+ */
+export async function undoNoShow(rideId: string, paxId: string, userId: string, role: string) {
+  const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+  if (!ride) throw new NotFoundError('Ride not found');
+  if (role !== 'admin' && ride.supervisorId !== userId) throw new ForbiddenError('You can only change your own rides');
+  if (!['assigned', 'in_progress'].includes(ride.status)) {
+    throw new ValidationError('This ride is already finished, so the no-show can no longer be undone');
+  }
+  const pax = await loadPax(rideId, paxId);
+  if (!pax.noShow) throw new ValidationError('This employee is not marked no-show');
+  await prisma.ridePax.update({ where: { id: paxId }, data: { noShow: false, noShowAt: null } });
+  await redis.del(`pax:noshow:attempts:${paxId}`);
+  logger.info({ rideId, paxId, userId, role }, 'No-show undone');
+  return { ok: true };
 }
 
 /**

@@ -1052,6 +1052,16 @@ export function useVerifyDrop() {
   });
 }
 
+/** Supervisor/admin reverses a driver's no-show (only while the ride is still open). */
+export function useUndoNoShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rideId, paxId }: { rideId: string; paxId: string }) =>
+      api(`/rides/${rideId}/pax/${paxId}/undo-no-show`, { method: "POST" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ridepax"] }); qc.invalidateQueries({ queryKey: ["rides"] }); },
+  });
+}
+
 /** Driver confirms arrival at one employee's stop (geofenced server-side). Starts the 5-minute no-show wait. */
 export function useMarkPaxArrived() {
   const qc = useQueryClient();

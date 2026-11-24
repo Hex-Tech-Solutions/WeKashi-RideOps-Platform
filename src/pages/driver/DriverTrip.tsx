@@ -9,6 +9,7 @@ import {
   useVerifyPickup,
   useVerifyDrop,
   useVerifyEscortDrop,
+  useMarkPaxArrived,
   mapsUrl,
   multiStopMapsUrl,
   type RidePaxRow,
@@ -30,6 +31,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import PaxNoShow from "./PaxNoShow";
+import ArrivedSlider from "./ArrivedSlider";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -153,6 +155,17 @@ export default function DriverTrip({
   const otpPaxPhase = otpPax
     ? (isLogin ? getPaxPhase(otpPax) : getLogoutPhase(otpPax))
     : null;
+
+  const arrive = useMarkPaxArrived();
+  const needsArrival = !!otpPax && isLogin && otpPaxPhase === "awaiting_pickup" && !otpPax.arrivedAt;
+  const confirmArrival = (p: RidePaxRow) =>
+    arrive.mutate(
+      { rideId, paxId: p.id },
+      {
+        onSuccess: () => toast.success(`Arrival confirmed at ${p.name}'s pickup`),
+        onError: (e: any) => toast.error(e?.message ?? "Could not confirm arrival"),
+      },
+    );
 
   const submitOtp = () => {
     if (!otpPax) return;
@@ -329,6 +342,16 @@ export default function DriverTrip({
               {phase === "pickup" ? "Go to pickup" : "Go to drop-off"} — open maps
             </a>
           )}
+
+          {/* Every login stop has its own arrival slider. */}
+          {phase === "pickup" && isLogin && !current.arrivedAt && (
+            <ArrivedSlider
+              isPending={arrive.isPending}
+              onArrived={() => confirmArrival(current)}
+              label={`Slide to confirm arrival at ${current.name}'s pickup`}
+              note={null}
+            />
+          )}
         </div>
       ) : null}
 
@@ -400,26 +423,41 @@ export default function DriverTrip({
               </a>
             )}
 
-            <Input
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              placeholder={otpPaxPhase === "awaiting_drop" ? "Drop OTP" : isLogin ? "Pickup OTP" : "Boarding OTP"}
-              inputMode="numeric"
-              autoFocus
-              className="tracking-[0.3em] text-center text-lg"
-            />
+            {/* Login pickups: the driver must slide to confirm arrival at THIS
+                stop before the OTP or the no-show option is available. */}
+            {needsArrival && otpPax && (
+              <ArrivedSlider
+                isPending={arrive.isPending}
+                onArrived={() => confirmArrival(otpPax)}
+                label={`Slide to confirm arrival at ${otpPax.name}'s pickup`}
+                note={null}
+              />
+            )}
 
-            <Button
-              className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
-              disabled={verifyPickup.isPending || verifyDrop.isPending}
-              onClick={submitOtp}
-            >
-              <Check className="h-4 w-4" /> Verify
-            </Button>
+            {!needsArrival && (
+              <>
+                <Input
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder={otpPaxPhase === "awaiting_drop" ? "Drop OTP" : isLogin ? "Pickup OTP" : "Boarding OTP"}
+                  inputMode="numeric"
+                  autoFocus
+                  className="tracking-[0.3em] text-center text-lg"
+                />
 
-            {/* No-show only applies before boarding — a passenger already in the
-                cab cannot be marked as never having boarded. */}
-            {otpPax && otpPaxPhase !== "awaiting_drop" && (
+                <Button
+                  className="w-full bg-gold text-gold-foreground hover:bg-gold/90"
+                  disabled={verifyPickup.isPending || verifyDrop.isPending}
+                  onClick={submitOtp}
+                >
+                  <Check className="h-4 w-4" /> Verify
+                </Button>
+              </>
+            )}
+
+            {/* No-show only applies before boarding, and only once the driver has
+                arrived and waited out the 5 minutes (PaxNoShow). */}
+            {otpPax && !needsArrival && otpPaxPhase !== "awaiting_drop" && (
               <PaxNoShow
                 rideId={rideId}
                 pax={otpPax}

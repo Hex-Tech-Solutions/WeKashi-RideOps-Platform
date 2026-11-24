@@ -1,5 +1,7 @@
 import { Badge } from "@/components/ui/badge";
-import { useRidePax, useAirportRides } from "@/lib/queries";
+import { useRidePax, useAirportRides, useUndoNoShow } from "@/lib/queries";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { Loader2, LogIn, LogOut, Shield, UserCheck, KeyRound, Phone } from "lucide-react";
 
 // Live per-passenger trip status shown to supervisors/admins.
@@ -63,6 +65,7 @@ function AirportTripProgress({ rideId }: { rideId: string }) {
 
 function PaxTripProgress({ rideId, type }: { rideId: string; type: string }) {
   const { data, isLoading } = useRidePax(rideId);
+  const undoNoShow = useUndoNoShow();
   const isLogin = type !== "logout";
   const pax = data?.pax ?? [];
 
@@ -138,9 +141,23 @@ function PaxTripProgress({ rideId, type }: { rideId: string; type: string }) {
                 {p.seq + 1}. {p.name}
               </span>
               {p.noShow && (
-                <Badge variant="outline" className="border-destructive/40 text-destructive text-[10px] py-0">
-                  no-show
-                </Badge>
+                <span className="flex items-center gap-1.5">
+                  <Badge variant="outline" className="border-destructive/40 text-destructive text-[10px] py-0">
+                    no-show
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[10px]"
+                    disabled={undoNoShow.isPending}
+                    onClick={() => undoNoShow.mutate({ rideId, paxId: p.id }, {
+                      onSuccess: () => toast.success(`${p.name}: no-show undone`),
+                      onError: (e: any) => toast.error(e?.message ?? "Could not undo"),
+                    })}
+                  >
+                    Undo
+                  </Button>
+                </span>
               )}
               {!p.noShow && p.droppedAt && (
                 <Badge variant="outline" className="border-success/40 text-success text-[10px] py-0">

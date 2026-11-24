@@ -499,7 +499,9 @@ export async function advanceRideStatus(
     if (blockers > 0) {
       throw new ValidationError('All passengers must be dropped (or marked no-show) before completing the ride');
     }
-    if (ride.escortRequired && !ride.escortDroppedAt) {
+    // Escort return-drop exists on LOGOUT rides only. On a login ride the escort
+    // simply rides to the office with the employees, so there is nothing to verify.
+    if (ride.type === 'logout' && ride.escortRequired && !ride.escortDroppedAt) {
       throw new ValidationError('Verify the escort drop-off before completing the ride');
     }
   }

@@ -21,7 +21,7 @@ import {
   manualAssignRide,
   deleteRide,
 } from '../services/ride.service';
-import { getRidePax, verifyPickup, verifyDrop, markNoShow, confirmStopArrival, verifyEscortDrop } from '../services/ridePax.service';
+import { getRidePax, verifyPickup, verifyDrop, markNoShow, undoNoShow, confirmStopArrival, verifyEscortDrop } from '../services/ridePax.service';
 import { createAirportRide, verifyAirportPickup, verifyAirportDrop } from '../services/airportRide.service';
 import { authenticate } from '../middleware/authenticate';
 import { requireRole } from '../middleware/requireRole';
@@ -529,6 +529,16 @@ export function createRidesRouter(io: IoServer): Router {
     try {
       await confirmStopArrival(req.params.id, req.driver!.id, req.params.paxId);
       res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+  // POST /rides/:id/pax/:paxId/undo-no-show — supervisor/admin reverses a no-show
+  router.post('/:id/pax/:paxId/undo-no-show', requireRole('supervisor', 'admin'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const result = await undoNoShow(req.params.id, req.params.paxId, req.user!.id, req.user!.role);
+      await notifyPax(req.params.id, 'pax:no_show_undone');
+      res.json(result);
     } catch (err) {
       next(err);
     }
