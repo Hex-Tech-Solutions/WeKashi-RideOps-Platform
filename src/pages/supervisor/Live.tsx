@@ -47,7 +47,7 @@ export default function Live() {
   const isExpiredBroadcast = (r: RideRow) =>
     r.status === "broadcasting" &&
     (!r.broadcastExpiresAt || new Date(r.broadcastExpiresAt).getTime() <= Date.now());
-  const liveList = rides.filter((r) => ["broadcasting", "assigned", "in_progress"].includes(r.status) && !r.scheduledFor && !isExpiredBroadcast(r));
+  const liveList = rides.filter((r) => (r.status === "in_progress" || (["broadcasting", "assigned"].includes(r.status) && !r.scheduledFor)) && !isExpiredBroadcast(r));
   const scheduledList = rides.filter((r) => (r.status === "scheduled" && !schedOverdue(r)) || (r.status === "assigned" && !!r.scheduledFor));
   const attentionList = rides.filter((r) => ["expired", "cancelled", "pending"].includes(r.status) || schedOverdue(r) || isExpiredBroadcast(r));
   const completedList = rides.filter((r) => r.status === "completed");
@@ -292,8 +292,8 @@ function RideCard({ ride, onCancel, showDetailHint }: { ride: RideRow; onCancel?
           <div className="p-3 rounded-md border-2 border-dashed text-center text-xs text-muted-foreground">Awaiting driver…</div>
         )}
 
-        {/* Driver approach badge — assigned but not started */}
-        {ride.status === "assigned" && ride.driver && (
+        {/* Driver approach badge (not for scheduled rides until started) — assigned but not started */}
+        {ride.status === "assigned" && ride.driver && !ride.scheduledFor && (
           <div className="rounded-lg border border-gold/20 bg-gold/5 px-3 py-2">
             <DriverApproachBadge rideId={ride.id} />
           </div>

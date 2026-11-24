@@ -320,6 +320,12 @@ export function createRidesRouter(io: IoServer): Router {
         SET driver_reporting_time = NOW()
         WHERE id = ${req.params.id} AND driver_reporting_time IS NULL
       `;
+      // Scheduled LOGOUT rides: boarding OTPs are verified before Start, so the
+      // employees must receive them on arrival (login rides: at Start).
+      if (ride.scheduledFor && ride.type === 'logout') {
+        const { sendPaxOtpSms } = await import('../services/ridePax.service');
+        await sendPaxOtpSms(ride.id, { atTrigger: true });
+      }
       res.json({ ok: true, driverReportingTime: new Date() });
     } catch (err) {
       next(err);

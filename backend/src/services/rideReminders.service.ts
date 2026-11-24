@@ -1,8 +1,8 @@
 /**
  * Pickup reminders for rides and rentals a driver has claimed / been given.
  *
- * A driver gets a push 24 hours, 2 hours and 45 minutes before the FIRST PICKUP
- * (45 min is when the ride becomes their active ride and can be started). For a
+ * A driver gets a push 24 hours, 2 hours and 60 minutes before the FIRST PICKUP
+ * (60 min is when the ride becomes their active ride and can be started). For a
  * group ride that is the first stop's pickup time, NOT the login / shift time,
  * which can be hours later (see lib/rideTiming.ts). Each step is sent once per
  * driver + ride (driver_notice_log), and a step is skipped if the ride was
@@ -17,7 +17,7 @@ import { notifyRideReminder } from './driverNotice.service';
 import { firstPickupAt } from '../lib/rideTiming';
 
 /** Minutes before pickup, largest first. */
-export const REMINDER_MINUTES = [1440, 120, 45] as const;
+export const REMINDER_MINUTES = [1440, 120, 60] as const;
 const MS_MIN = 60 * 1000;
 
 /**

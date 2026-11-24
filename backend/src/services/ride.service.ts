@@ -525,6 +525,9 @@ export async function advanceRideStatus(
     data: updateData,
   });
   await invalidateDriverActiveRide(ride.driverId);
+  // Scheduled rides: employees get their OTP SMS when the driver starts the trip
+  // (logout rides already got it on arrival; the once-only guard skips those).
+  if (newStatus === 'in_progress' && ride.scheduledFor) await sendPaxOtpSms(rideId, { atTrigger: true });
 
   return { id: updated.id, status: updated.status, promotedRideId: null };
 }
@@ -1016,7 +1019,7 @@ async function buildScheduledRidesForDriver(vehicleType?: string | null) {
 // pickup time) to each ride, so the driver sees the same shift + pickup times on
 // scheduled cards as on live broadcast offer cards. For a scheduled ride also
 // attach `pickupAt` (ISO): the real moment of the first pickup, which is what the
-// driver app counts "45 minutes before" from (scheduledFor is the shift time).
+// driver app counts "60 minutes before" from (scheduledFor is the shift time).
 async function attachFirstPickupTimes<T extends { id: string; scheduledFor?: Date | null; type?: string | null }>(
   rides: T[],
 ): Promise<(T & { firstPickupTime: string | null; pickupAt: string | null })[]> {

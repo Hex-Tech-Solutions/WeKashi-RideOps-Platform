@@ -12,13 +12,13 @@ describe('ride pickup reminders', () => {
     expect(reminderToSend(PICKUP, longAgo, at(1500))).toBeNull();
   });
 
-  it('picks the tightest step reached: 24h, then 2h, then 45 min', () => {
+  it('picks the tightest step reached: 24h, then 2h, then 60 min', () => {
     expect(reminderToSend(PICKUP, longAgo, at(1440))?.step).toBe(1440);
     expect(reminderToSend(PICKUP, longAgo, at(600))?.step).toBe(1440);
     expect(reminderToSend(PICKUP, longAgo, at(120))?.step).toBe(120);
     expect(reminderToSend(PICKUP, longAgo, at(90))?.step).toBe(120);
-    expect(reminderToSend(PICKUP, longAgo, at(45))?.step).toBe(45);
-    expect(reminderToSend(PICKUP, longAgo, at(5))?.step).toBe(45);
+    expect(reminderToSend(PICKUP, longAgo, at(60))?.step).toBe(60);
+    expect(reminderToSend(PICKUP, longAgo, at(5))?.step).toBe(60);
   });
 
   it('reports the real minutes left for the message', () => {
@@ -33,10 +33,10 @@ describe('ride pickup reminders', () => {
   it('skips a step whose moment was before the ride was assigned', () => {
     const assigned = at(100); // claimed 100 minutes before pickup
     expect(reminderToSend(PICKUP, assigned, at(90))).toBeNull();      // the 2h / 24h steps are already past
-    expect(reminderToSend(PICKUP, assigned, at(40))?.step).toBe(45);  // the 45-minute step still applies
+    expect(reminderToSend(PICKUP, assigned, at(40))?.step).toBe(60);  // the 60-minute step still applies
   });
 
-  it('claimed with under 45 minutes to go: no reminders at all', () => {
+  it('claimed with under 60 minutes to go: no reminders at all', () => {
     expect(reminderToSend(PICKUP, at(30), at(20))).toBeNull();
   });
 });
@@ -84,13 +84,13 @@ describe('first pickup time of a scheduled ride', () => {
     expect(firstPickupAt(end, 'logout', '17:45')).toBe(end);      // before the shift end
   });
 
-  it('the 45-minute reminder lands before the first pickup, not before login', () => {
+  it('the 60-minute reminder lands before the first pickup, not before login', () => {
     const login = ist('2026-11-20T08:30:00');
     const pickup = firstPickupAt(login, 'login', '06:30');
     const longBefore = new Date(pickup.getTime() - 7 * 24 * 60 * MIN);
     const at0545 = ist('2026-11-20T05:45:00');
-    expect(reminderToSend(pickup, longBefore, at0545)?.step).toBe(45);
-    // 45 min before LOGIN (07:45) is already past the pickup: nothing is sent then.
+    expect(reminderToSend(pickup, longBefore, at0545)?.step).toBe(60);
+    // 60 min before LOGIN (07:45) is already past the pickup: nothing is sent then.
     expect(reminderToSend(pickup, longBefore, ist('2026-11-20T07:45:00'))).toBeNull();
   });
 });

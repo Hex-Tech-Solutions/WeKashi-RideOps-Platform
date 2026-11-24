@@ -172,7 +172,7 @@ const short = (s: string | null | undefined, n = 60) => {
 };
 
 /** A scheduled ride becomes the driver's ACTIVE ride this long before pickup. */
-const ACTIVE_WINDOW_MS = 45 * 60 * 1000;
+const ACTIVE_WINDOW_MS = 60 * 60 * 1000;
 
 /** A supervisor or admin assigned a ride to this driver directly. */
 export async function notifyRideAssigned(
@@ -225,7 +225,7 @@ export async function notifyRideReminder(
     screen: ride.scheduledFor.getTime() - Date.now() > ACTIVE_WINDOW_MS ? 'scheduled' : 'home',
     title: `${isRental ? 'Rental pickup' : 'First pickup'} ${inText}`,
     body: `${formatIst(ride.scheduledFor)} · ${short(ride.pickupAddress, 80)}.${loginText} `
-      + (mins <= 45 ? 'You can start the trip now.' : 'Be ready on time.'),
+      + (mins <= 60 ? 'You can start the trip now.' : 'Be ready on time.'),
   }));
 }
 

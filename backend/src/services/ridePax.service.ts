@@ -36,14 +36,31 @@ export async function createRidePax(
  * Called once the ride is assigned to a driver (auto or manual).
  * Best-effort — never throws.
  */
-export async function sendPaxOtpSms(rideId: string): Promise<void> {
+export async function sendPaxOtpSms(rideId: string, opts: { atTrigger?: boolean } = {}): Promise<void> {
   try {
-    // The DLT ride template includes the vehicle number — resolve the assigned
+    // The DLT ride template includes the vehicle number - resolve the assigned
     // driver's registration number once for the whole ride.
     const ride = await prisma.ride.findUnique({
       where: { id: rideId },
-      select: { driver: { select: { vehicle: { select: { regNo: true } } } } },
+      select: {
+        scheduledFor: true,
+        driverId: true,
+        driver: { select: { vehicle: { select: { regNo: true } } } },
+      },
     });
+    // Scheduled rides are claimed days ahead, so the codes go out only at the
+    // trigger (driver starts a login trip / arrives for a logout trip), once per
+    // ride+driver. A replacement driver gets a fresh send with the new vehicle.
+    if (ride?.scheduledFor) {
+      if (!opts.atTrigger || !ride.driverId) return;
+      try {
+        await prisma.driverNoticeLog.create({
+          data: { driverId: ride.driverId, kind: 'pax_otp_sms', ref: `${rideId}:${ride.driverId}` },
+        });
+      } catch {
+        return; // already sent
+      }
+    }
     const vehicle = ride?.driver?.vehicle?.regNo ?? 'N/A';
 
     const paxList = await prisma.ridePax.findMany({
