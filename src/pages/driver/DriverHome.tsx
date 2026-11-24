@@ -106,9 +106,6 @@ export default function DriverHome() {
   );
   const queuedRide = rides.find((r) => r.status === "assigned" && !!r.queuedBehindRideId);
 
-  // Gate: all boarded passengers must have their drop OTP verified before
-  // the driver can complete the trip. Starts as false; DriverTrip reports up.
-  const [allDropsDone, setAllDropsDone] = useState(false);
 
   // Gate: on logout rides every employee must be boarding-verified (or marked
   // no-show) at the office before the trip can start. DriverBoarding reports up.
@@ -497,25 +494,12 @@ export default function DriverHome() {
                       dropAddress={activeRideFull?.dropAddress ?? active.dropAddress}
                       dropLat={activeRideFull?.dropLat}
                       dropLng={activeRideFull?.dropLng}
-                      onAllDropsDone={setAllDropsDone}
-                    />
-                    <Button
-                      className="w-full bg-foreground text-background hover:bg-foreground/90 disabled:opacity-50"
-                      disabled={advance.isPending || !allDropsDone}
-                      title={!allDropsDone ? completionBlockedReason(active) : undefined}
-                      onClick={() => advance.mutate(
+                      onComplete={() => advance.mutate(
                         { id: active.id, status: "completed" },
                         { onSuccess: () => toast.success("Trip completed"), onError: (e: any) => toast.error(e?.message ?? "Failed") },
                       )}
-                    >
-                      Complete trip
-                    </Button>
-                    {!allDropsDone && (
-                      <p className="text-[11px] text-muted-foreground text-center -mt-1">
-                        {completionBlockedReason(active)}
-                      </p>
-                    )}
-                  </>
+                      completing={advance.isPending}
+                    />                  </>
                 )}
               </CardContent>
             </Card>
@@ -682,17 +666,6 @@ export default function DriverHome() {
     </div>
   );
 }
-
-// Trip completion is blocked until every employee's drop OTP is verified,
-// and — for logout rides with an escort — the escort's own return-drop OTP
-// is also verified. Mirrors the gate enforced server-side in maybeComplete().
-function completionBlockedReason(ride: RideRow) {
-  if (ride.type === "logout" && ride.escortRequired) {
-    return "Verify all drop OTPs, then the escort's return-drop OTP, to enable trip completion.";
-  }
-  return "Verify all drop OTPs to enable trip completion.";
-}
-
 /**
  * Countdown to a broadcast's expiry. Broadcasts only live ~3 minutes, so
  * without this the driver has no idea how long an offer will stay acceptable.
